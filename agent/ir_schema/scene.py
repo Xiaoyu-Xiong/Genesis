@@ -21,10 +21,10 @@ class ViewerIR(StrictModel):
 class CollisionIR(StrictModel):
     friction: float | None = Field(
         default=None,
-        ge=1e-2,
+        ge=0.0,
         le=5.0,
         description=(
-            "Contact friction coefficient. Higher values resist sliding more strongly, but do not guarantee perfectly non-slipping contact."
+            "Contact friction coefficient. Higher values resist sliding more strongly, but do not guarantee perfectly non-slipping contact. Adjust this value to make contacts more or less slippery, which can be useful for tuning contact behaviors between objects."
         ),
     )
     coup_friction: float | None = Field(default=None, ge=0.0)
@@ -33,7 +33,7 @@ class CollisionIR(StrictModel):
         ge=0.0,
         le=1.0,
         description=(
-            "Impact restitution / bounciness. Higher values make contacts rebound more and can reduce stability."
+            "Impact restitution / bounciness. Higher values make contacts rebound more and can reduce stability. Adjust this value to make contacts more or less bouncy, which can be useful for tuning contact behaviors between objects."
         ),
     )
     contact_resistance: float | None = Field(default=None, gt=0.0)

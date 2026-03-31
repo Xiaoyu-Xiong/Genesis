@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
+import fcntl
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,8 @@ from ..runtime import build_llm_event_pack, run_rigid_ir
 from ..tool_library import GeneratorParameterOverrides
 from .feedback import build_generator_feedback_package
 
+_SIMULATION_LOCK_PATH = Path(__file__).resolve().parents[1] / "runs" / ".simulation.lock"
+
 
 @dataclass(slots=True)
 class OptimizationConfig:
@@ -21,6 +25,9 @@ class OptimizationConfig:
     critic_model: str | None = None
     hosted_prompt_id: str | None = None
     hosted_prompt_version: str | None = None
+    critic_hosted_prompt_id: str | None = None
+    critic_hosted_prompt_version: str | None = None
+    critic_prompt_variant: str = "full"
     temperature: float | None = None
     critic_temperature: float | None = None
     reasoning_effort: str | None = None
@@ -63,6 +70,29 @@ class OptimizationResult:
     final_verdict: str | None
 
 
+@dataclass(slots=True)
+class OptimizationTaskSpec:
+    case_id: str
+    task: str
+
+
+@dataclass(slots=True)
+class BatchOptimizationItemResult:
+    case_id: str
+    task: str
+    status: str
+    final_round_dir: str
+    final_verdict: str | None
+    rounds: list[OptimizationRoundResult]
+
+
+@dataclass(slots=True)
+class BatchOptimizationResult:
+    status: str
+    run_root: str
+    items: list[BatchOptimizationItemResult]
+
+
 def optimize_prompt(
     *,
     task: str,
@@ -78,7 +108,7 @@ def optimize_prompt(
     rounds: list[OptimizationRoundResult] = []
     feedback_package: dict[str, Any] | None = None
     previous_ir_json: dict[str, Any] | None = None
-    previous_xml_text: str | None = None
+    previous_xml_texts_by_body: dict[str, str] = {}
 
     final_round_dir = run_root
     final_verdict: str | None = None
@@ -106,11 +136,11 @@ def optimize_prompt(
             additional_requirements=(
                 None if feedback_package is None else feedback_package["generator_requirements"]
             ),
-            xml_feedback_requirements=(
-                None if feedback_package is None else feedback_package.get("xml_requirements")
+            xml_feedback_requirements_by_body=(
+                None if feedback_package is None else feedback_package.get("xml_requirements_by_body")
             ),
             previous_ir_json=previous_ir_json,
-            previous_xml_text=previous_xml_text,
+            previous_xml_texts_by_body=previous_xml_texts_by_body,
             hosted_prompt_id=config.hosted_prompt_id,
             hosted_prompt_version=config.hosted_prompt_version,
             parameter_overrides=config.generator_parameter_overrides,
@@ -147,13 +177,10 @@ def optimize_prompt(
         validated_program = parse_sanitize_validate(run_payload, normalize=True)
         dump_json(validated_program.model_dump(mode="json"), ir_validated)
         previous_ir_json = validated_program.model_dump(mode="json")
-        previous_xml_path = _resolve_xml_path(validated_program)
-        if previous_xml_path is not None and previous_xml_path.exists():
-            previous_xml_text = previous_xml_path.read_text(encoding="utf-8")
-        else:
-            previous_xml_text = None
+        previous_xml_texts_by_body = _load_articulated_asset_texts_by_body(validated_program)
 
-        raw_result = run_rigid_ir(validated_program, normalize=False)
+        with _simulation_file_lock():
+            raw_result = run_rigid_ir(validated_program, normalize=False)
         dump_json(raw_result, run_result_path)
 
         event_pack = build_llm_event_pack(validated_program, raw_result)
@@ -168,7 +195,7 @@ def optimize_prompt(
                     ir_path=ir_validated,
                     event_pack_path=event_pack_path,
                     video_path=video_path,
-                    xml_path=_resolve_xml_path(validated_program),
+                    xml_paths_by_body=_resolve_articulated_asset_paths_by_body(validated_program),
                     sample_every_sec=config.sample_every_sec,
                     max_frames=config.max_frames,
                     max_width=config.max_width,
@@ -176,6 +203,9 @@ def optimize_prompt(
                 ),
                 temperature=config.critic_temperature,
                 reasoning_effort=config.critic_reasoning_effort or config.reasoning_effort,
+                hosted_prompt_id=config.critic_hosted_prompt_id,
+                hosted_prompt_version=config.critic_hosted_prompt_version,
+                prompt_variant=config.critic_prompt_variant,
             )
             analysis_json = critic_result.analysis_json
             critic_log_payload = {
@@ -228,6 +258,71 @@ def optimize_prompt(
     )
 
 
+def _run_batch_task(
+    spec: OptimizationTaskSpec,
+    config: OptimizationConfig,
+    run_root_str: str,
+) -> BatchOptimizationItemResult:
+    run_root = Path(run_root_str)
+    case_root = run_root / spec.case_id
+    case_root.mkdir(parents=True, exist_ok=True)
+    (case_root / "task.txt").write_text(spec.task + "\n", encoding="utf-8")
+    case_config = replace(config, output_root=str(case_root))
+    result = optimize_prompt(task=spec.task, config=case_config)
+    return BatchOptimizationItemResult(
+        case_id=spec.case_id,
+        task=spec.task,
+        status=result.status,
+        final_round_dir=result.final_round_dir,
+        final_verdict=result.final_verdict,
+        rounds=result.rounds,
+    )
+
+
+def optimize_prompts_batch(
+    *,
+    task_specs: list[OptimizationTaskSpec],
+    config: OptimizationConfig,
+    max_parallel: int = 4,
+) -> BatchOptimizationResult:
+    if not task_specs:
+        raise ValueError("`task_specs` must contain at least one task.")
+    if max_parallel < 1:
+        raise ValueError("`max_parallel` must be >= 1.")
+
+    run_root = _resolve_run_root(config.output_root)
+    ordered_results: list[BatchOptimizationItemResult | None] = [None] * len(task_specs)
+
+    with ProcessPoolExecutor(max_workers=min(max_parallel, len(task_specs))) as executor:
+        futures = [
+            executor.submit(_run_batch_task, spec, config, str(run_root))
+            for spec in task_specs
+        ]
+        for index, future in enumerate(futures):
+            item = future.result()
+            ordered_results[index] = item
+
+    items = [item for item in ordered_results if item is not None]
+    overall_status = "passed" if items and all(item.status == "passed" for item in items) else "completed"
+    return BatchOptimizationResult(
+        status=overall_status,
+        run_root=str(run_root),
+        items=items,
+    )
+
+
+class _simulation_file_lock:
+    def __enter__(self):
+        _SIMULATION_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self._file = _SIMULATION_LOCK_PATH.open("a+", encoding="utf-8")
+        fcntl.flock(self._file.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
+        self._file.close()
+
+
 def _resolve_run_root(output_root: str | None) -> Path:
     if output_root is not None:
         path = Path(output_root)
@@ -259,30 +354,47 @@ def _prepare_run_payload(
     return payload
 
 
-def _resolve_xml_path(program) -> Path | None:
-    articulated_bodies = [body for body in program.bodies if body.shape.kind == "mjcf"]
-    if not articulated_bodies:
-        return None
-    file_path = getattr(articulated_bodies[0].shape, "file", None)
-    if isinstance(file_path, str) and file_path.endswith(".xml"):
+def _resolve_articulated_asset_paths_by_body(program) -> dict[str, Path]:
+    paths_by_body: dict[str, Path] = {}
+    for body in program.bodies:
+        if body.shape.kind not in {"mjcf", "urdf"}:
+            continue
+        file_path = getattr(body.shape, "file", None)
+        if not isinstance(file_path, str):
+            continue
         path = Path(file_path)
         if path.exists():
-            return path
-    return None
+            paths_by_body[body.name] = path
+    return paths_by_body
+
+
+def _load_articulated_asset_texts_by_body(program) -> dict[str, str]:
+    texts_by_body: dict[str, str] = {}
+    for body_name, path in _resolve_articulated_asset_paths_by_body(program).items():
+        texts_by_body[body_name] = path.read_text(encoding="utf-8")
+    return texts_by_body
 
 
 def _generation_log_payload(result, config: OptimizationConfig) -> dict[str, Any]:
-    xml_result = result.xml_result
+    xml_results_by_body = result.xml_results_by_body
     return {
         "model": result.model,
         "mode": result.mode,
         "articulated_requested": result.articulated_requested,
         "generator_parameter_overrides": config.generator_parameter_overrides.as_dict(),
         "ir_rounds": result.ir_result.rounds,
-        "xml_attempts": None if xml_result is None else xml_result.attempts,
-        "xml_path": None if xml_result is None else xml_result.xml_path,
+        "xml_results_by_body": {
+            body_name: {
+                "xml_path": xml_result.xml_path,
+                "attempts": xml_result.attempts,
+            }
+            for body_name, xml_result in sorted(xml_results_by_body.items())
+        },
         "ir_logs": [asdict(log) for log in result.ir_result.logs],
-        "xml_logs": [] if xml_result is None else [asdict(log) for log in xml_result.logs],
+        "xml_logs_by_body": {
+            body_name: [asdict(log) for log in xml_result.logs]
+            for body_name, xml_result in sorted(xml_results_by_body.items())
+        },
     }
 
 

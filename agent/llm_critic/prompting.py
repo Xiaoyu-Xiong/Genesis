@@ -11,7 +11,7 @@ CRITIC_SYSTEM_PROMPT = """You are a simulation critic for robotics/physics outpu
 You will receive:
 1) a task prompt,
 2) the generated IR JSON,
-3) optional XML asset text,
+3) optional articulated asset texts by body,
 4) the raw event-pack JSON,
 5) sampled video frames in chronological order.
 
@@ -100,15 +100,37 @@ def build_critic_prompt_cache_key() -> str:
     return f"rigid_critic:{digest}"
 
 
+def build_compact_critic_prompt_cache_key() -> str:
+    digest = hashlib.sha1((CRITIC_SYSTEM_PROMPT + "\ncompact").encode("utf-8")).hexdigest()[:16]
+    return f"rigid_critic_compact:{digest}"
+
+
+def build_critic_hosted_prompt_ref(
+    *,
+    hosted_prompt_id: str | None,
+    hosted_prompt_version: str | None,
+) -> dict[str, Any] | None:
+    if hosted_prompt_id is None:
+        return None
+    prompt: dict[str, Any] = {"id": hosted_prompt_id}
+    if hosted_prompt_version is not None:
+        prompt["version"] = hosted_prompt_version
+    return prompt
+
+
 def build_critic_user_content(
     *,
     task: str,
     ir: dict[str, Any],
     event_pack: dict[str, Any],
-    xml_text: str | None,
+    xml_texts_by_body: dict[str, str],
     input_digest: dict[str, Any],
     sampled_frames: list[SampledFrame],
 ) -> list[dict[str, Any]]:
+    if xml_texts_by_body:
+        rendered_xml_text = json.dumps(xml_texts_by_body, ensure_ascii=False, indent=2)
+    else:
+        rendered_xml_text = "<none provided>"
     content: list[dict[str, Any]] = [
         {
             "type": "input_text",
@@ -117,8 +139,8 @@ def build_critic_user_content(
                 f"Task prompt:\n{task}\n\n"
                 "Raw IR JSON:\n"
                 f"{json.dumps(ir, ensure_ascii=False, indent=2)}\n\n"
-                "Raw XML text (optional):\n"
-                f"{xml_text if xml_text is not None else '<none provided>'}\n\n"
+                "Raw articulated asset texts by body (optional):\n"
+                f"{rendered_xml_text}\n\n"
                 "Raw event-pack JSON:\n"
                 f"{json.dumps(event_pack, ensure_ascii=False, indent=2)}\n\n"
                 "Input digest (supporting summary and metadata, not the primary grading target):\n"
@@ -132,6 +154,57 @@ def build_critic_user_content(
                 "to keep the IR shorter without changing behavior. "
                 "Do not let minor numeric mismatches in the digest outweigh clear overall behavioral evidence from the task, "
                 "video, and event trends.\n\n"
+                "The following images are sampled frames in chronological order."
+            ),
+        }
+    ]
+    for frame in sampled_frames:
+        content.append({"type": "input_text", "text": f"Frame {frame.index + 1} / {len(sampled_frames)}"})
+        content.append({"type": "input_image", "image_url": frame.data_url})
+    content.append(
+        {
+            "type": "input_text",
+            "text": (
+                "Now return the required JSON object using evidence from task, event-pack, and video frames. "
+                "Focus on the main blockers, but for each main blocker provide a detailed, field-level modification."
+            ),
+        }
+    )
+    return content
+
+
+def build_compact_critic_user_content(
+    *,
+    task: str,
+    ir: dict[str, Any],
+    event_pack: dict[str, Any],
+    xml_texts_by_body: dict[str, str],
+    input_digest: dict[str, Any],
+    sampled_frames: list[SampledFrame],
+) -> list[dict[str, Any]]:
+    if xml_texts_by_body:
+        rendered_xml_text = json.dumps(xml_texts_by_body, ensure_ascii=False, indent=2)
+    else:
+        rendered_xml_text = "<none provided>"
+    content: list[dict[str, Any]] = [
+        {
+            "type": "input_text",
+            "text": (
+                "Evaluate whether the simulation output satisfies the task.\n\n"
+                f"Task prompt:\n{task}\n\n"
+                "Raw IR JSON:\n"
+                f"{json.dumps(ir, ensure_ascii=False, indent=2)}\n\n"
+                "Raw articulated asset texts by body (optional):\n"
+                f"{rendered_xml_text}\n\n"
+                "Raw event-pack JSON:\n"
+                f"{json.dumps(event_pack, ensure_ascii=False, indent=2)}\n\n"
+                "Compact input digest (compact capability summary plus compact metadata):\n"
+                f"{json.dumps(input_digest, ensure_ascii=False, indent=2)}\n\n"
+                "The compact digest intentionally summarizes only the tool-library capability boundary, key parameter notes, "
+                "and critical multi-body / multi-XML rules. Stay within that capability boundary when proposing fixes. "
+                "When there are multiple bodies, assign body-specific issues to `by_body` using actual IR body names. "
+                "Also consider whether repeated same-payload actions could be merged using multi-entity `entity` lists "
+                "to keep the IR shorter without changing behavior.\n\n"
                 "The following images are sampled frames in chronological order."
             ),
         }

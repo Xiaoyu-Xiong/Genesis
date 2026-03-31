@@ -36,7 +36,6 @@ class RigidIR(StrictModel):
     def _check_references(self) -> "RigidIR":
         body_names: set[str] = set()
         bodies_by_name: dict[str, BodyIR] = {}
-        articulated_bodies: list[BodyIR] = []
         actuator_kind_by_entity: dict[str, dict[str, str]] = {}
 
         for body in self.bodies:
@@ -48,8 +47,6 @@ class RigidIR(StrictModel):
                 raise ValueError("Body name `ground` is reserved when `scene.add_ground=true`.")
 
             is_articulated_shape = isinstance(body.shape, (MJCFShapeIR, URDFShapeIR))
-            if is_articulated_shape:
-                articulated_bodies.append(body)
             if len(body.actuators) > 0 and not is_articulated_shape:
                 raise ValueError(f"`bodies[{body.name}].actuators` requires an articulated shape (`mjcf` or `urdf`).")
 
@@ -66,13 +63,6 @@ class RigidIR(StrictModel):
                         f"`{body.shape.kind}` does not expose named articulated joints."
                     )
             actuator_kind_by_entity[body.name] = actuator_kind_by_name
-
-        if len(articulated_bodies) > 1:
-            articulated_names = [body.name for body in articulated_bodies]
-            raise ValueError(
-                "Current IR supports multiple primitive bodies plus at most one articulated body. "
-                f"Got articulated bodies {articulated_names}."
-            )
 
         if not self.scene.add_ground and self.scene.ground_collision is not None:
             raise ValueError("`scene.ground_collision` requires `scene.add_ground=true`.")

@@ -13,7 +13,7 @@ def resolve_links_idx(
         return tuple(int(entity.link_start + index) for index in links_idx_local)
 
     if link_names is None:
-        return None
+        return tuple(range(int(entity.link_start), int(entity.link_end)))
 
     resolved: list[int] = []
     for link_name in link_names:

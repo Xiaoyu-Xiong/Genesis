@@ -5,7 +5,7 @@ This directory contains the IR, runtime, compiler, generator, critic, and optimi
 The current system supports:
 
 - multiple primitive bodies
-- at most one articulated body (`mjcf` or `urdf`)
+- multiple articulated bodies (`mjcf` or `urdf`)
 - body-level `fixed` support for primitives and URDF
 - multi-entity actions for `observe`, `set_pose`, and `apply_external_wrench`
 - direct execution, code generation, LLM generation, multimodal critique, and iterative optimization
@@ -54,7 +54,7 @@ Supported shape kinds:
 Current articulated policy:
 
 - multiple primitive bodies are allowed
-- at most one articulated body is allowed
+- multiple articulated bodies are allowed
 
 ### Fixed Bodies
 
@@ -251,7 +251,8 @@ Example:
 uv run python -m agent.llm_critic.cli evaluate \
   --task "Create a newton cradle with five suspended equal spheres." \
   --ir path/to/ir.validated.json \
-  --xml path/to/model.xml \
+  --xml robot_a=path/to/robot_a.xml \
+  --xml robot_b=path/to/robot_b.xml \
   --event-pack path/to/event_pack.json \
   --video path/to/render.mp4 \
   --model gpt-5.4 \
@@ -309,7 +310,7 @@ These scripts:
 ## Key Constraints and Notes
 
 - IR class name is `RigidIR`, and the root IR field is `bodies`
-- current support is multiple primitive bodies plus at most one articulated body
+- current support is multiple primitive and articulated bodies
 - `fixed=true` is supported for primitives and URDF, not for MJCF
 - `set_pose`, `set_dofs_position`, and `set_dofs_velocity` are intended for pre-simulation use only
 - `kp`, `kv`, and `force_range` should be interpreted together:

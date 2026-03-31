@@ -1,13 +1,26 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..io_utils import load_json_object
 from ..llm_generator.client import OpenAIRequestError, OpenAIResponsesClient, coerce_content_to_text
 from ..tool_library import GeneratorParameterOverrides
-from .digest import build_input_digest, ensure_sectioned_analysis, extract_first_json_object, load_optional_text
-from .prompting import CRITIC_SYSTEM_PROMPT, build_critic_prompt_cache_key, build_critic_user_content
+from .digest import (
+    build_compact_input_digest,
+    build_input_digest,
+    ensure_sectioned_analysis,
+    extract_first_json_object,
+    load_optional_texts_by_body,
+)
+from .prompting import (
+    CRITIC_SYSTEM_PROMPT,
+    build_compact_critic_prompt_cache_key,
+    build_compact_critic_user_content,
+    build_critic_hosted_prompt_ref,
+    build_critic_prompt_cache_key,
+    build_critic_user_content,
+)
 from .video_sampler import VideoSamplingError, probe_video_duration_sec, sample_video_frames_as_data_urls
 
 
@@ -21,7 +34,7 @@ class CriticEvaluationInput:
     ir_path: Path
     event_pack_path: Path
     video_path: Path
-    xml_path: Path | None = None
+    xml_paths_by_body: dict[str, Path] = field(default_factory=dict)
     sample_every_sec: float = 0.5
     max_frames: int = 24
     max_width: int = 640
@@ -44,46 +57,79 @@ def evaluate_prompt_event_video(
     eval_input: CriticEvaluationInput,
     temperature: float | None = None,
     reasoning_effort: str | None = None,
+    hosted_prompt_id: str | None = None,
+    hosted_prompt_version: str | None = None,
+    prompt_variant: str = "full",
 ) -> CriticEvaluationResult:
+    if prompt_variant not in {"full", "compact"}:
+        raise CriticEvaluationError(f"Unsupported critic prompt_variant `{prompt_variant}`.")
+
     try:
         ir = load_json_object(eval_input.ir_path, label="IR")
         event_pack = load_json_object(eval_input.event_pack_path, label="Event pack")
-        xml_info = load_optional_text(eval_input.xml_path)
+        xml_infos_by_body = load_optional_texts_by_body(eval_input.xml_paths_by_body)
     except ValueError as exc:
         raise CriticEvaluationError(str(exc)) from exc
 
     video_duration_sec = _probe_video_duration(eval_input.video_path)
     sampled_frames = _sample_video_frames(eval_input)
 
-    input_digest = build_input_digest(
-        task=eval_input.task,
-        ir=ir,
-        event_pack=event_pack,
-        xml_info=xml_info,
-        video_duration_sec=video_duration_sec,
-        sample_every_sec=eval_input.sample_every_sec,
-        max_frames=eval_input.max_frames,
-        parameter_overrides=eval_input.generator_parameter_overrides,
-    )
-    content = build_critic_user_content(
-        task=eval_input.task,
-        ir=ir,
-        event_pack=event_pack,
-        xml_text=xml_info["text"],
-        input_digest=input_digest,
-        sampled_frames=sampled_frames,
+    if prompt_variant == "compact":
+        input_digest = build_compact_input_digest(
+            task=eval_input.task,
+            ir=ir,
+            event_pack=event_pack,
+            xml_infos_by_body=xml_infos_by_body,
+            video_duration_sec=video_duration_sec,
+            sample_every_sec=eval_input.sample_every_sec,
+            max_frames=eval_input.max_frames,
+            parameter_overrides=eval_input.generator_parameter_overrides,
+        )
+        content = build_compact_critic_user_content(
+            task=eval_input.task,
+            ir=ir,
+            event_pack=event_pack,
+            xml_texts_by_body={body_name: info["text"] for body_name, info in xml_infos_by_body.items()},
+            input_digest=input_digest,
+            sampled_frames=sampled_frames,
+        )
+        prompt_cache_key = build_compact_critic_prompt_cache_key()
+    else:
+        input_digest = build_input_digest(
+            task=eval_input.task,
+            ir=ir,
+            event_pack=event_pack,
+            xml_infos_by_body=xml_infos_by_body,
+            video_duration_sec=video_duration_sec,
+            sample_every_sec=eval_input.sample_every_sec,
+            max_frames=eval_input.max_frames,
+            parameter_overrides=eval_input.generator_parameter_overrides,
+        )
+        content = build_critic_user_content(
+            task=eval_input.task,
+            ir=ir,
+            event_pack=event_pack,
+            xml_texts_by_body={body_name: info["text"] for body_name, info in xml_infos_by_body.items()},
+            input_digest=input_digest,
+            sampled_frames=sampled_frames,
+        )
+        prompt_cache_key = build_critic_prompt_cache_key()
+    hosted_prompt = build_critic_hosted_prompt_ref(
+        hosted_prompt_id=hosted_prompt_id,
+        hosted_prompt_version=hosted_prompt_version,
     )
 
     try:
         message = client.responses_completion(
             model=model,
-            messages=[
+            messages=[{"role": "user", "content": content}] if hosted_prompt is not None else [
                 {"role": "system", "content": CRITIC_SYSTEM_PROMPT},
                 {"role": "user", "content": content},
             ],
             temperature=temperature,
             reasoning_effort=reasoning_effort,
-            prompt_cache_key=build_critic_prompt_cache_key(),
+            prompt=hosted_prompt,
+            prompt_cache_key=prompt_cache_key,
             response_format={"type": "json_object"},
         )
     except OpenAIRequestError as exc:

@@ -46,6 +46,81 @@ def count_contacts(contact_data: dict[str, Any]) -> int:
     return 0
 
 
+def _iter_contact_geom_pairs(contact_data: dict[str, Any]) -> list[tuple[int, int]]:
+    geom_a = to_serializable(contact_data.get("geom_a", []))
+    geom_b = to_serializable(contact_data.get("geom_b", []))
+    valid_mask = to_serializable(contact_data.get("valid_mask")) if "valid_mask" in contact_data else None
+
+    pairs: list[tuple[int, int]] = []
+
+    def _append_pairs(a_data: Any, b_data: Any, mask_data: Any = None) -> None:
+        if isinstance(a_data, list) and isinstance(b_data, list) and a_data and isinstance(a_data[0], list):
+            for index in range(min(len(a_data), len(b_data))):
+                env_mask = None if mask_data is None else mask_data[index]
+                _append_pairs(a_data[index], b_data[index], env_mask)
+            return
+
+        if not isinstance(a_data, list) or not isinstance(b_data, list):
+            return
+
+        for index in range(min(len(a_data), len(b_data))):
+            if mask_data is not None and isinstance(mask_data, list) and index < len(mask_data) and not bool(mask_data[index]):
+                continue
+            a_item = a_data[index]
+            b_item = b_data[index]
+            if not isinstance(a_item, (int, float)) or isinstance(a_item, bool):
+                continue
+            if not isinstance(b_item, (int, float)) or isinstance(b_item, bool):
+                continue
+            pairs.append((int(a_item), int(b_item)))
+
+    _append_pairs(geom_a, geom_b, valid_mask)
+    return pairs
+
+
+def contact_other_entities(
+    contact_data: dict[str, Any],
+    *,
+    target_entity_name: str,
+    scene_entities: dict[str, Any],
+) -> list[str]:
+    target_entity = scene_entities.get(target_entity_name)
+    if target_entity is None:
+        return []
+
+    try:
+        target_geom_start = int(target_entity.geom_start)
+        target_geom_end = int(target_entity.geom_end)
+    except Exception:  # noqa: BLE001
+        return []
+
+    def _entity_name_for_geom(geom_idx: int) -> str | None:
+        for entity_name, entity in scene_entities.items():
+            try:
+                geom_start = int(entity.geom_start)
+                geom_end = int(entity.geom_end)
+            except Exception:  # noqa: BLE001
+                continue
+            if geom_start <= geom_idx < geom_end:
+                return entity_name
+        return None
+
+    other_entities: list[str] = []
+    seen: set[str] = set()
+    for geom_a, geom_b in _iter_contact_geom_pairs(contact_data):
+        a_in_target = target_geom_start <= geom_a < target_geom_end
+        b_in_target = target_geom_start <= geom_b < target_geom_end
+        if a_in_target == b_in_target:
+            continue
+        other_geom = geom_b if a_in_target else geom_a
+        other_entity_name = _entity_name_for_geom(other_geom)
+        if other_entity_name is None or other_entity_name == target_entity_name or other_entity_name in seen:
+            continue
+        seen.add(other_entity_name)
+        other_entities.append(other_entity_name)
+    return other_entities
+
+
 def is_floating_base_entity(entity: Any) -> bool:
     try:
         return int(entity.n_qs) >= 7 and int(entity.n_dofs) >= 6

@@ -63,7 +63,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Rigid-scene IR toolchain for Genesis (multiple primitive bodies plus at most one articulated body)."
+        description="Rigid-scene IR toolchain for Genesis (multiple primitive and articulated bodies)."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

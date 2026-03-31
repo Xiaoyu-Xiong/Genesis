@@ -12,24 +12,11 @@ def build_tool_specs(*, xml_generation_enabled: bool) -> list[dict[str, Any]]:
         {
             "type": "function",
             "function": {
-                "name": "get_generation_guide",
-                "description": "Return IR constraints, supported shape kinds, and planning notes.",
-                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_observation_field_guide",
-                "description": "Return semantics of observe fields for primitive and articulated entities.",
-                "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_rigid_ir_schema",
-                "description": "Return full JSON schema for RigidIR.",
+                "name": "get_generation_bootstrap",
+                "description": (
+                    "Return the main rigid-scene generation bootstrap context: generation guide, observation field guide, "
+                    "and full JSON schema."
+                ),
                 "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
             },
         },
@@ -75,10 +62,14 @@ def build_tool_specs(*, xml_generation_enabled: bool) -> list[dict[str, Any]]:
                 "type": "function",
                 "function": {
                     "name": "generate_articulated_xml",
-                    "description": "Generate MJCF XML for articulated body and return the asset path.",
+                    "description": "Generate MJCF XML for one articulated body and return the asset path.",
                     "parameters": {
                         "type": "object",
                         "properties": {
+                            "body_name": {
+                                "type": "string",
+                                "description": "Name of the articulated body this XML belongs to.",
+                            },
                             "xml_task": {
                                 "type": "string",
                                 "description": "Optional specialized XML generation instruction.",
@@ -88,6 +79,7 @@ def build_tool_specs(*, xml_generation_enabled: bool) -> list[dict[str, Any]]:
                                 "description": "Optional output filename stem (without .xml).",
                             },
                         },
+                        "required": ["body_name"],
                         "additionalProperties": False,
                     },
                 },
@@ -101,12 +93,12 @@ def build_generation_guide_payload(
     required_shape_kind: str | None,
     required_shape_file: str | None,
     allowed_shape_kinds: tuple[str, ...] | None,
-    allowed_articulated_joint_names: tuple[str, ...] | None,
+    allowed_articulated_joint_names_by_body: dict[str, tuple[str, ...]] | None,
     enforce_articulated_actuator_control: bool,
     target_sim_duration_sec: float | None,
     duration_tolerance_sec: float,
     xml_generation_enabled: bool,
-    generated_xml_path: str | None,
+    generated_xml_paths_by_body: dict[str, str] | None,
     parameter_overrides: GeneratorParameterOverrides | None = None,
 ) -> dict[str, Any]:
     effective_dt = 0.01 if parameter_overrides is None or parameter_overrides.sim_dt is None else parameter_overrides.sim_dt
@@ -123,9 +115,14 @@ def build_generation_guide_payload(
         "ir_version": IR_VERSION,
         "allowed_shape_kinds": ["sphere", "box", "cylinder", "mjcf", "urdf"],
         "multi_body_supported": True,
+        "multi_articulated_supported": True,
         "root_structure_note": "Use top-level `bodies` list.",
-        "body_count_policy": "Multiple bodies are allowed. At most one body may be articulated (mjcf or urdf).",
+        "body_count_policy": "Multiple bodies are allowed, including multiple articulated bodies.",
         "body_naming_policy": "Each body.name must be unique. Actions refer to bodies through the `entity` field.",
+        "articulated_body_xml_policy": (
+            "Each articulated body should have its own XML asset. When XML generation is used, call "
+            "`generate_articulated_xml` separately for each articulated body and pass `body_name` explicitly."
+        ),
         "ir_conciseness_policy": (
             "Prefer concise IR. If the same `observe`, `set_pose`, or `apply_external_wrench` should apply to multiple "
             "bodies at the same moment with identical parameters, use one action with `entity` as a body-name list "
@@ -170,8 +167,11 @@ def build_generation_guide_payload(
         constraints["required_shape_file"] = required_shape_file
     if allowed_shape_kinds is not None:
         constraints["enforced_allowed_shape_kinds"] = list(allowed_shape_kinds)
-    if allowed_articulated_joint_names is not None:
-        constraints["allowed_articulated_joint_names"] = list(allowed_articulated_joint_names)
+    if allowed_articulated_joint_names_by_body is not None:
+        constraints["allowed_articulated_joint_names_by_body"] = {
+            body_name: list(joint_names)
+            for body_name, joint_names in sorted(allowed_articulated_joint_names_by_body.items())
+        }
     if enforce_articulated_actuator_control:
         constraints["articulated_motion_policy"] = {
             "forbid_actions": ["set_pose", "set_dofs_position", "set_dofs_velocity"],
@@ -284,8 +284,8 @@ def build_generation_guide_payload(
         constraints["sim_duration_tolerance_sec"] = duration_tolerance_sec
         constraints["sim_duration_definition"] = "sim_duration_sec = final_step * scene.sim.dt"
     constraints["xml_generation_is_available"] = xml_generation_enabled
-    if generated_xml_path is not None:
-        constraints["generated_xml_path"] = generated_xml_path
+    if generated_xml_paths_by_body is not None:
+        constraints["generated_xml_paths_by_body"] = dict(sorted(generated_xml_paths_by_body.items()))
 
     templates: dict[str, Any] = {
         "minimal_scene": {
@@ -305,6 +305,32 @@ def build_generation_guide_payload(
                 "fixed": True,
                 "shape": {"kind": "box", "size": [0.3, 0.3, 0.3]},
                 "initial_pose": {"pos": [1.0, 0.0, 0.15], "quat": [1.0, 0.0, 0.0, 0.0]},
+            },
+        ],
+        "multiple_articulated_bodies_example": [
+            {
+                "name": "robot_a",
+                "shape": {"kind": "mjcf", "file": "path/to/robot_a.xml", "scale": 1.0},
+                "actuators": [
+                    {
+                        "kind": "position",
+                        "name": "joint0_pos",
+                        "joint_names": ["joint0"],
+                        "force_range": {"lower": -120.0, "upper": 120.0},
+                    }
+                ],
+            },
+            {
+                "name": "robot_b",
+                "shape": {"kind": "mjcf", "file": "path/to/robot_b.xml", "scale": 1.0},
+                "actuators": [
+                    {
+                        "kind": "position",
+                        "name": "joint1_pos",
+                        "joint_names": ["joint1"],
+                        "force_range": {"lower": -120.0, "upper": 120.0},
+                    }
+                ],
             },
         ],
         "render_follow_entity_example": {
@@ -375,3 +401,35 @@ def build_observation_field_guide_payload() -> dict[str, Any]:
 
 def build_schema_payload() -> dict[str, Any]:
     return {"ok": True, "schema": RigidIR.model_json_schema()}
+
+
+def build_generation_bootstrap_payload(
+    *,
+    required_shape_kind: str | None,
+    required_shape_file: str | None,
+    allowed_shape_kinds: tuple[str, ...] | None,
+    allowed_articulated_joint_names_by_body: dict[str, tuple[str, ...]] | None,
+    enforce_articulated_actuator_control: bool,
+    target_sim_duration_sec: float | None,
+    duration_tolerance_sec: float,
+    xml_generation_enabled: bool,
+    generated_xml_paths_by_body: dict[str, str] | None,
+    parameter_overrides: GeneratorParameterOverrides | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "generation_guide": build_generation_guide_payload(
+            required_shape_kind=required_shape_kind,
+            required_shape_file=required_shape_file,
+            allowed_shape_kinds=allowed_shape_kinds,
+            allowed_articulated_joint_names_by_body=allowed_articulated_joint_names_by_body,
+            enforce_articulated_actuator_control=enforce_articulated_actuator_control,
+            target_sim_duration_sec=target_sim_duration_sec,
+            duration_tolerance_sec=duration_tolerance_sec,
+            xml_generation_enabled=xml_generation_enabled,
+            generated_xml_paths_by_body=generated_xml_paths_by_body,
+            parameter_overrides=parameter_overrides,
+        ),
+        "observation_field_guide": build_observation_field_guide_payload(),
+        "schema": build_schema_payload()["schema"],
+    }

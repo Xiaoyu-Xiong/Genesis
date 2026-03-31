@@ -32,6 +32,9 @@ def emit_action_loop(
     emit(1, "events = []")
     emit(1, "sim_step = 0")
     emit(1, "rendered_frames = 0")
+    emit(1, "_contact_entities = {}")
+    for entity_name, entity_var in entity_vars.items():
+        emit(1, f"_contact_entities[{entity_name!r}] = {entity_var}")
     if render is not None:
         emit(1, "camera.start_recording()")
         if render.include_initial_frame:
@@ -229,7 +232,10 @@ def emit_action_loop(
                 emit(1, "}")
                 if action.include_contacts:
                     emit(1, f"_contacts = {entity_var}.get_contacts()")
-                    emit(1, "_event['contacts'] = {'count': _count_contacts(_contacts)}")
+                    emit(1, "_event['contacts'] = {")
+                    emit(2, "'count': _count_contacts(_contacts),")
+                    emit(2, f"'other_entities': _contact_other_entities(_contacts, {entity_name!r}, _contact_entities),")
+                    emit(1, "}")
                 emit(1, "events.append(_event)")
             emit(1)
             continue

@@ -25,7 +25,7 @@ class RigidToolLibrary:
     - `generation_call_tool`: execute one generation tool call locally.
 
     Scope of current IR:
-    - Multiple bodies per program (`bodies`), with at most one articulated MJCF/URDF body.
+    - Multiple bodies per program (`bodies`), including multiple articulated MJCF/URDF bodies.
     - Action space includes pose edits, dof writes, external wrench application, and actuator controls.
     """
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ..ir_schema import (
@@ -19,10 +20,10 @@ def validate_program_constraints(
     required_shape_kind: str | None = None,
     required_shape_file: str | None = None,
     allowed_shape_kinds: tuple[str, ...] | None = None,
-    allowed_articulated_joint_names: tuple[str, ...] | None = None,
+    allowed_articulated_joint_names_by_body: dict[str, tuple[str, ...]] | None = None,
     enforce_articulated_actuator_control: bool = False,
     xml_generation_enabled: bool = False,
-    generated_xml_shape_file: str | None = None,
+    generated_xml_shape_files_by_body: dict[str, str] | None = None,
     target_sim_duration_sec: float | None = None,
     sim_duration_tolerance_sec: float = 0.75,
 ) -> list[str]:
@@ -30,12 +31,6 @@ def validate_program_constraints(
 
     bodies = program.bodies
     articulated_bodies = [body for body in bodies if body.shape.kind in {"mjcf", "urdf"}]
-
-    if len(articulated_bodies) > 1:
-        errors.append(
-            "Current toolchain supports multiple primitive bodies plus at most one articulated body. "
-            f"Got articulated bodies {[body.name for body in articulated_bodies]}."
-        )
 
     if required_shape_kind is not None and not any(body.shape.kind == required_shape_kind for body in bodies):
         actual_kinds = [body.shape.kind for body in bodies]
@@ -56,23 +51,28 @@ def validate_program_constraints(
             errors.append(f"Required at least one body.shape.file=`{required_shape_file}`, but got {actual_files}.")
 
     if enforce_articulated_actuator_control and articulated_bodies:
-        errors.extend(_validate_articulated_actuator_control(program, allowed_articulated_joint_names))
+        errors.extend(_validate_articulated_actuator_control(program, allowed_articulated_joint_names_by_body))
 
-    if xml_generation_enabled and articulated_bodies:
-        if generated_xml_shape_file is None:
-            errors.append(
-                "Articulated MJCF requires generated XML asset. "
-                "Call `generate_articulated_xml` tool first and use the returned `xml_path` in one articulated body's `shape.file`."
-            )
-        else:
-            generated_matches = [
-                body.name for body in articulated_bodies if getattr(body.shape, "file", None) == generated_xml_shape_file
-            ]
-            if not generated_matches:
+    mjcf_bodies = [body for body in articulated_bodies if body.shape.kind == "mjcf"]
+    if xml_generation_enabled and mjcf_bodies:
+        for body in mjcf_bodies:
+            actual_file = getattr(body.shape, "file", None)
+            if not isinstance(actual_file, str) or not actual_file.strip():
+                errors.append(f"Articulated body `{body.name}` is missing `shape.file`.")
+                continue
+            if not Path(actual_file).exists():
                 errors.append(
-                    "Generated XML asset was not attached to the articulated body. "
-                    f"Expected one articulated body.shape.file to equal `{generated_xml_shape_file}`."
+                    f"Articulated body `{body.name}` references missing XML asset `{actual_file}`."
                 )
+                continue
+
+            if generated_xml_shape_files_by_body:
+                expected_file = generated_xml_shape_files_by_body.get(body.name)
+                if expected_file is not None and actual_file != expected_file:
+                    errors.append(
+                        f"Generated XML asset for body `{body.name}` was not attached correctly. "
+                        f"Expected body.shape.file=`{expected_file}`, got `{actual_file}`."
+                    )
 
     if target_sim_duration_sec is not None:
         final_step = sum(action.steps for action in program.actions if isinstance(action, StepActionIR))
@@ -100,7 +100,7 @@ def _selected_entities(entity: str | tuple[str, ...] | None) -> tuple[str, ...]:
 
 def _validate_articulated_actuator_control(
     program: RigidIR,
-    allowed_articulated_joint_names: tuple[str, ...] | None,
+    allowed_articulated_joint_names_by_body: dict[str, tuple[str, ...]] | None,
 ) -> list[str]:
     errors: list[str] = []
     articulated_body_names = {body.name for body in program.bodies if body.shape.kind in {"mjcf", "urdf"}}
@@ -131,11 +131,20 @@ def _validate_articulated_actuator_control(
             "(`set_target_pos` or `set_torque`)."
         )
 
-    if allowed_articulated_joint_names is None:
-        return errors
+    if allowed_articulated_joint_names_by_body is None:
+        allowed_articulated_joint_names_by_body = {}
 
-    allowed_joint_set = set(allowed_articulated_joint_names)
     for body in articulated_bodies:
+        allowed_joint_names = allowed_articulated_joint_names_by_body.get(body.name)
+        if allowed_joint_names is None and body.shape.kind == "mjcf":
+            file_path = getattr(body.shape, "file", None)
+            if isinstance(file_path, str) and Path(file_path).exists():
+                from ..llm_generator.agents.xml_agent import list_named_joint_names
+
+                allowed_joint_names = list_named_joint_names(file_path)
+        if allowed_joint_names is None:
+            continue
+        allowed_joint_set = set(allowed_joint_names)
         for actuator in body.actuators:
             if actuator.joint_names is None:
                 continue

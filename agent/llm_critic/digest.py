@@ -2,28 +2,42 @@ from __future__ import annotations
 
 from collections import Counter
 import json
-from pathlib import Path
 from typing import Any
 
-from ..tool_library import GeneratorParameterOverrides, build_generator_tool_context
+from ..tool_library import (
+    GeneratorParameterOverrides,
+    build_compact_generator_tool_context,
+    build_generator_tool_context,
+)
 
 
-def load_optional_text(path: Path | None, *, max_chars: int = 50_000) -> dict[str, Any]:
-    if path is None:
-        return {"provided": False, "path": None, "text": None, "truncated": False}
-    if not path.exists():
-        raise ValueError(f"XML file not found: {path}")
+def load_optional_texts_by_body(
+    paths_by_body: dict[str, Any] | None,
+    *,
+    max_chars: int = 50_000,
+) -> dict[str, dict[str, Any]]:
+    if not paths_by_body:
+        return {}
 
-    text = path.read_text(encoding="utf-8")
-    truncated = len(text) > max_chars
-    if truncated:
-        text = text[:max_chars]
-    return {
-        "provided": True,
-        "path": str(path),
-        "text": text,
-        "truncated": truncated,
-    }
+    loaded: dict[str, dict[str, Any]] = {}
+    for body_name, path in sorted(paths_by_body.items()):
+        if not isinstance(body_name, str) or not body_name:
+            continue
+        if path is None:
+            continue
+        if not path.exists():
+            raise ValueError(f"XML file not found for body `{body_name}`: {path}")
+        text = path.read_text(encoding="utf-8")
+        truncated = len(text) > max_chars
+        if truncated:
+            text = text[:max_chars]
+        loaded[body_name] = {
+            "provided": True,
+            "path": str(path),
+            "text": text,
+            "truncated": truncated,
+        }
+    return loaded
 
 
 def extract_first_json_object(text: str) -> dict[str, Any]:
@@ -69,7 +83,7 @@ def build_input_digest(
     task: str,
     ir: dict[str, Any],
     event_pack: dict[str, Any],
-    xml_info: dict[str, Any],
+    xml_infos_by_body: dict[str, dict[str, Any]],
     video_duration_sec: float | None,
     sample_every_sec: float,
     max_frames: int,
@@ -92,7 +106,7 @@ def build_input_digest(
     return {
         "task_prompt": task,
         "generator_tool_context": build_generator_tool_context(
-            xml_generation_enabled=xml_info["provided"],
+            xml_generation_enabled=True,
             parameter_overrides=parameter_overrides,
         ),
         "video_meta": {
@@ -101,10 +115,13 @@ def build_input_digest(
             "sample_every_sec": sample_every_sec,
             "max_frames": max_frames,
         },
-        "xml_meta": {
-            "provided": xml_info["provided"],
-            "path": xml_info["path"],
-            "truncated": xml_info["truncated"],
+        "xml_meta_by_body": {
+            body_name: {
+                "provided": xml_info["provided"],
+                "path": xml_info["path"],
+                "truncated": xml_info["truncated"],
+            }
+            for body_name, xml_info in xml_infos_by_body.items()
         },
         "supporting_metrics": {
             "sim_duration_sec": sim_duration_sec,
@@ -113,6 +130,67 @@ def build_input_digest(
         },
         "ir_digest": _build_ir_digest(ir),
         "event_pack": event_pack,
+    }
+
+
+def build_compact_input_digest(
+    *,
+    task: str,
+    ir: dict[str, Any],
+    event_pack: dict[str, Any],
+    xml_infos_by_body: dict[str, dict[str, Any]],
+    video_duration_sec: float | None,
+    sample_every_sec: float,
+    max_frames: int,
+    parameter_overrides: GeneratorParameterOverrides | None = None,
+) -> dict[str, Any]:
+    execution = event_pack.get("execution")
+    sim_duration_sec = None
+    if isinstance(execution, dict):
+        value = execution.get("final_time_sec")
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            sim_duration_sec = float(value)
+
+    observations = event_pack.get("observations")
+    observation_count = None
+    observed_entities: list[str] = []
+    if isinstance(observations, dict):
+        timeline = observations.get("timeline")
+        if isinstance(timeline, list):
+            observation_count = len(timeline)
+            observed_entities = sorted(
+                {
+                    item.get("entity")
+                    for item in timeline
+                    if isinstance(item, dict) and isinstance(item.get("entity"), str)
+                }
+            )
+
+    return {
+        "task_prompt": task,
+        "generator_tool_context": build_compact_generator_tool_context(
+            xml_generation_enabled=True,
+            parameter_overrides=parameter_overrides,
+        ),
+        "video_meta": {
+            "video_duration_sec": video_duration_sec,
+            "sample_every_sec": sample_every_sec,
+            "max_frames": max_frames,
+        },
+        "xml_meta_by_body": {
+            body_name: {
+                "path": xml_info["path"],
+                "truncated": xml_info["truncated"],
+            }
+            for body_name, xml_info in xml_infos_by_body.items()
+        },
+        "supporting_metrics": {
+            "sim_duration_sec": sim_duration_sec,
+            "observation_count": observation_count,
+            "observed_entities": observed_entities,
+            "estimated_displacement_by_entity_m": _estimate_displacement_by_entity(event_pack),
+        },
+        "ir_digest": _build_ir_digest(ir),
     }
 
 
@@ -187,6 +265,11 @@ def _build_ir_digest(ir: dict[str, Any]) -> dict[str, Any]:
             for body in bodies
             if isinstance(body.get("shape"), dict) and body["shape"].get("kind") in {"mjcf", "urdf"}
         ],
+        "articulated_body_count": sum(
+            1
+            for body in bodies
+            if isinstance(body.get("shape"), dict) and body["shape"].get("kind") in {"mjcf", "urdf"}
+        ),
         "actions_summary": {
             "count": len(actions),
             "op_counts": dict(sorted(op_counter.items())),

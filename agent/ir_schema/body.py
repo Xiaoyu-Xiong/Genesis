@@ -193,7 +193,7 @@ class BodyIR(StrictModel):
         default=None,
         gt=0.0,
         description=(
-            "Material density. Higher rho makes the body heavier and increases inertia, but does not change geometric size."
+            "Material density. Higher rho makes the body heavier and increases inertia, but does not change geometric size. Adjust this parameter to make a body heavier or lighter without changing its shape, which is useful for tuning interactive behaviors between bodies"
         ),
     )
     collision: CollisionIR = Field(default_factory=CollisionIR)

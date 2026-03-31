@@ -160,13 +160,13 @@ def _build_generator_requirements(package: dict[str, Any]) -> str:
         for item in must_fix:
             lines.append(f"- {item}")
 
-    xml_requirements = package.get("xml_requirements")
-    if isinstance(xml_requirements, str) and xml_requirements.strip():
+    xml_requirements_by_body = package.get("xml_requirements_by_body")
+    if isinstance(xml_requirements_by_body, dict) and xml_requirements_by_body:
         lines.extend(
             [
                 "",
                 "If you call `generate_articulated_xml`, you must pass XML-specific repair requirements through that tool call.",
-                "The XML-specific repair requirements are provided separately and must not be ignored.",
+                "The XML-specific repair requirements are provided separately per articulated body and must not be ignored.",
             ]
         )
 
@@ -209,7 +209,7 @@ def build_generator_feedback_package(critic_analysis: dict[str, Any]) -> dict[st
     section_feedback: dict[str, Any] = {}
     body_feedback: dict[str, Any] = {}
     must_fix: list[str] = []
-    xml_issue_records: list[dict[str, Any]] = []
+    xml_issue_records_by_body: dict[str, list[dict[str, Any]]] = {}
 
     for section_name in ("scene", "actions"):
         section = by_section.get(section_name)
@@ -231,8 +231,6 @@ def build_generator_feedback_package(critic_analysis: dict[str, Any]) -> dict[st
 
             if not isinstance(fix, str) or not fix.strip():
                 continue
-            if "xml" in issue["targets"]:
-                xml_issue_records.append(issue)
 
     for body_name, section in by_body.items():
         if not isinstance(body_name, str) or not isinstance(section, dict):
@@ -258,7 +256,7 @@ def build_generator_feedback_package(critic_analysis: dict[str, Any]) -> dict[st
             if not isinstance(fix, str) or not fix.strip():
                 continue
             if "xml" in issue["targets"]:
-                xml_issue_records.append(issue)
+                xml_issue_records_by_body.setdefault(body_name, []).append(issue)
 
     package: dict[str, Any] = {
         "verdict": critic_analysis.get("verdict"),
@@ -267,6 +265,10 @@ def build_generator_feedback_package(critic_analysis: dict[str, Any]) -> dict[st
         "body_feedback": body_feedback,
         "must_fix": must_fix,
     }
-    package["xml_requirements"] = _build_xml_requirements(xml_issue_records)
+    package["xml_requirements_by_body"] = {
+        body_name: text
+        for body_name, issues in sorted(xml_issue_records_by_body.items())
+        if (text := _build_xml_requirements(issues)) is not None
+    }
     package["generator_requirements"] = _build_generator_requirements(package)
     return package

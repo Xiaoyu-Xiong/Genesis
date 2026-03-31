@@ -8,6 +8,20 @@ from ..llm_generator.client import OpenAIResponsesClient, REASONING_EFFORT_VALUE
 from .critic import CriticEvaluationInput, evaluate_prompt_event_video
 
 
+def _parse_xml_args(xml_args: list[str] | None) -> dict[str, Path]:
+    paths_by_body: dict[str, Path] = {}
+    for item in xml_args or []:
+        if "=" not in item:
+            raise ValueError("Each --xml must use the form BODY_NAME=PATH.")
+        body_name, path_str = item.split("=", 1)
+        body_name = body_name.strip()
+        path_str = path_str.strip()
+        if not body_name or not path_str:
+            raise ValueError("Each --xml must use the form BODY_NAME=PATH.")
+        paths_by_body[body_name] = Path(path_str)
+    return paths_by_body
+
+
 def _cmd_evaluate(args: argparse.Namespace) -> None:
     client = OpenAIResponsesClient.from_env(
         api_key_env=args.api_key_env,
@@ -19,7 +33,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> None:
         ir_path=args.ir,
         event_pack_path=args.event_pack,
         video_path=args.video,
-        xml_path=args.xml,
+        xml_paths_by_body=_parse_xml_args(args.xml),
         sample_every_sec=args.sample_every_sec,
         max_frames=args.max_frames,
         max_width=args.max_width,
@@ -30,6 +44,9 @@ def _cmd_evaluate(args: argparse.Namespace) -> None:
         eval_input=eval_input,
         temperature=args.temperature,
         reasoning_effort=args.reasoning_effort,
+        hosted_prompt_id=args.hosted_prompt_id,
+        hosted_prompt_version=args.hosted_prompt_version,
+        prompt_variant=args.prompt_variant,
     )
 
     dump_json(result.analysis_json, args.out)
@@ -41,10 +58,11 @@ def _cmd_evaluate(args: argparse.Namespace) -> None:
                 "reasoning_effort": args.reasoning_effort,
                 "task": args.task,
                 "ir": str(args.ir),
-                "xml": str(args.xml) if args.xml is not None else None,
+                "xml_paths_by_body": {k: str(v) for k, v in _parse_xml_args(args.xml).items()},
                 "event_pack": str(args.event_pack),
                 "video": str(args.video),
                 "sample_every_sec": args.sample_every_sec,
+                "prompt_variant": args.prompt_variant,
                 "frames_used": result.frames_used,
                 "input_digest": result.input_digest,
                 "raw_response_text": result.raw_response_text,
@@ -61,10 +79,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser_eval = subparsers.add_parser("evaluate", help="Run multimodal critique.")
     parser_eval.add_argument("--task", type=str, required=True, help="Original natural-language task prompt.")
     parser_eval.add_argument("--ir", type=Path, required=True, help="Path to generated IR JSON.")
-    parser_eval.add_argument("--xml", type=Path, default=None, help="Optional path to XML asset used by IR.")
+    parser_eval.add_argument(
+        "--xml",
+        action="append",
+        default=None,
+        help="Optional articulated asset path in the form BODY_NAME=PATH. Repeat for multiple articulated bodies.",
+    )
     parser_eval.add_argument("--event-pack", type=Path, required=True, help="Path to event_pack.json.")
     parser_eval.add_argument("--video", type=Path, required=True, help="Path to rendered video (mp4).")
     parser_eval.add_argument("--model", type=str, default="gpt-5.2", help="OpenAI model name.")
+    parser_eval.add_argument(
+        "--prompt-variant",
+        type=str,
+        default="full",
+        choices=("full", "compact"),
+        help="Choose the original or compact critic prompt path.",
+    )
+    parser_eval.add_argument(
+        "--hosted-prompt-id",
+        type=str,
+        default=None,
+        help="Optional Hosted Prompt ID for the fixed critic instructions.",
+    )
+    parser_eval.add_argument(
+        "--hosted-prompt-version",
+        type=str,
+        default=None,
+        help="Optional Hosted Prompt version for the critic.",
+    )
     parser_eval.add_argument(
         "--sample-every-sec",
         type=float,

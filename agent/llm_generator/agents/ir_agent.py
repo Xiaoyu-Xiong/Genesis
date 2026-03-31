@@ -36,7 +36,7 @@ class IRGenerationResult:
 
 IR_SYSTEM_PROMPT = (
     "You are an IR planning agent for the Genesis rigid-scene IR. "
-    "Use tools to fetch guide/schema and validate candidate IR before final output. "
+    "Use tools to fetch guide/schema and to validate draft candidates when useful. "
     "When done, output exactly one IR JSON object and nothing else."
 )
 
@@ -63,20 +63,22 @@ def _tool_result_message(tool_call_id: str, name: str, result: dict[str, Any]) -
 def _build_user_prompt(task: str, *, additional_requirements: str | None = None) -> str:
     lines = [
         "Process requirements:",
-        "- Call get_generation_guide and get_rigid_ir_schema first.",
-        "- Call get_observation_field_guide before finalizing observe actions.",
+        "- Call get_generation_bootstrap first.",
         "- Use top-level `bodies` list.",
         "- Use `bodies[].fixed=true` for static primitive or URDF props, targets, and supports. For MJCF, express a fixed base in the XML itself.",
         "- `observe`, `set_pose`, and `apply_external_wrench` may target a single body or a list of body names via the `entity` field.",
         "- Keep the IR as concise as possible without changing behavior; merge repeated `observe`, `set_pose`, or `apply_external_wrench` actions into one action with an `entity` list whenever the payload and timing are identical.",
         "- Render is mandatory for generated IR; ensure scene.render is present.",
-        "- The IR may contain multiple bodies in `bodies`, but at most one body may be articulated (`mjcf` or `urdf`).",
-        "- If articulated structure is needed and tool is available, call generate_articulated_xml before finalizing IR.",
+        "- The IR may contain multiple bodies in `bodies`, including multiple articulated bodies (`mjcf` or `urdf`).",
+        "- If articulated structure is needed and tool is available, call generate_articulated_xml once per articulated body.",
+        "- Every generate_articulated_xml tool call must include the target `body_name`.",
+        "- If multiple articulated bodies need XML generation, batch those generate_articulated_xml tool calls in one response when possible.",
+        "- Each articulated body should use its own XML asset; do not reuse one XML path across unrelated articulated bodies.",
+        "- If an articulated body's XML does not need to change in this revision, keep its existing xml_path instead of regenerating it.",
         "- For articulated bodies, define actuators only in IR (`bodies[].actuators`), not in XML.",
         "- Use `set_target_pos` only with position actuators and `set_torque` only with motor actuators.",
         "- If task specifies target simulation duration, pass it to validate_ir as target_sim_duration_sec.",
-        "- Draft candidate IR and call validate_ir.",
-        "- If validate_ir fails, revise and validate again.",
+        "- Use validate_ir when it is helpful to check a draft before finalizing, but it is not mandatory before final output.",
         "- Return only final valid IR JSON.",
         "",
         "Task:",
@@ -90,9 +92,10 @@ def _build_user_prompt(task: str, *, additional_requirements: str | None = None)
 def _build_revision_prompt_sections(
     *,
     previous_ir_json: dict[str, Any] | None,
-    previous_xml_text: str | None,
+    previous_xml_texts_by_body: dict[str, str] | None,
+    previous_xml_summaries_by_body: dict[str, dict[str, Any]] | None,
 ) -> list[str]:
-    if previous_ir_json is None and previous_xml_text is None:
+    if previous_ir_json is None and not previous_xml_texts_by_body and not previous_xml_summaries_by_body:
         return []
 
     lines = [
@@ -111,14 +114,22 @@ def _build_revision_prompt_sections(
                 truncate_prompt_text(json.dumps(previous_ir_json, ensure_ascii=False, indent=2)),
             ]
         )
-    if previous_xml_text is not None and previous_xml_text.strip():
-        lines.extend(
-            [
-                "",
-                "Previous articulated XML to revise if XML changes are needed:",
-                truncate_prompt_text(previous_xml_text.strip()),
-            ]
-        )
+    if previous_xml_summaries_by_body:
+        lines.extend(["", "Articulated asset summary for bodies that should usually stay unchanged:"])
+        for body_name, summary in sorted(previous_xml_summaries_by_body.items()):
+            lines.append(f"- {body_name}: {json.dumps(summary, ensure_ascii=False)}")
+    if previous_xml_texts_by_body:
+        lines.extend(["", "Previous articulated XML assets to revise when XML changes are needed:"])
+        for body_name, xml_text in sorted(previous_xml_texts_by_body.items()):
+            if not xml_text.strip():
+                continue
+            lines.extend(
+                [
+                    "",
+                    f"Body `{body_name}` previous XML:",
+                    truncate_prompt_text(xml_text.strip()),
+                ]
+            )
     return lines
 
 
@@ -138,10 +149,22 @@ def _build_hosted_prompt_ref(
     task: str,
     additional_requirements: str | None,
     previous_ir_json: dict[str, Any] | None,
-    previous_xml_text: str | None,
+    previous_xml_texts_by_body: dict[str, str] | None,
+    previous_xml_summaries_by_body: dict[str, dict[str, Any]] | None,
 ) -> dict[str, Any] | None:
     if hosted_prompt_id is None:
         return None
+    previous_xml_texts = ""
+    if previous_xml_texts_by_body:
+        sections: list[str] = []
+        for body_name, xml_text in sorted(previous_xml_texts_by_body.items()):
+            if not xml_text.strip():
+                continue
+            sections.append(f"Body `{body_name}` previous XML:\n{truncate_prompt_text(xml_text)}")
+        previous_xml_texts = "\n\n".join(sections)
+    previous_xml_summaries = ""
+    if previous_xml_summaries_by_body:
+        previous_xml_summaries = json.dumps(previous_xml_summaries_by_body, ensure_ascii=False, indent=2)
     prompt: dict[str, Any] = {
         "id": hosted_prompt_id,
         "variables": {
@@ -150,7 +173,8 @@ def _build_hosted_prompt_ref(
             "previous_ir_json": "" if previous_ir_json is None else truncate_prompt_text(
                 json.dumps(previous_ir_json, ensure_ascii=False, indent=2)
             ),
-            "previous_xml_text": "" if previous_xml_text is None else truncate_prompt_text(previous_xml_text),
+            "previous_xml_texts_by_body": previous_xml_texts,
+            "previous_xml_summaries_by_body": previous_xml_summaries,
         },
     }
     if hosted_prompt_version is not None:
@@ -170,7 +194,8 @@ def generate_ir_with_tool_agent(
     normalize: bool = True,
     additional_requirements: str | None = None,
     previous_ir_json: dict[str, Any] | None = None,
-    previous_xml_text: str | None = None,
+    previous_xml_texts_by_body: dict[str, str] | None = None,
+    previous_xml_summaries_by_body: dict[str, dict[str, Any]] | None = None,
     hosted_prompt_id: str | None = None,
     hosted_prompt_version: str | None = None,
 ) -> IRGenerationResult:
@@ -181,7 +206,8 @@ def generate_ir_with_tool_agent(
     user_prompt = _build_user_prompt(task, additional_requirements=additional_requirements)
     revision_sections = _build_revision_prompt_sections(
         previous_ir_json=previous_ir_json,
-        previous_xml_text=previous_xml_text,
+        previous_xml_texts_by_body=previous_xml_texts_by_body,
+        previous_xml_summaries_by_body=previous_xml_summaries_by_body,
     )
     if revision_sections:
         user_prompt = "\n".join([user_prompt, *revision_sections])
@@ -196,7 +222,8 @@ def generate_ir_with_tool_agent(
         task=task,
         additional_requirements=additional_requirements,
         previous_ir_json=previous_ir_json,
-        previous_xml_text=previous_xml_text,
+        previous_xml_texts_by_body=previous_xml_texts_by_body,
+        previous_xml_summaries_by_body=previous_xml_summaries_by_body,
     )
 
     if hosted_prompt is not None:
@@ -204,8 +231,6 @@ def generate_ir_with_tool_agent(
     base_messages = [] if hosted_prompt is not None else [system_message]
 
     logs: list[IRGenerationRoundLog] = []
-    validated_with_tool = False
-
     for round_idx in range(1, max_rounds + 1):
         assistant_message = client.responses_completion(
             model=model,
@@ -229,6 +254,7 @@ def generate_ir_with_tool_agent(
 
         if isinstance(raw_tool_calls, list) and len(raw_tool_calls) > 0:
             next_messages: list[dict[str, Any]] = []
+            batch_calls: list[dict[str, Any]] = []
             for call_index, raw_call in enumerate(raw_tool_calls):
                 compact_call = _compact_tool_call(raw_call)
                 tool_calls.append(compact_call)
@@ -244,30 +270,65 @@ def generate_ir_with_tool_agent(
                 if not isinstance(call_id, str):
                     call_id = f"synthetic_tool_call_{round_idx}_{call_index}"
 
-                result = tool_library.execute_tool_call(name=name, arguments_json=arguments_json)
+                batch_calls.append({"id": call_id, "name": name, "arguments_json": arguments_json})
+
+            batch_results = tool_library.execute_tool_calls_batch(batch_calls)
+            for batch_call, result in zip(batch_calls, batch_results, strict=True):
+                call_id = batch_call["id"]
+                name = batch_call["name"]
                 tool_results.append({"id": call_id, "name": name, "result": result})
                 next_messages.append(_tool_result_message(call_id, name, result))
-                if name == "validate_ir" and isinstance(result, dict) and result.get("ok") is True:
-                    validated_with_tool = True
+
+            round_log = IRGenerationRoundLog(
+                round=round_idx,
+                assistant_content=assistant_content or None,
+                tool_calls=tool_calls,
+                tool_results=tool_results,
+                validation_error=None,
+            )
+            logs.append(round_log)
+
+            successful_validate_result = None
+            for tool_result in reversed(tool_results):
+                if tool_result["name"] != "validate_ir":
+                    continue
+                result = tool_result["result"]
+                if isinstance(result, dict) and result.get("ok") is True and isinstance(result.get("normalized_ir"), dict):
+                    successful_validate_result = result
+                    break
+
+            if successful_validate_result is not None:
+                try:
+                    program = parse_sanitize_validate(successful_validate_result["normalized_ir"], normalize=normalize)
+                    program = tool_library.apply_parameter_overrides(program)
+                    constraint_errors = tool_library.validate_program_constraints(program)
+                    if constraint_errors:
+                        raise ValueError("; ".join(constraint_errors))
+                    return IRGenerationResult(
+                        model=model,
+                        rounds=round_idx,
+                        program=program,
+                        ir_json=program.model_dump(mode="json"),
+                        logs=logs,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    pending_messages = [
+                        {
+                            "role": "user",
+                            "content": (
+                                "The validated candidate returned by validate_ir could not be finalized locally. "
+                                f"Error: {exc}. Revise and return corrected JSON only."
+                            ),
+                        }
+                    ]
+                    continue
 
             pending_messages = next_messages
-
-            logs.append(
-                IRGenerationRoundLog(
-                    round=round_idx,
-                    assistant_content=assistant_content or None,
-                    tool_calls=tool_calls,
-                    tool_results=tool_results,
-                    validation_error=None,
-                )
-            )
             continue
 
         validation_error: str | None = None
         try:
             payload = extract_first_json_object(assistant_content)
-            if not validated_with_tool:
-                raise ValueError("Must call validate_ir and obtain ok=true before final output.")
             program = parse_sanitize_validate(payload, normalize=normalize)
             program = tool_library.apply_parameter_overrides(program)
             constraint_errors = tool_library.validate_program_constraints(program)

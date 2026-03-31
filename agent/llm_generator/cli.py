@@ -35,7 +35,6 @@ def _cmd_generate(args: argparse.Namespace) -> None:
 
     if args.log_out is not None:
         ir_logs = [asdict(log) for log in result.ir_result.logs]
-        xml_logs = [asdict(log) for log in result.xml_result.logs] if result.xml_result is not None else []
         dump_json(
             {
                 "model": result.model,
@@ -43,10 +42,18 @@ def _cmd_generate(args: argparse.Namespace) -> None:
                 "mode": result.mode,
                 "articulated_requested": result.articulated_requested,
                 "ir_rounds": result.ir_result.rounds,
-                "xml_attempts": result.xml_result.attempts if result.xml_result is not None else None,
-                "xml_path": result.xml_result.xml_path if result.xml_result is not None else None,
+                "xml_results_by_body": {
+                    body_name: {
+                        "xml_path": xml_result.xml_path,
+                        "attempts": xml_result.attempts,
+                    }
+                    for body_name, xml_result in sorted(result.xml_results_by_body.items())
+                },
                 "ir_logs": ir_logs,
-                "xml_logs": xml_logs,
+                "xml_logs_by_body": {
+                    body_name: [asdict(log) for log in xml_result.logs]
+                    for body_name, xml_result in sorted(result.xml_results_by_body.items())
+                },
             },
             args.log_out,
         )
@@ -54,7 +61,7 @@ def _cmd_generate(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate rigid-scene IR with agentic LLM workflow (multiple primitive bodies plus at most one articulated body)."
+        description="Generate rigid-scene IR with agentic LLM workflow (multiple primitive and articulated bodies)."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 

@@ -20,7 +20,7 @@ MAX_FRAMES="${MAX_FRAMES:-24}"
 TIMEOUT_SEC="${TIMEOUT_SEC:-600}"
 
 RUN_TS="$(date +%Y%m%d_%H%M%S)"
-RUN_ROOT="${RUN_ROOT:-agent/runs/opt_multibody_suite/${RUN_TS}}"
+RUN_ROOT="${RUN_ROOT:-agent/runs/opt_multiarticulated_suite/${RUN_TS}}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -115,24 +115,17 @@ echo "Backend: $BACKEND"
 echo "Python: ${PYTHON_CMD[*]}"
 
 cat > "$TASK_FILE" <<'CASES'
-box_pyramid_impact|Create a compact pyramid of small boxes resting on the ground, then launch one dense sphere at high speed into the lower layer so the pyramid collapses and scatters over 6s.
+forklift_and_scara_cell|Create one forklift-like articulated vehicle and one separate fixed-base SCARA robot, and add one pallet box and one fixed loading platform. Render an 8s open-loop industrial-cell sequence where the forklift drives and raises its fork while the SCARA arm independently moves through several poses above the platform.
 
-sphere_rack_break|Create a tightly packed triangular rack of equal small spheres on the ground and launch one cue sphere at high speed into the rack to produce a billiards-style break over 6s.
+dual_excavator_sweep|Create two separate excavator-style articulated arms on fixed or anchored bases facing a shared work area. Add several primitive debris objects between them. Render an 8s open-loop sequence where both excavator arms perform different sweeping motions near the debris without requiring precise coordination.
 
-box_wall_breach|Create a short wall built from several stacked boxes and launch a heavy rectangular projectile into the center so the wall breaks apart and collapses over 6s.
-block_arch_collapse|Create a simple freestanding arch from rectangular blocks on the ground, then send a fast small sphere into one side so the arch loses support and collapses over 6s.
+three_pendulum_gallery|Create three separate simple pendulum-like articulated mechanisms mounted along a line. Render a 6s sequence where each pendulum starts from a different initial angle or receives a different initial disturbance so they swing with visibly different phases.
 
-mixed_bodies_on_slope|Create a fixed inclined plane with several spheres, boxes, and cylinders initially resting near the top, then let them move down the slope together, colliding, sliding, and rolling into each other over 6s.
+dual_robot_pushers|Create two separate compact mobile pushing robots. Place two movable boxes and one fixed wall in the scene. Render an 8s open-loop sequence where each robot drives toward its own box and pushes it in a different direction.
 
-cylinder_cluster_scatter|Create a dense cluster of upright cylinders on the ground and launch one fast box through the cluster so the cylinders topple and scatter over 6s.
+arm_pair_target_gallery|Create two separate fixed-base articulated arms, plus several fixed target spheres arranged in space. Render an 8s open-loop sequence where each arm moves through its own sequence of poses near different targets.
 
-offset_box_stack_settle|Create a tall stack of boxes with small alternating horizontal offsets so the stack is near the edge of stability, then simulate the settling and eventual toppling behavior over 6s.
-
-rubble_pile_impact|Create an irregular pile of mixed boxes and cylinders on the ground and launch one dense sphere into the pile so the bodies rearrange, topple, and scatter over 6s.
-
-bin_fill_scatter|Create a fixed open-top bin from several static box walls, place a group of small spheres above it, and let them fall into the bin while colliding with each other and with the walls over 6s.
-
-plank_bridge_failure|Create a narrow bridge made from several thin boxes spanning between two fixed supports, then drop a dense sphere onto the bridge so the planks shift and the bridge collapses over 6s.
+mobile_robot_and_excavator|Create one separate differential-drive mobile robot and one separate excavator-style articulated arm on a fixed base. Add a few primitive obstacles and one movable box. Render an 8s open-loop scene where the mobile robot drives through the environment while the excavator arm independently sweeps near the box.
 CASES
 
 opt_cmd=(
