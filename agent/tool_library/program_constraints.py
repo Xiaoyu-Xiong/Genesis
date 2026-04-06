@@ -24,6 +24,9 @@ def validate_program_constraints(
     enforce_articulated_actuator_control: bool = False,
     xml_generation_enabled: bool = False,
     generated_xml_shape_files_by_body: dict[str, str] | None = None,
+    mesh_generation_enabled: bool = False,
+    generated_mesh_shape_files_by_body: dict[str, str] | None = None,
+    failed_generated_mesh_shape_files_by_body: dict[str, str] | None = None,
     target_sim_duration_sec: float | None = None,
     sim_duration_tolerance_sec: float = 0.75,
 ) -> list[str]:
@@ -31,6 +34,7 @@ def validate_program_constraints(
 
     bodies = program.bodies
     articulated_bodies = [body for body in bodies if body.shape.kind in {"mjcf", "urdf"}]
+    mesh_bodies = [body for body in bodies if body.shape.kind == "mesh"]
 
     if required_shape_kind is not None and not any(body.shape.kind == required_shape_kind for body in bodies):
         actual_kinds = [body.shape.kind for body in bodies]
@@ -73,6 +77,29 @@ def validate_program_constraints(
                         f"Generated XML asset for body `{body.name}` was not attached correctly. "
                         f"Expected body.shape.file=`{expected_file}`, got `{actual_file}`."
                     )
+
+    for body in mesh_bodies:
+        actual_file = getattr(body.shape, "file", None)
+        if not isinstance(actual_file, str) or not actual_file.strip():
+            errors.append(f"Mesh body `{body.name}` is missing `shape.file`.")
+            continue
+        if not Path(actual_file).exists():
+            errors.append(f"Mesh body `{body.name}` references missing mesh asset `{actual_file}`.")
+            continue
+        if mesh_generation_enabled and generated_mesh_shape_files_by_body:
+            expected_file = generated_mesh_shape_files_by_body.get(body.name)
+            if expected_file is not None and actual_file != expected_file:
+                errors.append(
+                    f"Generated mesh asset for body `{body.name}` was not attached correctly. "
+                    f"Expected body.shape.file=`{expected_file}`, got `{actual_file}`."
+                )
+        if mesh_generation_enabled and failed_generated_mesh_shape_files_by_body:
+            failed_file = failed_generated_mesh_shape_files_by_body.get(body.name)
+            if failed_file is not None and actual_file == failed_file:
+                errors.append(
+                    f"Generated mesh asset for body `{body.name}` failed manifold validation and cannot be used: "
+                    f"`{actual_file}`."
+                )
 
     if target_sim_duration_sec is not None:
         final_step = sum(action.steps for action in program.actions if isinstance(action, StepActionIR))

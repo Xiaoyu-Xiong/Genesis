@@ -8,6 +8,7 @@ from ..ir_schema import (
     CollisionIR,
     CylinderShapeIR,
     MJCFShapeIR,
+    MeshShapeIR,
     SphereShapeIR,
     URDFShapeIR,
 )
@@ -29,6 +30,16 @@ def body_morph_source(body: BodyIR) -> str:
         return (
             f"gs.morphs.Cylinder(radius={shape.radius}, height={shape.height}, "
             f"pos={pos_src}, quat={quat_src}, fixed={fixed_src})"
+        )
+    if isinstance(shape, MeshShapeIR):
+        return (
+            "gs.morphs.Mesh("
+            f"file={shape.file!r}, "
+            f"scale={shape.scale}, "
+            f"pos={pos_src}, "
+            f"quat={quat_src}, "
+            f"fixed={fixed_src}"
+            ")"
         )
     if isinstance(shape, MJCFShapeIR):
         return (

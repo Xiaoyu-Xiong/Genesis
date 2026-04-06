@@ -27,6 +27,7 @@ def _cmd_generate(args: argparse.Namespace) -> None:
         reasoning_effort=args.reasoning_effort,
         normalize=not args.no_normalize,
         assets_dir=args.assets_dir,
+        mesh_assets_dir=args.mesh_assets_dir,
         force_primitive_mode=args.primitive_only,
         hosted_prompt_id=args.hosted_prompt_id,
         hosted_prompt_version=args.hosted_prompt_version,
@@ -49,10 +50,22 @@ def _cmd_generate(args: argparse.Namespace) -> None:
                     }
                     for body_name, xml_result in sorted(result.xml_results_by_body.items())
                 },
+                "mesh_results_by_body": {
+                    body_name: {
+                        "mesh_path": mesh_result.mesh_path,
+                        "raw_manifold_ok": mesh_result.raw_manifold_ok,
+                        "repaired_manifold_ok": mesh_result.repaired_manifold_ok,
+                    }
+                    for body_name, mesh_result in sorted(result.mesh_results_by_body.items())
+                },
                 "ir_logs": ir_logs,
                 "xml_logs_by_body": {
                     body_name: [asdict(log) for log in xml_result.logs]
                     for body_name, xml_result in sorted(result.xml_results_by_body.items())
+                },
+                "mesh_logs_by_body": {
+                    body_name: [asdict(log) for log in mesh_result.logs]
+                    for body_name, mesh_result in sorted(result.mesh_results_by_body.items())
                 },
             },
             args.log_out,
@@ -121,6 +134,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("agent/generated_assets"),
         help="Directory for generated articulated XML assets.",
+    )
+    parser_generate.add_argument(
+        "--mesh-assets-dir",
+        type=Path,
+        default=Path("agent/generated_meshes"),
+        help="Directory for generated non-articulated mesh assets.",
     )
     parser_generate.add_argument(
         "--primitive-only",

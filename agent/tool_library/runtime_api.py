@@ -25,7 +25,8 @@ class RigidToolLibrary:
     - `generation_call_tool`: execute one generation tool call locally.
 
     Scope of current IR:
-    - Multiple bodies per program (`bodies`), including multiple articulated MJCF/URDF bodies.
+    - Multiple bodies per program (`bodies`), including primitive bodies, non-articulated mesh bodies,
+      and multiple articulated MJCF/URDF bodies.
     - Action space includes pose edits, dof writes, external wrench application, and actuator controls.
     """
 
@@ -91,6 +92,7 @@ class RigidToolLibrary:
         base_url_env: str = "OPENAI_BASE_URL",
         timeout_sec: float = 120.0,
         assets_dir: str = "agent/generated_assets",
+        mesh_assets_dir: str = "agent/generated_meshes",
         force_primitive_mode: bool = False,
         parameter_overrides: GeneratorParameterOverrides | None = None,
     ) -> RigidIR:
@@ -112,6 +114,7 @@ class RigidToolLibrary:
             reasoning_effort=reasoning_effort,
             normalize=normalize,
             assets_dir=assets_dir,
+            mesh_assets_dir=mesh_assets_dir,
             force_primitive_mode=force_primitive_mode,
             parameter_overrides=parameter_overrides,
             hosted_prompt_id=hosted_prompt_id,

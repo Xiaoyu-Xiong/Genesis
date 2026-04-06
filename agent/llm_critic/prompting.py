@@ -34,6 +34,7 @@ Your job:
 - Every item in `priority_fixes` must be implementable through the provided tool library and current IR/XML path.
 - Do not over-focus on duration alone; prioritize content correctness, physical plausibility, and control logic.
 - For each major issue, make the `fix` field concrete: name the IR field(s) or actuator setting(s) to adjust, the direction of change, and the intended effect on behavior.
+- For mesh objects, calibrate their direction and scale from the video evidence, and if applicable, provide specific adjustments to their quaterinion and scale fields with the intended effect on behavior.
 - Do not recommend verbose IR rewrites when a shorter equivalent IR is possible.
 
 Return ONLY a JSON object with this schema:

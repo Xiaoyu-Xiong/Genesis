@@ -31,6 +31,12 @@ class CylinderShapeIR(StrictModel):
     height: float = Field(default=1.0, gt=0.0)
 
 
+class MeshShapeIR(StrictModel):
+    kind: Literal["mesh"] = "mesh"
+    file: str = Field(min_length=1)
+    scale: float = Field(default=1.0, gt=0.0)
+
+
 class MJCFShapeIR(StrictModel):
     kind: Literal["mjcf"] = "mjcf"
     file: str = Field(min_length=1)
@@ -64,7 +70,7 @@ class URDFShapeIR(StrictModel):
 
 
 ShapeIR = Annotated[
-    SphereShapeIR | BoxShapeIR | CylinderShapeIR | MJCFShapeIR | URDFShapeIR,
+    SphereShapeIR | BoxShapeIR | CylinderShapeIR | MeshShapeIR | MJCFShapeIR | URDFShapeIR,
     Field(discriminator="kind"),
 ]
 

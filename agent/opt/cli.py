@@ -41,6 +41,7 @@ def _cmd_optimize(args: argparse.Namespace) -> None:
         xml_max_attempts=args.xml_max_attempts,
         timeout_sec=args.timeout_sec,
         assets_dir=str(args.assets_dir),
+        mesh_assets_dir=str(args.mesh_assets_dir),
         generator_parameter_overrides=parameter_overrides,
         sample_every_sec=args.sample_every_sec,
         max_frames=args.max_frames,
@@ -128,6 +129,7 @@ def _build_config(args: argparse.Namespace) -> OptimizationConfig:
         xml_max_attempts=args.xml_max_attempts,
         timeout_sec=args.timeout_sec,
         assets_dir=str(args.assets_dir),
+        mesh_assets_dir=str(args.mesh_assets_dir),
         generator_parameter_overrides=parameter_overrides,
         sample_every_sec=args.sample_every_sec,
         max_frames=args.max_frames,
@@ -272,6 +274,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("agent/generated_assets"),
         help="Directory for generated articulated XML assets.",
+        )
+        parser_variant.add_argument(
+        "--mesh-assets-dir",
+        type=Path,
+        default=Path("agent/generated_meshes"),
+        help="Directory for generated non-articulated mesh assets.",
         )
         parser_variant.add_argument("--sample-every-sec", type=float, default=0.5, help="Critic video sampling interval.")
         parser_variant.add_argument("--max-frames", type=int, default=24, help="Critic hard cap on sampled frames.")

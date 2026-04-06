@@ -4,6 +4,7 @@ from typing import Any
 
 from .overrides import GeneratorParameterOverrides
 from .tool_specs import (
+    COMPACT_HARD_RULE_KEYS,
     build_generation_guide_payload,
     build_observation_field_guide_payload,
     build_schema_payload,
@@ -14,6 +15,7 @@ from .tool_specs import (
 def build_generator_tool_context(
     *,
     xml_generation_enabled: bool = True,
+    mesh_generation_enabled: bool = True,
     parameter_overrides: GeneratorParameterOverrides | None = None,
 ) -> dict[str, Any]:
     guide = build_generation_guide_payload(
@@ -26,6 +28,8 @@ def build_generator_tool_context(
         duration_tolerance_sec=0.75,
         xml_generation_enabled=xml_generation_enabled,
         generated_xml_paths_by_body=None,
+        mesh_generation_enabled=mesh_generation_enabled,
+        generated_mesh_paths_by_body=None,
         parameter_overrides=parameter_overrides,
     )
     constraints = dict(guide["constraints"])
@@ -39,7 +43,10 @@ def build_generator_tool_context(
         "MJCF generation path, and supported action ops."
     )
     return {
-        "tool_specs": build_tool_specs(xml_generation_enabled=xml_generation_enabled),
+        "tool_specs": build_tool_specs(
+            xml_generation_enabled=xml_generation_enabled,
+            mesh_generation_enabled=mesh_generation_enabled,
+        ),
         "generation_guide": {
             "ok": guide["ok"],
             "mode": guide["mode"],
@@ -54,6 +61,7 @@ def build_generator_tool_context(
 def build_compact_generator_tool_context(
     *,
     xml_generation_enabled: bool = True,
+    mesh_generation_enabled: bool = True,
     parameter_overrides: GeneratorParameterOverrides | None = None,
 ) -> dict[str, Any]:
     guide = build_generation_guide_payload(
@@ -66,6 +74,8 @@ def build_compact_generator_tool_context(
         duration_tolerance_sec=0.75,
         xml_generation_enabled=xml_generation_enabled,
         generated_xml_paths_by_body=None,
+        mesh_generation_enabled=mesh_generation_enabled,
+        generated_mesh_paths_by_body=None,
         parameter_overrides=parameter_overrides,
     )
     constraints = guide["constraints"]
@@ -102,16 +112,13 @@ def build_compact_generator_tool_context(
             "recommended_articulated_action_ops": constraints.get("recommended_articulated_action_ops"),
             "render_follow_entity_supported": constraints.get("render_follow_entity_supported"),
             "xml_generation_is_available": constraints.get("xml_generation_is_available"),
+            "mesh_generation_is_available": constraints.get("mesh_generation_is_available"),
         },
         "hard_rules": {
-            "root_structure_note": constraints.get("root_structure_note"),
-            "body_naming_policy": constraints.get("body_naming_policy"),
-            "articulated_body_xml_policy": constraints.get("articulated_body_xml_policy"),
-            "fixed_body_note": constraints.get("fixed_body_note"),
-            "pre_sim_only_actions": constraints.get("pre_sim_only_actions"),
-            "articulated_motion_policy": constraints.get("articulated_motion_policy"),
-            "ir_conciseness_policy": constraints.get("ir_conciseness_policy"),
-            "fixed_parameter_override_policy": constraints.get("fixed_parameter_override_policy"),
+            **{
+                key: constraints.get(key)
+                for key in COMPACT_HARD_RULE_KEYS
+            },
             "implementable_fix_rule": (
                 "Only recommend changes expressible through the current generator tool library, IR fields, "
                 "MJCF generation path, and supported action ops."

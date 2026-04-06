@@ -39,6 +39,7 @@ XML_SYSTEM_PROMPT = (
     "The XML must describe only the robot body tree. "
     "Do not add ground planes, tables, lights, cameras, or any other background/environment elements. "
     "Under `<worldbody>`, include only the robot root `<body>` tree. "
+    "Use only simple primitive geoms inside the articulated body tree; do not define mesh assets or geom type='mesh'. "
     "Do not include `<actuator>` blocks or actuator tags under `<default>`; actuator definitions belong to IR. "
     "Do not include `<contact><exclude .../></contact>` blocks. "
     "Do not wrap XML in markdown fences."
@@ -138,6 +139,11 @@ def _validate_mjcf(xml_content: str) -> None:
             "Generated MJCF must contain exactly one direct robot root `<body>` under `<worldbody>`."
         )
 
+    if any(elem.tag == "mesh" for elem in root.iter()):
+        raise XMLGenerationError("Generated MJCF must not define `<mesh>` assets; use simple primitive geoms only.")
+    if any(elem.tag == "geom" and elem.attrib.get("type") == "mesh" for elem in root.iter()):
+        raise XMLGenerationError("Generated MJCF must not use `geom type=\"mesh\"`; use simple primitive geoms only.")
+
     try:
         import mujoco
     except Exception:
@@ -229,6 +235,7 @@ def _build_user_prompt(task: str, *, previous_error: str | None = None, file_ste
         "- xml_content must be valid MJCF.",
         "- The XML must include only the robot itself. No ground, no background, no environment objects.",
         "- Under `<worldbody>`, include only the robot root `<body>` tree.",
+        "- Use only simple primitive geoms inside the articulated body. Do not define mesh assets or `geom type=\"mesh\"`.",
         "- Include at least one movable joint.",
         "- Do not include `<actuator>` blocks or actuator-default tags under `<default>`.",
         "- Do not include `<contact><exclude .../></contact>` blocks.",

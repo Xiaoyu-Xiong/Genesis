@@ -159,7 +159,9 @@ class ApplyExternalWrenchActionIR(StrictModel):
         default=None,
         description=(
             "External force applied to the selected body or links. This is an external disturbance, not an actuator "
-            "command. The effect persists across subsequent simulation steps until another wrench update changes it."
+            "command. The effect persists across subsequent simulation steps until another wrench update changes it. "
+            "If the disturbance is too weak or too strong, prefer adjusting force magnitude first before changing how "
+            "long the wrench is applied."
         ),
     )
     torque: Vec3 | None = Field(

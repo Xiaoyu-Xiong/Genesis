@@ -9,6 +9,7 @@ from ...ir_schema import RigidIR
 from ..client import OpenAIResponsesClient, coerce_content_to_text
 from ..constraints.general_constraints import extract_first_json_object, parse_sanitize_validate
 from ...tool_library import GeneralIRAgentToolLibrary
+from ...tool_library.tool_specs import build_ir_agent_process_requirements
 from .prompt_utils import truncate_prompt_text
 
 
@@ -60,26 +61,16 @@ def _tool_result_message(tool_call_id: str, name: str, result: dict[str, Any]) -
     }
 
 
-def _build_user_prompt(task: str, *, additional_requirements: str | None = None) -> str:
+def _build_user_prompt(
+    task: str,
+    *,
+    mesh_generation_available: bool,
+    additional_requirements: str | None = None,
+) -> str:
     lines = [
         "Process requirements:",
         "- Call get_generation_bootstrap first.",
-        "- Use top-level `bodies` list.",
-        "- Use `bodies[].fixed=true` for static primitive or URDF props, targets, and supports. For MJCF, express a fixed base in the XML itself.",
-        "- `observe`, `set_pose`, and `apply_external_wrench` may target a single body or a list of body names via the `entity` field.",
-        "- Keep the IR as concise as possible without changing behavior; merge repeated `observe`, `set_pose`, or `apply_external_wrench` actions into one action with an `entity` list whenever the payload and timing are identical.",
-        "- Render is mandatory for generated IR; ensure scene.render is present.",
-        "- The IR may contain multiple bodies in `bodies`, including multiple articulated bodies (`mjcf` or `urdf`).",
-        "- If articulated structure is needed and tool is available, call generate_articulated_xml once per articulated body.",
-        "- Every generate_articulated_xml tool call must include the target `body_name`.",
-        "- If multiple articulated bodies need XML generation, batch those generate_articulated_xml tool calls in one response when possible.",
-        "- Each articulated body should use its own XML asset; do not reuse one XML path across unrelated articulated bodies.",
-        "- If an articulated body's XML does not need to change in this revision, keep its existing xml_path instead of regenerating it.",
-        "- For articulated bodies, define actuators only in IR (`bodies[].actuators`), not in XML.",
-        "- Use `set_target_pos` only with position actuators and `set_torque` only with motor actuators.",
-        "- If task specifies target simulation duration, pass it to validate_ir as target_sim_duration_sec.",
-        "- Use validate_ir when it is helpful to check a draft before finalizing, but it is not mandatory before final output.",
-        "- Return only final valid IR JSON.",
+        *build_ir_agent_process_requirements(mesh_generation_available=mesh_generation_available),
         "",
         "Task:",
         task.strip(),
@@ -94,8 +85,9 @@ def _build_revision_prompt_sections(
     previous_ir_json: dict[str, Any] | None,
     previous_xml_texts_by_body: dict[str, str] | None,
     previous_xml_summaries_by_body: dict[str, dict[str, Any]] | None,
+    previous_mesh_summaries_by_body: dict[str, dict[str, Any]] | None,
 ) -> list[str]:
-    if previous_ir_json is None and not previous_xml_texts_by_body and not previous_xml_summaries_by_body:
+    if previous_ir_json is None and not previous_xml_texts_by_body and not previous_xml_summaries_by_body and not previous_mesh_summaries_by_body:
         return []
 
     lines = [
@@ -117,6 +109,10 @@ def _build_revision_prompt_sections(
     if previous_xml_summaries_by_body:
         lines.extend(["", "Articulated asset summary for bodies that should usually stay unchanged:"])
         for body_name, summary in sorted(previous_xml_summaries_by_body.items()):
+            lines.append(f"- {body_name}: {json.dumps(summary, ensure_ascii=False)}")
+    if previous_mesh_summaries_by_body:
+        lines.extend(["", "Existing mesh asset summary for bodies that may be reused:"])
+        for body_name, summary in sorted(previous_mesh_summaries_by_body.items()):
             lines.append(f"- {body_name}: {json.dumps(summary, ensure_ascii=False)}")
     if previous_xml_texts_by_body:
         lines.extend(["", "Previous articulated XML assets to revise when XML changes are needed:"])
@@ -151,6 +147,7 @@ def _build_hosted_prompt_ref(
     previous_ir_json: dict[str, Any] | None,
     previous_xml_texts_by_body: dict[str, str] | None,
     previous_xml_summaries_by_body: dict[str, dict[str, Any]] | None,
+    previous_mesh_summaries_by_body: dict[str, dict[str, Any]] | None,
 ) -> dict[str, Any] | None:
     if hosted_prompt_id is None:
         return None
@@ -165,6 +162,9 @@ def _build_hosted_prompt_ref(
     previous_xml_summaries = ""
     if previous_xml_summaries_by_body:
         previous_xml_summaries = json.dumps(previous_xml_summaries_by_body, ensure_ascii=False, indent=2)
+    previous_mesh_summaries = ""
+    if previous_mesh_summaries_by_body:
+        previous_mesh_summaries = json.dumps(previous_mesh_summaries_by_body, ensure_ascii=False, indent=2)
     prompt: dict[str, Any] = {
         "id": hosted_prompt_id,
         "variables": {
@@ -175,6 +175,7 @@ def _build_hosted_prompt_ref(
             ),
             "previous_xml_texts_by_body": previous_xml_texts,
             "previous_xml_summaries_by_body": previous_xml_summaries,
+            "previous_mesh_summaries_by_body": previous_mesh_summaries,
         },
     }
     if hosted_prompt_version is not None:
@@ -196,6 +197,7 @@ def generate_ir_with_tool_agent(
     previous_ir_json: dict[str, Any] | None = None,
     previous_xml_texts_by_body: dict[str, str] | None = None,
     previous_xml_summaries_by_body: dict[str, dict[str, Any]] | None = None,
+    previous_mesh_summaries_by_body: dict[str, dict[str, Any]] | None = None,
     hosted_prompt_id: str | None = None,
     hosted_prompt_version: str | None = None,
 ) -> IRGenerationResult:
@@ -203,11 +205,16 @@ def generate_ir_with_tool_agent(
         raise ValueError("`max_rounds` must be >= 1.")
 
     system_message = {"role": "system", "content": IR_SYSTEM_PROMPT}
-    user_prompt = _build_user_prompt(task, additional_requirements=additional_requirements)
+    user_prompt = _build_user_prompt(
+        task,
+        mesh_generation_available=tool_library.mesh_generation_fn is not None,
+        additional_requirements=additional_requirements,
+    )
     revision_sections = _build_revision_prompt_sections(
         previous_ir_json=previous_ir_json,
         previous_xml_texts_by_body=previous_xml_texts_by_body,
         previous_xml_summaries_by_body=previous_xml_summaries_by_body,
+        previous_mesh_summaries_by_body=previous_mesh_summaries_by_body,
     )
     if revision_sections:
         user_prompt = "\n".join([user_prompt, *revision_sections])
@@ -224,6 +231,7 @@ def generate_ir_with_tool_agent(
         previous_ir_json=previous_ir_json,
         previous_xml_texts_by_body=previous_xml_texts_by_body,
         previous_xml_summaries_by_body=previous_xml_summaries_by_body,
+        previous_mesh_summaries_by_body=previous_mesh_summaries_by_body,
     )
 
     if hosted_prompt is not None:

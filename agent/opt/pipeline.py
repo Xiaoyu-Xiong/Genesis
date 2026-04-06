@@ -4,6 +4,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 import fcntl
+import multiprocessing as mp
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,7 @@ class OptimizationConfig:
     xml_max_attempts: int = 4
     timeout_sec: float = 600.0
     assets_dir: str = "agent/generated_assets"
+    mesh_assets_dir: str = "agent/generated_meshes"
     generator_parameter_overrides: GeneratorParameterOverrides = field(
         default_factory=lambda: GeneratorParameterOverrides(
             sim_dt=0.001,
@@ -120,6 +122,9 @@ def optimize_prompt(
         assets_root = Path(config.assets_dir) / run_root.name
         round_assets_dir = assets_root / f"round_{round_index:02d}"
         round_assets_dir.mkdir(parents=True, exist_ok=True)
+        mesh_assets_root = Path(config.mesh_assets_dir) / run_root.name
+        round_mesh_assets_dir = mesh_assets_root / f"round_{round_index:02d}"
+        round_mesh_assets_dir.mkdir(parents=True, exist_ok=True)
 
         generator_result = generate_ir_two_agent(
             task=task,
@@ -132,6 +137,7 @@ def optimize_prompt(
             reasoning_effort=config.reasoning_effort,
             normalize=True,
             assets_dir=str(round_assets_dir),
+            mesh_assets_dir=str(round_mesh_assets_dir),
             force_primitive_mode=False,
             additional_requirements=(
                 None if feedback_package is None else feedback_package["generator_requirements"]
@@ -293,7 +299,17 @@ def optimize_prompts_batch(
     run_root = _resolve_run_root(config.output_root)
     ordered_results: list[BatchOptimizationItemResult | None] = [None] * len(task_specs)
 
-    with ProcessPoolExecutor(max_workers=min(max_parallel, len(task_specs))) as executor:
+    executor_kwargs: dict[str, Any] = {
+        "max_workers": min(max_parallel, len(task_specs)),
+    }
+    if config.backend == "gpu":
+        # GPU + forked workers is fragile because CUDA/Taichi state can leak across
+        # process boundaries. Use spawn and recycle workers after one task to keep each
+        # case isolated.
+        executor_kwargs["mp_context"] = mp.get_context("spawn")
+        executor_kwargs["max_tasks_per_child"] = 1
+
+    with ProcessPoolExecutor(**executor_kwargs) as executor:
         futures = [
             executor.submit(_run_batch_task, spec, config, str(run_root))
             for spec in task_specs
@@ -377,6 +393,7 @@ def _load_articulated_asset_texts_by_body(program) -> dict[str, str]:
 
 def _generation_log_payload(result, config: OptimizationConfig) -> dict[str, Any]:
     xml_results_by_body = result.xml_results_by_body
+    mesh_results_by_body = result.mesh_results_by_body
     return {
         "model": result.model,
         "mode": result.mode,
@@ -390,10 +407,22 @@ def _generation_log_payload(result, config: OptimizationConfig) -> dict[str, Any
             }
             for body_name, xml_result in sorted(xml_results_by_body.items())
         },
+        "mesh_results_by_body": {
+            body_name: {
+                "mesh_path": mesh_result.mesh_path,
+                "raw_manifold_ok": mesh_result.raw_manifold_ok,
+                "repaired_manifold_ok": mesh_result.repaired_manifold_ok,
+            }
+            for body_name, mesh_result in sorted(mesh_results_by_body.items())
+        },
         "ir_logs": [asdict(log) for log in result.ir_result.logs],
         "xml_logs_by_body": {
             body_name: [asdict(log) for log in xml_result.logs]
             for body_name, xml_result in sorted(xml_results_by_body.items())
+        },
+        "mesh_logs_by_body": {
+            body_name: [asdict(log) for log in mesh_result.logs]
+            for body_name, mesh_result in sorted(mesh_results_by_body.items())
         },
     }
 

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any
 
 from ..client import OpenAIResponsesClient
 from ...tool_library import GeneralIRAgentToolLibrary, GeneratorParameterOverrides
 from .ir_agent import IRGenerationResult, generate_ir_with_tool_agent
+from .mesh_agent import MeshGenerationResult, generate_mesh_asset_with_meshy, load_existing_mesh_generation_result
 from .xml_agent import XMLGenerationResult, generate_articulated_xml_with_openai
 
 
@@ -17,10 +19,17 @@ class TwoAgentGenerationResult:
     articulated_requested: bool
     ir_result: IRGenerationResult
     xml_results_by_body: dict[str, XMLGenerationResult]
+    mesh_results_by_body: dict[str, MeshGenerationResult]
 
     @property
     def ir_json(self) -> dict[str, Any]:
         return self.ir_result.ir_json
+
+
+def _prepare_asset_dir(path_like: str | Path) -> Path:
+    path = Path(path_like)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _merge_xml_task(base_task: str, body_name: str, xml_feedback_requirements: str | None) -> str:
@@ -37,7 +46,21 @@ def _merge_xml_task(base_task: str, body_name: str, xml_feedback_requirements: s
     )
 
 
-def _previous_xml_path_by_body(previous_ir_json: dict[str, Any] | None) -> dict[str, str]:
+def _merge_mesh_task(base_task: str, body_name: str) -> str:
+    return "\n\n".join(
+        [
+            base_task.strip(),
+            f"Target non-articulated mesh body name: `{body_name}`.",
+            "Generate one single-object simulation-friendly mesh asset for this body only.",
+        ]
+    )
+
+
+def _previous_shape_path_by_body(
+    previous_ir_json: dict[str, Any] | None,
+    *,
+    allowed_kinds: set[str],
+) -> dict[str, str]:
     if previous_ir_json is None:
         return {}
     bodies_any = previous_ir_json.get("bodies")
@@ -51,12 +74,68 @@ def _previous_xml_path_by_body(previous_ir_json: dict[str, Any] | None) -> dict[
         shape = body.get("shape")
         if not isinstance(body_name, str) or not isinstance(shape, dict):
             continue
-        if shape.get("kind") not in {"mjcf", "urdf"}:
+        if shape.get("kind") not in allowed_kinds:
             continue
         file_path = shape.get("file")
         if isinstance(file_path, str) and file_path.strip():
             paths_by_body[body_name] = file_path
     return paths_by_body
+
+
+def _previous_xml_path_by_body(previous_ir_json: dict[str, Any] | None) -> dict[str, str]:
+    return _previous_shape_path_by_body(previous_ir_json, allowed_kinds={"mjcf", "urdf"})
+
+
+def _previous_mesh_path_by_body(previous_ir_json: dict[str, Any] | None) -> dict[str, str]:
+    return _previous_shape_path_by_body(previous_ir_json, allowed_kinds={"mesh"})
+
+
+def _previous_mesh_summaries_by_body(previous_ir_json: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    paths_by_body = _previous_mesh_path_by_body(previous_ir_json)
+    summaries: dict[str, dict[str, Any]] = {}
+    for body_name, path_str in sorted(paths_by_body.items()):
+        path = Path(path_str)
+        if not path.exists():
+            continue
+        summary: dict[str, Any] = {"mesh_path": path_str}
+        try:
+            summary["mesh_bytes"] = path.stat().st_size
+        except Exception:  # noqa: BLE001
+            pass
+        existing = load_existing_mesh_generation_result(path)
+        if existing is not None:
+            summary["raw_manifold_ok"] = existing.raw_manifold_ok
+            summary["repaired_manifold_ok"] = existing.repaired_manifold_ok
+        summaries[body_name] = summary
+    return summaries
+
+
+def _filtered_previous_xml_texts_by_body(
+    previous_xml_texts_by_body: dict[str, str] | None,
+    xml_feedback_requirements_by_body: dict[str, str] | None,
+) -> dict[str, str]:
+    if not previous_xml_texts_by_body or not xml_feedback_requirements_by_body:
+        return {}
+    return {
+        body_name: xml_text
+        for body_name, xml_text in previous_xml_texts_by_body.items()
+        if body_name in xml_feedback_requirements_by_body
+    }
+
+
+def _build_additional_requirements(
+    *,
+    force_primitive_mode: bool,
+    additional_requirements: str | None,
+) -> str | None:
+    requirement_lines: list[str] = []
+    if force_primitive_mode:
+        requirement_lines.append("Primitive-only mode: all bodies[].shape.kind must be one of sphere/box/cylinder.")
+    if additional_requirements and additional_requirements.strip():
+        requirement_lines.append(additional_requirements.strip())
+    if not requirement_lines:
+        return None
+    return "\n\n".join(requirement_lines)
 
 
 def _previous_xml_summaries_by_body(
@@ -85,6 +164,96 @@ def _previous_xml_summaries_by_body(
     return summaries
 
 
+def _build_xml_generation_fn(
+    *,
+    task: str,
+    model: str,
+    xml_model: str | None,
+    client: OpenAIResponsesClient,
+    output_dir: Path,
+    xml_max_attempts: int,
+    temperature: float | None,
+    reasoning_effort: str | None,
+    xml_feedback_requirements_by_body: dict[str, str] | None,
+    previous_xml_texts_by_body: dict[str, str] | None,
+    previous_xml_paths_by_body: dict[str, str],
+):
+    def _xml_generation_fn(body_name: str, xml_task: str | None, file_stem: str | None) -> XMLGenerationResult:
+        xml_feedback_requirements = None
+        if xml_feedback_requirements_by_body is not None:
+            xml_feedback_requirements = xml_feedback_requirements_by_body.get(body_name)
+        previous_xml_text = None if previous_xml_texts_by_body is None else previous_xml_texts_by_body.get(body_name)
+        previous_xml_path = previous_xml_paths_by_body.get(body_name)
+        if xml_feedback_requirements is None and previous_xml_path:
+            path = Path(previous_xml_path)
+            if path.exists():
+                xml_content = (
+                    previous_xml_text
+                    if isinstance(previous_xml_text, str) and previous_xml_text
+                    else path.read_text(encoding="utf-8")
+                )
+                return XMLGenerationResult(
+                    model=xml_model or model,
+                    attempts=0,
+                    xml_path=str(path.as_posix()),
+                    xml_content=xml_content,
+                    logs=[],
+                )
+        xml_task_default = _merge_xml_task(task, body_name, xml_feedback_requirements)
+        effective_xml_task = xml_task if isinstance(xml_task, str) and xml_task.strip() else xml_task_default
+        if xml_feedback_requirements and xml_feedback_requirements.strip() not in effective_xml_task:
+            effective_xml_task = _merge_xml_task(effective_xml_task, body_name, xml_feedback_requirements)
+        return generate_articulated_xml_with_openai(
+            task=effective_xml_task,
+            model=xml_model or model,
+            client=client,
+            output_dir=output_dir,
+            file_stem=file_stem or body_name,
+            previous_xml_text=previous_xml_text,
+            max_attempts=xml_max_attempts,
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+        )
+
+    return _xml_generation_fn
+
+
+def _build_mesh_generation_fn(
+    *,
+    task: str,
+    output_dir: Path,
+    previous_mesh_paths_by_body: dict[str, str],
+):
+    def _mesh_generation_fn(body_name: str, mesh_task: str | None, file_stem: str | None) -> MeshGenerationResult:
+        previous_mesh_path = previous_mesh_paths_by_body.get(body_name)
+        if previous_mesh_path is not None:
+            reused = load_existing_mesh_generation_result(previous_mesh_path)
+            if reused is not None and reused.repaired_manifold_ok:
+                return reused
+        mesh_task_default = _merge_mesh_task(task, body_name)
+        effective_mesh_task = mesh_task if isinstance(mesh_task, str) and mesh_task.strip() else mesh_task_default
+        return generate_mesh_asset_with_meshy(
+            task=effective_mesh_task,
+            output_dir=output_dir,
+            file_stem=file_stem or body_name,
+        )
+
+    return _mesh_generation_fn
+
+
+def _determine_generation_mode(
+    *,
+    force_primitive_mode: bool,
+    xml_results_by_body: dict[str, XMLGenerationResult],
+    mesh_results_by_body: dict[str, MeshGenerationResult],
+) -> str:
+    if force_primitive_mode:
+        return "single_agent_primitive"
+    if xml_results_by_body or mesh_results_by_body:
+        return "ir_agent_triggered_assets"
+    return "ir_agent_no_xml"
+
+
 def generate_ir_two_agent(
     *,
     task: str,
@@ -97,6 +266,7 @@ def generate_ir_two_agent(
     reasoning_effort: str | None = None,
     normalize: bool = True,
     assets_dir: str | Path = "agent/generated_assets",
+    mesh_assets_dir: str | Path = "agent/generated_meshes",
     force_primitive_mode: bool = False,
     additional_requirements: str | None = None,
     xml_feedback_requirements_by_body: dict[str, str] | None = None,
@@ -106,88 +276,46 @@ def generate_ir_two_agent(
     hosted_prompt_version: str | None = None,
     parameter_overrides: GeneratorParameterOverrides | None = None,
 ) -> TwoAgentGenerationResult:
-    xml_out_dir = Path(assets_dir)
-    xml_out_dir.mkdir(parents=True, exist_ok=True)
+    xml_out_dir = _prepare_asset_dir(assets_dir)
+    mesh_out_dir = _prepare_asset_dir(mesh_assets_dir)
     previous_xml_paths_by_body = _previous_xml_path_by_body(previous_ir_json)
-
-    def _xml_generation_fn(body_name: str, xml_task: str | None, file_stem: str | None) -> XMLGenerationResult:
-        xml_feedback_requirements = None
-        if xml_feedback_requirements_by_body is not None:
-            xml_feedback_requirements = xml_feedback_requirements_by_body.get(body_name)
-        previous_xml_text = None if previous_xml_texts_by_body is None else previous_xml_texts_by_body.get(body_name)
-        previous_xml_path = previous_xml_paths_by_body.get(body_name)
-        if xml_feedback_requirements is None and previous_xml_path:
-            path = Path(previous_xml_path)
-            if path.exists():
-                xml_content = previous_xml_text if isinstance(previous_xml_text, str) and previous_xml_text else path.read_text(encoding="utf-8")
-                return XMLGenerationResult(
-                    model=xml_model or model,
-                    attempts=0,
-                    xml_path=str(path.as_posix()),
-                    xml_content=xml_content,
-                    logs=[],
-                )
-        xml_task_default = _merge_xml_task(task, body_name, xml_feedback_requirements)
-        effective_xml_task = xml_task if isinstance(xml_task, str) and xml_task.strip() else xml_task_default
-        if xml_feedback_requirements and xml_feedback_requirements.strip() not in effective_xml_task:
-            effective_xml_task = _merge_xml_task(effective_xml_task, body_name, xml_feedback_requirements)
-        result = generate_articulated_xml_with_openai(
-            task=effective_xml_task,
-            model=xml_model or model,
-            client=client,
-            output_dir=xml_out_dir,
-            file_stem=file_stem or body_name,
-            previous_xml_text=previous_xml_text,
-            max_attempts=xml_max_attempts,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-        )
-        return result
+    previous_mesh_paths_by_body = _previous_mesh_path_by_body(previous_ir_json)
+    mesh_generation_available = bool(os.getenv("MESHY_API_KEY"))
+    xml_generation_fn = None if force_primitive_mode else _build_xml_generation_fn(
+        task=task,
+        model=model,
+        xml_model=xml_model,
+        client=client,
+        output_dir=xml_out_dir,
+        xml_max_attempts=xml_max_attempts,
+        temperature=temperature,
+        reasoning_effort=reasoning_effort,
+        xml_feedback_requirements_by_body=xml_feedback_requirements_by_body,
+        previous_xml_texts_by_body=previous_xml_texts_by_body,
+        previous_xml_paths_by_body=previous_xml_paths_by_body,
+    )
+    mesh_generation_fn = None if force_primitive_mode or not mesh_generation_available else _build_mesh_generation_fn(
+        task=task,
+        output_dir=mesh_out_dir,
+        previous_mesh_paths_by_body=previous_mesh_paths_by_body,
+    )
 
     tool_library = GeneralIRAgentToolLibrary(
         allowed_shape_kinds=(
             ("sphere", "box", "cylinder")
             if force_primitive_mode
-            else ("sphere", "box", "cylinder", "mjcf")
+            else ("sphere", "box", "cylinder", "mesh", "mjcf")
         ),
         enforce_articulated_actuator_control=True,
-        xml_generation_fn=None if force_primitive_mode else _xml_generation_fn,
+        xml_generation_fn=xml_generation_fn,
+        mesh_generation_fn=mesh_generation_fn,
         parameter_overrides=parameter_overrides,
     )
 
-    requirement_lines: list[str] = []
-    if previous_ir_json is not None or (previous_xml_texts_by_body and any(text.strip() for text in previous_xml_texts_by_body.values())):
-        requirement_lines.extend(
-            [
-                "This is a refinement pass, not a fresh generation pass.",
-                "Modify the previous candidate based on feedback instead of starting over from scratch.",
-                "Preserve working parts of the previous IR/XML unless the feedback requires changing them.",
-            ]
-        )
-    if force_primitive_mode:
-        requirement_lines.append("Primitive-only mode: all bodies[].shape.kind must be one of sphere/box/cylinder.")
-    else:
-        requirement_lines.extend(
-            [
-                "You may generate multiple bodies in one IR.",
-                "Multiple articulated bodies are allowed (`mjcf` or `urdf`) alongside primitive bodies.",
-                "Use `fixed=true` on primitive or URDF bodies that should stay anchored in the world. For MJCF bodies, express a fixed base in the XML itself.",
-                "If articulated motion is needed, call `generate_articulated_xml` once per articulated body and bind each returned xml_path to the matching body in `bodies` with `shape.kind='mjcf'`.",
-                "Always include `body_name` when calling `generate_articulated_xml`.",
-                "Do not regenerate articulated XML assets that do not need structural changes; reuse their existing xml_path when possible.",
-                "Do not define actuators inside XML; define actuators only on the articulated body in `bodies[].actuators`.",
-                "For articulated bodies, do not use `set_pose` / `set_dofs_position` / `set_dofs_velocity`; "
-                "use that body's actuators plus actuator commands (`set_target_pos` for position actuators, "
-                "`set_torque` for motor actuators).",
-            ]
-        )
-    requirement_lines.append(
-        "If the task specifies a target simulation duration, enforce it via "
-        "validate_ir(target_sim_duration_sec=..., sim_duration_tolerance_sec=...)."
+    merged_requirements = _build_additional_requirements(
+        force_primitive_mode=force_primitive_mode,
+        additional_requirements=additional_requirements,
     )
-    merged_requirements = "\n".join(requirement_lines)
-    if additional_requirements:
-        merged_requirements = "\n\n".join([merged_requirements, additional_requirements.strip()])
 
     ir_result = generate_ir_with_tool_agent(
         task=task,
@@ -200,28 +328,28 @@ def generate_ir_two_agent(
         normalize=normalize,
         additional_requirements=merged_requirements,
         previous_ir_json=previous_ir_json,
-        previous_xml_texts_by_body={
-            body_name: xml_text
-            for body_name, xml_text in (previous_xml_texts_by_body or {}).items()
-            if xml_feedback_requirements_by_body and body_name in xml_feedback_requirements_by_body
-        },
+        previous_xml_texts_by_body=_filtered_previous_xml_texts_by_body(
+            previous_xml_texts_by_body,
+            xml_feedback_requirements_by_body,
+        ),
         previous_xml_summaries_by_body=_previous_xml_summaries_by_body(
             previous_ir_json,
             previous_xml_texts_by_body,
             xml_feedback_requirements_by_body,
         ),
+        previous_mesh_summaries_by_body=_previous_mesh_summaries_by_body(previous_ir_json),
         hosted_prompt_id=hosted_prompt_id,
         hosted_prompt_version=hosted_prompt_version,
     )
 
     xml_results_by_body = tool_library.generated_xml_results_by_body
+    mesh_results_by_body = tool_library.generated_mesh_results_by_body
     articulated_requested = any(body.shape.kind in {"mjcf", "urdf"} for body in ir_result.program.bodies)
-    if force_primitive_mode:
-        mode = "single_agent_primitive"
-    elif xml_results_by_body:
-        mode = "ir_agent_triggered_xml"
-    else:
-        mode = "ir_agent_no_xml"
+    mode = _determine_generation_mode(
+        force_primitive_mode=force_primitive_mode,
+        xml_results_by_body=xml_results_by_body,
+        mesh_results_by_body=mesh_results_by_body,
+    )
 
     return TwoAgentGenerationResult(
         model=model,
@@ -229,4 +357,5 @@ def generate_ir_two_agent(
         articulated_requested=articulated_requested,
         ir_result=ir_result,
         xml_results_by_body=xml_results_by_body,
+        mesh_results_by_body=mesh_results_by_body,
     )

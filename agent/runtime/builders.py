@@ -8,6 +8,7 @@ from ..ir_schema import (
     CollisionIR,
     CylinderShapeIR,
     MJCFShapeIR,
+    MeshShapeIR,
     SphereShapeIR,
     URDFShapeIR,
 )
@@ -26,6 +27,8 @@ def build_body_morph(gs: Any, body: BodyIR) -> Any:
         return gs.morphs.Box(size=tuple(shape.size), pos=pos, quat=quat, fixed=fixed)
     if isinstance(shape, CylinderShapeIR):
         return gs.morphs.Cylinder(radius=shape.radius, height=shape.height, pos=pos, quat=quat, fixed=fixed)
+    if isinstance(shape, MeshShapeIR):
+        return gs.morphs.Mesh(file=shape.file, scale=shape.scale, pos=pos, quat=quat, fixed=fixed)
     if isinstance(shape, MJCFShapeIR):
         return gs.morphs.MJCF(
             file=shape.file,

@@ -104,4 +104,11 @@ def run_rigid_ir(
                 except Exception:
                     pass
             runtime.scene.destroy()
+        # Tear down Genesis global state as well, not just the scene. In GPU mode this
+        # helps avoid stale CUDA/Taichi contexts when a long-lived worker process runs
+        # multiple optimize rounds.
+        try:
+            gs.destroy()
+        except Exception:
+            pass
     return result
