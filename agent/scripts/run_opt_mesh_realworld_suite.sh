@@ -10,14 +10,14 @@ CRITIC_MODEL="${CRITIC_MODEL:-}"
 REASONING_EFFORT="${REASONING_EFFORT:-xhigh}"
 CRITIC_REASONING_EFFORT="${CRITIC_REASONING_EFFORT:-}"
 CRITIC_PROMPT_VARIANT="${CRITIC_PROMPT_VARIANT:-full}"
-MAX_PARALLEL="${MAX_PARALLEL:-6}"
+MAX_PARALLEL="${MAX_PARALLEL:-8}"
 BACKEND="${BACKEND:-gpu}"
 MAX_OPT_ROUNDS="${MAX_OPT_ROUNDS:-8}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-12}"
 XML_MAX_ATTEMPTS="${XML_MAX_ATTEMPTS:-4}"
 SAMPLE_EVERY_SEC="${SAMPLE_EVERY_SEC:-0.5}"
 MAX_FRAMES="${MAX_FRAMES:-24}"
-TIMEOUT_SEC="${TIMEOUT_SEC:-600}"
+TIMEOUT_SEC="${TIMEOUT_SEC:-1000}"
 
 RUN_TS="$(date +%Y%m%d_%H%M%S)"
 RUN_ROOT="${RUN_ROOT:-agent/runs/opt_mesh_realworld_suite/${RUN_TS}}"
@@ -105,21 +105,21 @@ mkdir -p "$RUN_ROOT"
 TASK_FILE="$RUN_ROOT/tasks.txt"
 
 cat > "$TASK_FILE" <<'CASES'
-warehouse_loading_bay|Create a busy warehouse loading bay with a forklift-like articulated vehicle, several palletized cargo containers, a few movable safety barriers, and a loading platform. Over 10s, the vehicle should move into the area and cause realistic contact interactions among the loose objects.
+warehouse_loading_bay|Create a believable warehouse loading scene that feels like an active fulfillment area, with handling equipment, movable freight, and the kinds of surrounding props that naturally appear around a loading zone. Over 10s, the scene should show an ongoing loading or handling activity with plausible object interactions.
 
-factory_packing_cell|Create a factory packing cell with a fixed-base articulated robot working around several matching storage totes, workpiece trays, and a tool cart on and around a packing table. Over 10s, the robot should move through a believable open-loop routine while the surrounding props remain part of the scene.
+airport_service_apron|Create a realistic airport ground-service staging scene near an aircraft turnaround area, with the kinds of support equipment, movable assets, and safety infrastructure that would naturally appear there. Over 10s, the scene should depict an ongoing service operation with believable motion and contact-rich activity.
 
-dual_robot_assembly_zone|Create a dual-robot assembly zone with two compact articulated robots facing a shared worktable, several matching bins and trays, and a few larger shop-floor props around the station. Over 10s, both robots should execute open-loop motions in the shared space while the environment feels like a real work cell.
+construction_logistics_corner|Create a realistic construction or site-logistics corner with active machinery, stored materials, temporary safety infrastructure, and other movable worksite elements arranged naturally. Over 10s, the environment should feel active, with a plausible equipment-led interaction sequence affecting nearby objects.
 
-workshop_clutter_rollthrough|Create a cluttered workshop scene with stools, toolboxes, storage crates, bins, and other movable shop props scattered in a believable arrangement. Over 10s, one heavy moving object should travel through the area and trigger a chain of contacts across multiple props.
+factory_packing_cell|Create a believable factory packing or packaging cell with an active automation setup operating within a realistic production environment. Over 10s, the scene should show a coherent open-loop work routine while the surrounding work area feels like a real working station.
 
-construction_site_corner|Create a small construction-site corner with an articulated machine, stacked material containers, portable barriers, and other rugged site props arranged around a work zone. Over 10s, the machine should move through the scene and disturb nearby objects in a plausible way.
+dual_robot_workcell|Create a realistic shared automation workcell centered on a common workspace in a believable industrial environment. Over 10s, multiple active systems should move through a coordinated-looking routine while the surrounding fixtures, props, and movable items establish a rich scene.
 
-lab_handling_station|Create a tabletop lab handling station with one articulated arm, several trays, racks, storage bins, and a few larger support props around the workstation. Over 10s, the arm should carry out an open-loop motion sequence above the station while the props define a realistic working environment.
+retail_backroom_scene|Create a believable retail backroom or stockroom scene with the kinds of movable storage, handling equipment, utility props, and safety objects that would naturally accumulate in a busy support area. Over 10s, the scene should include a plausible handling or movement sequence that creates multi-object interactions.
 
-retail_backroom_scene|Create a retail backroom or stockroom scene with rolling containers, storage bins, stacked cases, safety obstacles, and a few larger utility props laid out like a real storage area. Over 10s, a moving object should pass through and create a complex multi-object interaction sequence.
+workshop_makerspace_scene|Create a realistic workshop or makerspace scene with varied movable equipment, storage, and work-area elements arranged in a naturally cluttered but usable environment. Over 10s, the scene should show a believable disturbance or handling event that causes a rich cascade of contacts among objects.
 
-airport_service_corner|Create an airport ground-service corner with baggage containers, safety barriers, service carts, and one articulated service vehicle or robot arranged near a staging area. Over 10s, the active articulated asset should move through the environment and produce believable interactions with the surrounding movable props.
+lab_handling_station|Create a believable lab or medical handling environment with one active handling system working within a detailed tabletop or bench-top station. Over 10s, the scene should feel like an ongoing real-world handling routine, with surrounding equipment and support props contributing to a realistic environment.
 CASES
 
 echo "Run root: $RUN_ROOT"

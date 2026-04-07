@@ -11,6 +11,7 @@ from .tool_spec_rules import (
     ARTICULATED_DECISION_POLICY,
     BODY_COUNT_POLICY,
     BODY_NAMING_POLICY,
+    DYNAMIC_SCENE_POLICY,
     FIXED_BODY_NOTE,
     IR_CONCISENESS_POLICY,
     MESH_BODY_POLICY,
@@ -150,6 +151,7 @@ def _build_constraints(
         "mesh_local_frame_policy": MESH_LOCAL_FRAME_POLICY,
         "articulated_body_mesh_policy": ARTICULATED_BODY_MESH_POLICY,
         "ir_conciseness_policy": IR_CONCISENESS_POLICY,
+        "dynamic_scene_policy": DYNAMIC_SCENE_POLICY,
         "fixed_body_support": True,
         "fixed_body_note": FIXED_BODY_NOTE,
         "multi_entity_action_support": {

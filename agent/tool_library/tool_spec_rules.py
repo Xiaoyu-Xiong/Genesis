@@ -42,6 +42,11 @@ IR_CONCISENESS_POLICY = (
     "bodies at the same moment with identical parameters, use one action with `entity` as a body-name list "
     "instead of duplicating many near-identical actions."
 )
+DYNAMIC_SCENE_POLICY = (
+    "When the task allows open-ended scene design, prefer scenes with clear motion, visible state changes, and "
+    "meaningful contact-rich interactions instead of mostly static tableaux. Favor behaviors that make the scene "
+    "evolve noticeably over the requested duration."
+)
 
 COMPACT_HARD_RULE_KEYS = (
     "root_structure_note",
@@ -57,6 +62,7 @@ COMPACT_HARD_RULE_KEYS = (
     "pre_sim_only_actions",
     "articulated_motion_policy",
     "ir_conciseness_policy",
+    "dynamic_scene_policy",
     "fixed_parameter_override_policy",
 )
 
@@ -68,6 +74,7 @@ def build_ir_agent_process_requirements(*, mesh_generation_available: bool) -> l
         "- Use `shape.kind='mesh'` only for non-articulated bodies. Mesh bodies should reference a mesh asset file and may be fixed or movable.",
         f"- {ARTICULATED_DECISION_POLICY}",
         f"- {MESH_DECISION_POLICY}",
+        f"- {DYNAMIC_SCENE_POLICY}",
         "- `observe`, `set_pose`, and `apply_external_wrench` may target a single body or a list of body names via the `entity` field.",
         f"- {IR_CONCISENESS_POLICY}",
         "- Render is mandatory for generated IR; ensure scene.render is present.",
