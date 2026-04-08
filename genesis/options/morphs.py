@@ -15,8 +15,10 @@ from pydantic import Field, StrictBool, StrictInt, model_validator
 import genesis as gs
 import genesis.utils.geom as gu
 import genesis.utils.misc as mu
+import genesis.utils.urdf as uu
 import genesis.ext.urdfpy as urdfpy
 from genesis.typing import (
+    FrozenDictType,
     NonNegativeInt,
     PositiveFloat,
     PositiveInt,
@@ -32,9 +34,10 @@ from .misc import CoacdOptions
 from .options import Options
 
 URDF_FORMAT = ".urdf"
+XACRO_FORMAT = ".xacro"
 MJCF_FORMAT = ".xml"
 GLTF_FORMATS = (".glb", ".gltf")
-MESH_FORMATS = (".obj", ".stl", *GLTF_FORMATS)
+MESH_FORMATS = (".obj", ".stl", ".dae", *GLTF_FORMATS)
 USD_FORMATS = (".usd", ".usda", ".usdc", ".usdz")
 
 
@@ -522,6 +525,13 @@ class FileMorph(Morph):
     recompute_inertia : bool, optional
         Force recomputing spatial inertia of links from their geometry. This option is useful to import partially
         broken assets from external providers that cannot be re-exported from source. Default to False.
+    align : bool, optional
+        Whether to reframe root links so that the link origin coincides with the center of mass and its axes are
+        aligned with the principal axes of inertia. This makes the inertia tensor diagonal, which improves numerical
+        stability. Only applies to root (floating-base) links. Uses file-specified inertia if valid (and
+        ``recompute_inertia=False``), otherwise computes from geometry. Defaults to None, which resolves to True
+        for basic rigid objects (entities with only a root free joint and no articulated descendants), False otherwise.
+        **This is only used for RigidEntity.**
     file_meshes_are_zup : bool, optional
         Defines if the mesh files are expressed in a Z-up or Y-up coordinate system. If set to true, meshes are loaded
         as Z-up and no transforms are applied to the input data. If set to false, all meshes undergo a conversion step
@@ -551,6 +561,7 @@ class FileMorph(Morph):
     decompose_robot_error_threshold: float = Field(default=float("inf"), ge=0, allow_inf_nan=True)
     coacd_options: CoacdOptions | None = None
     recompute_inertia: StrictBool = False
+    align: StrictBool | None = None
     file_meshes_are_zup: StrictBool | None = True
     batch_fixed_verts: StrictBool = False
 
@@ -706,6 +717,10 @@ class Mesh(FileMorph, TetGenMixin):
     group_by_material : bool, optional
         Whether to group submeshes by their visual material type defined in the asset file. Defaults to False.
         **This is only used for RigidEntity.**
+    align : bool, optional
+        Whether to reframe the mesh so that its link origin coincides with the center of mass and its axes are
+        aligned with the principal axes of inertia. This makes the inertia tensor diagonal, which improves
+        numerical stability. Defaults to True. **This is only used for RigidEntity.**
     order : int, optional
         The order of the FEM mesh. Defaults to 1. **This is only used for FEMEntity.**
     mindihedral : int, optional
@@ -870,6 +885,10 @@ class MJCF(FileMorph):
     batch_fixed_verts : bool, optional
         Whether to batch fixed vertices. This will allow setting env-specific poses to fixed geometries, at the cost of
         significantly increasing memory usage. Default to true. **This is only used for RigidEntity.**
+    align : bool, optional
+        Whether to reframe root links so that the link origin coincides with the center of mass and its axes are
+        aligned with the principal axes of inertia. Only applies to root (floating-base) links. Default to False.
+        **This is only used for RigidEntity.**
     default_armature : float, optional
         Default rotor inertia of the actuators. In practice it is applied to all joints regardless of whether they are
         actuated. None to disable. Default to 0.1.
@@ -898,8 +917,13 @@ class MJCF(FileMorph):
 
 class URDF(FileMorph):
     """
-    Morph loaded from a URDF file. This morph only supports `RigidEntity`.
+    Morph loaded from a URDF or XACRO file. This morph only supports `RigidEntity`.
     If you need to create a `Drone` entity, use `gs.morphs.Drone` instead.
+
+    XACRO files (``.urdf.xacro`` or ``.xacro``) are automatically preprocessed into plain URDF using the ``xacro``
+    package. All standard xacro features (macros, properties, includes, conditionals, substitution args) are supported.
+    Use ``xacro_args`` to override ``xacro:arg`` declarations at load time. The only limitation is that
+    ``$(find package_name)`` substitutions require ROS's ``ament_index_python``; without ROS, these will raise an error.
 
     Note
     ----
@@ -984,9 +1008,16 @@ class URDF(FileMorph):
         Whether to merge links connected via a fixed joint. Defaults to True.
     links_to_keep : list of str, optional
         A list of link names that should not be skipped during link merging. Defaults to [].
+    align : bool, optional
+        Whether to reframe root links so that the link origin coincides with the center of mass and its axes are
+        aligned with the principal axes of inertia. Only applies to root (floating-base) links. Default to False.
+        **This is only used for RigidEntity.**
     default_armature : float, optional
         Default rotor inertia of the actuators. In practice it is applied to all joints regardless of whether they are
         actuated. None to disable. Default to 0.1.
+    xacro_args : dict, optional
+        Key-value pairs to override ``xacro:arg`` declarations in the xacro file
+        (e.g. ``{"use_sim": "true", "arm_length": "0.5"}``). Only used for ``.xacro`` files. Defaults to ``{}``.
     """
 
     fixed: StrictBool = False
@@ -995,6 +1026,7 @@ class URDF(FileMorph):
     merge_fixed_links: StrictBool = True
     links_to_keep: StrArrayType = ()
     default_armature: float | None = Field(default=0.1, ge=0)
+    xacro_args: FrozenDictType[str, str] = {}
 
     @model_validator(mode="before")
     @classmethod
@@ -1007,12 +1039,14 @@ class URDF(FileMorph):
         return data
 
     def model_post_init(self, context: Any) -> None:
-        if not self.is_format(URDF_FORMAT):
-            gs.raise_exception(f"Expected `{URDF_FORMAT}` extension for URDF file: {self.file}")
+        if self.is_format(XACRO_FORMAT):
+            self.file = uu.load_xacro(self.file, self.xacro_args)
+        elif not self.is_format(URDF_FORMAT):
+            gs.raise_exception(f"Expected `{URDF_FORMAT}` or `{XACRO_FORMAT}` extension for URDF file: {self.file}")
 
     def is_format(self, format):
         if isinstance(self.file, urdfpy.URDF):
-            return True
+            return format == URDF_FORMAT
         return super().is_format(format)
 
 
@@ -1407,6 +1441,10 @@ class USD(FileMorph):
     recompute_inertia : bool, optional
         Force recomputing spatial inertia of links from their geometry. This option is useful to import partially
         broken assets from external providers that cannot be re-exported from source. Default to False.
+    align : bool, optional
+        Whether to reframe root links so that the link origin coincides with the center of mass and its axes are
+        aligned with the principal axes of inertia. Only applies to root (floating-base) links. Default to False.
+        **This is only used for RigidEntity.**
     file_meshes_are_zup : bool, optional
         Defines if the mesh files are expressed in a Z-up or Y-up coordinate system. If set to true, meshes are loaded
         as Z-up and no transforms are applied to the input data. If set to false, all meshes undergo a conversion step
@@ -1424,6 +1462,9 @@ class USD(FileMorph):
     requires_jac_and_IK : bool, optional
         Whether this morph, if created as `RigidEntity`, requires jacobian and inverse kinematics. Defaults to False.
         **This is only used for RigidEntity.**
+    default_armature : float, optional
+        Default rotor inertia of the actuators. In practice it is applied to all joints regardless of whether they are
+        actuated. None to disable. Default to 0.1.
 
     Joint Dynamics Options
     ----------------------
@@ -1487,7 +1528,8 @@ class USD(FileMorph):
 
     # Mesh Options
     file_meshes_are_zup: StrictBool | None = None
-    fixed: StrictBool = False
+    fixed: StrictBool | None = None
+    default_armature: float | None = Field(default=0.1, ge=0)
 
     # Joint Dynamics Options
     joint_friction_attr_candidates: StrArrayType = (

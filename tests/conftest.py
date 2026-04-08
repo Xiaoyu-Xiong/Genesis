@@ -4,9 +4,11 @@ import gc
 import logging
 import os
 import re
+import shutil
 import subprocess
-from argparse import SUPPRESS
 import sys
+import warnings
+from argparse import SUPPRESS
 from enum import Enum
 from io import BytesIO
 from pathlib import Path
@@ -19,8 +21,6 @@ import pytest
 from _pytest.mark import Expression, MarkMatcher
 from PIL import Image
 from syrupy.extensions.image import PNGImageSnapshotExtension
-
-from . import profiling
 
 # Mock tkinter module for backward compatibility because it is a hard dependency for old Genesis versions
 has_tkinter = False
@@ -75,6 +75,7 @@ if not has_display and has_egl:
 
 IS_INTERACTIVE_VIEWER_AVAILABLE = has_display or has_egl
 
+
 TOL_SINGLE = 5e-5
 TOL_DOUBLE = 1e-9
 IMG_STD_ERR_THR = 1.0
@@ -96,6 +97,9 @@ def _skip_reason(reason):
 
 SKIP_NO_GPU = _skip_reason("No GPU available on this machine")
 SKIP_METAL_64BIT = _skip_reason("Apple Metal GPU does not support 64bits precision.")
+SKIP_NDARRAY_PERFORMANCE_MODE = _skip_reason(
+    "Skipping unit tests requiring performance mode when running with Quadrants dynamic array mode."
+)
 SKIP_BACKEND_UNAVAILABLE = _skip_reason("Backend not available on this machine")
 SKIP_NO_MADRONA = _skip_reason("BatchRenderer is not supported because 'gs_madrona' is not available.")
 SKIP_NO_LUISA = _skip_reason("RayTracer is not supported because 'LuisaRenderPy' is not available.")
@@ -180,6 +184,10 @@ def pytest_cmdline_main(config: pytest.Config) -> None:
         if config.option.numprocesses > max_workers:
             raise ValueError(f"The number of workers cannot exceed '{max_workers}' on this machine.")
 
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    config = session.config
+
     # Properly configure Quadrants std out stream right away to avoid significant performance penalty (~10%)
     # Note that this variable must be set in the main thread BEFORE spawning the distributed workers, otherwise
     # the variable will be set incorrectly. Although, Genesis is already setting this env variable properly at import,
@@ -199,6 +207,8 @@ def pytest_cmdline_main(config: pytest.Config) -> None:
             os.environ["QD_VISIBLE_DEVICE"] = str(gpu_index)
 
         # Limit CPU threading
+        expr = Expression.compile(config.option.markexpr)
+        is_benchmarks = expr.evaluate(MarkMatcher.from_markers((pytest.mark.benchmarks,)))
         if is_benchmarks:
             # FIXME: Enabling multi-threading in benchmark is making compile time estimation unreliable
             num_cpu_per_worker = "1"
@@ -214,6 +224,11 @@ def pytest_cmdline_main(config: pytest.Config) -> None:
         os.environ["NUMEXPR_NUM_THREADS"] = num_cpu_per_worker
         os.environ["NUMBA_NUM_THREADS"] = num_cpu_per_worker
 
+    # Avoid numba cache collision between sessions and workers.
+    # Must be set before numba is imported, so it cannot live in a fixture.
+    basetemp = config._tmp_path_factory.getbasetemp()
+    os.environ["NUMBA_CACHE_DIR"] = str(basetemp / "numba-cache")
+
 
 def _get_gpu_indices():
     cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -221,10 +236,15 @@ def _get_gpu_indices():
         return tuple(map(int, cuda_visible_devices.split(",")))
 
     if sys.platform == "linux":
-        nvidia_gpu_indices = []
         nvidia_gpu_interface_path = "/proc/driver/nvidia/gpus/"
-        if os.path.exists(nvidia_gpu_interface_path):
+        try:
             return tuple(range(len(os.listdir(nvidia_gpu_interface_path))))
+        except FileNotFoundError:
+            warnings.warn(
+                f"'{nvidia_gpu_interface_path}' is not available. Multi-GPU support will be disabled. This is expected "
+                "on WSL2 where the NVIDIA proc interface is not mounted.",
+                stacklevel=2,
+            )
 
     return (0,)
 
@@ -240,11 +260,18 @@ def _torch_get_gpu_idx(device):
         device_uuid = str(device_property.uuid)
 
         nvidia_gpu_interface_path = "/proc/driver/nvidia/gpus/"
-        for device_idx, device_path in enumerate(os.listdir(nvidia_gpu_interface_path)):
-            with open(os.path.join(nvidia_gpu_interface_path, device_path, "information"), "r") as f:
-                device_info = f.read()
-            if re.search(rf"GPU UUID:\s+GPU-{device_uuid}", device_info):
-                return device_idx
+        try:
+            for device_idx, device_path in enumerate(os.listdir(nvidia_gpu_interface_path)):
+                with open(os.path.join(nvidia_gpu_interface_path, device_path, "information"), "r") as f:
+                    device_info = f.read()
+                if re.search(rf"GPU UUID:\s+GPU-{device_uuid}", device_info):
+                    return device_idx
+        except FileNotFoundError:
+            warnings.warn(
+                f"'{nvidia_gpu_interface_path}' is not available. Multi-GPU support will be disabled. This is expected "
+                "on WSL2 where the NVIDIA proc interface is not mounted.",
+                stacklevel=2,
+            )
 
     return -1
 
@@ -398,11 +425,21 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_setup(item):
+    # Convert all quadrants and torch UserWarning as errors
+    warnings.filterwarnings("error", category=UserWarning, module="torch")
+    warnings.filterwarnings(
+        "default", message=r".*The .grad attribute of a Tensor that is not a leaf Tensor is being accessed..*"
+    )
+    warnings.filterwarnings(
+        "default", message=r".*not currently supported on the MPS backend and will fall back to run on the CPU.*"
+    )
+    warnings.filterwarnings("error", category=UserWarning, module="quadrants")
+    warnings.filterwarnings("default", message=r".*cannot create weak reference to 'tuple' object.*")
+
     # Include test name in process title
     test_name = item.nodeid.replace(" ", "")
     dtype = "field" if os.environ.get("GS_ENABLE_NDARRAY", "1") == "0" else "ndarray"
     test_name = test_name[:-1] + f"-{dtype}]"
-
     setproctitle.setproctitle(f"pytest: {test_name}")
 
     # Match CUDA device with EGL device.
@@ -434,7 +471,7 @@ def pytest_runtest_makereport(item, call):
     report = outcome.get_result()
     if report.skipped and isinstance(report.longrepr, tuple):
         _, _, reason = report.longrepr
-        # pytest may prefix the reason with "Skipped: " — strip it for matching
+        # pytest may prefix the reason with "Skipped: " - strip it for matching
         bare_reason = reason.removeprefix("Skipped: ")
         lineno = _CANONICAL_SKIP_LINES.get(bare_reason)
         if (
@@ -468,19 +505,6 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default="speed_test.txt",
         help="Base filepath for speed test reports (default: speed_test.txt).",
     )
-    if os.environ.get("GS_PROFILING", "0") == "1":
-        profiling.parser_add_options(parser)
-
-
-# Note: moving this out of conftest.py, e.g. into profiling.py, does not appear to work.
-@pytest.fixture(scope="function")
-def pytorch_profiler_step(pytestconfig, request):
-    if os.environ.get("GS_PROFILING", "0") == "1":
-        for res in profiling.pytorch_profiler(pytestconfig, request):
-            yield res
-    else:
-        noop = lambda: None  # noqa: E731
-        yield noop
 
 
 @pytest.fixture(scope="session")
@@ -600,16 +624,16 @@ def dof_damping(request):
 
 
 @pytest.fixture
-def disable_cache(request):
-    disable_cache = None
-    for mark in request.node.iter_markers("disable_cache"):
+def cache(request):
+    cache = None
+    for mark in request.node.iter_markers("cache"):
         if mark.args:
-            if disable_cache is not None:
-                pytest.fail("'disable_cache' can only be specified once.")
-            (disable_cache,) = mark.args
-    if disable_cache is None:
-        disable_cache = True
-    return disable_cache
+            if cache is not None:
+                pytest.fail("'cache' can only be specified once.")
+            (cache,) = mark.args
+    if cache is None:
+        cache = True
+    return cache
 
 
 @pytest.fixture
@@ -620,8 +644,6 @@ def performance_mode(request):
             if performance_mode is not None:
                 pytest.fail("'performance_mode' can only be specified once.")
             (performance_mode,) = mark.args
-    if performance_mode is None:
-        performance_mode = False
     return performance_mode
 
 
@@ -637,7 +659,7 @@ def debug(request):
 
 
 @pytest.fixture(scope="function", autouse=True)
-def initialize_genesis(request, monkeypatch, tmp_path, backend, precision, performance_mode, debug, disable_cache):
+def initialize_genesis(request, monkeypatch, tmp_path, backend, precision, performance_mode, debug, cache):
     import genesis as gs
 
     # Early return if backend is None
@@ -653,15 +675,18 @@ def initialize_genesis(request, monkeypatch, tmp_path, backend, precision, perfo
     if debug is None:
         debug = request.config.getoption("--dev")
 
-    if not disable_cache:
+    if not cache:
         monkeypatch.setenv("QD_OFFLINE_CACHE", "0")
         # FIXME: Must set temporary cache even if caching is forcibly disabled because this flag is not always honored
         monkeypatch.setenv("QD_OFFLINE_CACHE_FILE_PATH", str(tmp_path / ".cache" / "quadrants"))
         monkeypatch.setenv("GS_CACHE_FILE_PATH", str(tmp_path / ".cache" / "genesis"))
         monkeypatch.setenv("GS_ENABLE_FASTCACHE", "0")
 
-    # Avoid numba cache collision
-    monkeypatch.setenv("NUMBA_CACHE_DIR", str(tmp_path / ".cache" / "numba"))
+        # Wipe worker-specific cache entirely since there is no way to disable it
+        numba_cache_dir = Path(os.environ["NUMBA_CACHE_DIR"])
+        basetemp = request.config._tmp_path_factory.getbasetemp()
+        assert numba_cache_dir.is_relative_to(basetemp)
+        shutil.rmtree(numba_cache_dir, ignore_errors=True)
 
     # Redirect name terrain cache directory to some test-local temporary location to avoid conflict and persistence
     monkeypatch.setattr("genesis.utils.misc.get_gnd_cache_dir", lambda: str(tmp_path / ".cache" / "terrain"))
@@ -678,6 +703,10 @@ def initialize_genesis(request, monkeypatch, tmp_path, backend, precision, perfo
             if os.environ.get("QD_ENABLE_METAL", "1") != "0" and precision == "64":
                 pytest.skip(SKIP_METAL_64BIT)
 
+        # Skip test if performance mode is required but 'GS_ENABLE_NDARRAY' != '0' because it cannot be updated
+        if performance_mode is not None and ((os.environ.get("GS_ENABLE_NDARRAY", "1") == "0") ^ performance_mode):
+            pytest.skip(SKIP_NDARRAY_PERFORMANCE_MODE)
+
         gs.init(
             backend=backend,
             precision=precision,
@@ -687,6 +716,23 @@ def initialize_genesis(request, monkeypatch, tmp_path, backend, precision, perfo
             performance_mode=performance_mode,
         )
         gc.collect()
+
+        # Set default prefer_parallel_linesearch based on backend so that both iterative (CPU) and parallel (GPU)
+        # linesearch paths are systematically tested, while still allowing individual tests to override explicitly.
+        # Skip for benchmarks - let performance dispatch choose freely.
+        expr = Expression.compile(request.config.option.markexpr)
+        is_benchmarks = expr.evaluate(MarkMatcher.from_markers((pytest.mark.benchmarks,)))
+        if not is_benchmarks:
+            from genesis.options.solvers import RigidOptions
+
+            _orig_model_post_init = RigidOptions.model_post_init
+
+            def _patched_model_post_init(self, context):
+                _orig_model_post_init(self, context)
+                if self.prefer_parallel_linesearch is None:
+                    self.prefer_parallel_linesearch = True
+
+            monkeypatch.setattr(RigidOptions, "model_post_init", _patched_model_post_init)
 
         if gs.backend != gs.cpu and gs.device.index is not None:
             if _torch_get_gpu_idx(gs.device.index) not in _get_gpu_indices():

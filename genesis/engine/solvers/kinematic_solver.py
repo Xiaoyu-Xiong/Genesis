@@ -257,8 +257,8 @@ class KinematicSolver(Solver):
                 dofs_damping=np.concatenate([joint.dofs_damping for joint in joints], dtype=gs.np_float),
                 dofs_frictionloss=np.concatenate([joint.dofs_frictionloss for joint in joints], dtype=gs.np_float),
                 dofs_armature=np.concatenate([joint.dofs_armature for joint in joints], dtype=gs.np_float),
-                dofs_kp=np.concatenate([joint.dofs_kp for joint in joints], dtype=gs.np_float),
-                dofs_kv=np.concatenate([joint.dofs_kv for joint in joints], dtype=gs.np_float),
+                dofs_act_gain=np.concatenate([joint.dofs_act_gain for joint in joints], dtype=gs.np_float),
+                dofs_act_bias=np.concatenate([joint.dofs_act_bias for joint in joints], dtype=gs.np_float),
                 dofs_force_range=np.concatenate([joint.dofs_force_range for joint in joints], dtype=gs.np_float),
                 dofs_info=self.dofs_info,
                 dofs_state=self.dofs_state,
@@ -550,22 +550,25 @@ class KinematicSolver(Solver):
             state = None
         return state
 
-    def set_state(self, f, state, envs_idx=None):
-        if self.is_active:
-            envs_idx = self._scene._sanitize_envs_idx(envs_idx)
+    def set_state(self, f, state, envs_idx=None, *, partial: bool = False) -> None:
+        if not self.is_active:
+            return
 
-            kernel_set_kinematic_state(
-                envs_idx=envs_idx,
-                qpos=state.qpos,
-                dofs_vel=state.dofs_vel,
-                links_pos=state.links_pos,
-                links_quat=state.links_quat,
-                i_pos_shift=state.i_pos_shift,
-                links_state=self.links_state,
-                dofs_state=self.dofs_state,
-                rigid_global_info=self._rigid_global_info,
-                static_rigid_sim_config=self._static_rigid_sim_config,
-            )
+        envs_idx = self._scene._sanitize_envs_idx(envs_idx)
+
+        kernel_set_kinematic_state(
+            envs_idx=envs_idx,
+            qpos=state.qpos,
+            dofs_vel=state.dofs_vel,
+            links_pos=state.links_pos,
+            links_quat=state.links_quat,
+            i_pos_shift=state.i_pos_shift,
+            links_state=self.links_state,
+            dofs_state=self.dofs_state,
+            rigid_global_info=self._rigid_global_info,
+            static_rigid_sim_config=self._static_rigid_sim_config,
+        )
+        if not partial:
             kernel_forward_kinematics(
                 envs_idx,
                 links_state=self.links_state,
@@ -580,6 +583,9 @@ class KinematicSolver(Solver):
             )
             self._is_forward_pos_updated = True
             self._is_forward_vel_updated = True
+        else:
+            self._is_forward_pos_updated = False
+            self._is_forward_vel_updated = False
 
     # ------------------------------------------------------------------------------------
     # -------------------------------- process_input -------------------------------------
@@ -647,7 +653,7 @@ class KinematicSolver(Solver):
 
         return tensor_, inputs_idx_, envs_idx_
 
-    def set_base_links_pos(self, pos, links_idx=None, envs_idx=None, *, relative=False):
+    def set_base_links_pos(self, pos, links_idx=None, envs_idx=None, *, relative=False, skip_forward=False):
         if links_idx is None:
             links_idx = self._base_links_idx
         pos, links_idx, envs_idx = self._sanitize_io_variables(
@@ -667,20 +673,24 @@ class KinematicSolver(Solver):
             static_rigid_sim_config=self._static_rigid_sim_config,
         )
 
-        kernel_forward_kinematics(
-            envs_idx,
-            links_state=self.links_state,
-            links_info=self.links_info,
-            joints_state=self.joints_state,
-            joints_info=self.joints_info,
-            dofs_state=self.dofs_state,
-            dofs_info=self.dofs_info,
-            entities_info=self.entities_info,
-            rigid_global_info=self._rigid_global_info,
-            static_rigid_sim_config=self._static_rigid_sim_config,
-        )
-        self._is_forward_pos_updated = True
-        self._is_forward_vel_updated = True
+        if not skip_forward:
+            kernel_forward_kinematics(
+                envs_idx,
+                links_state=self.links_state,
+                links_info=self.links_info,
+                joints_state=self.joints_state,
+                joints_info=self.joints_info,
+                dofs_state=self.dofs_state,
+                dofs_info=self.dofs_info,
+                entities_info=self.entities_info,
+                rigid_global_info=self._rigid_global_info,
+                static_rigid_sim_config=self._static_rigid_sim_config,
+            )
+            self._is_forward_pos_updated = True
+            self._is_forward_vel_updated = True
+        else:
+            self._is_forward_pos_updated = False
+            self._is_forward_vel_updated = False
 
     def set_base_links_pos_grad(self, links_idx, envs_idx, relative, pos_grad):
         if links_idx is None:
@@ -701,7 +711,7 @@ class KinematicSolver(Solver):
             static_rigid_sim_config=self._static_rigid_sim_config,
         )
 
-    def set_base_links_quat(self, quat, links_idx=None, envs_idx=None, *, relative=False):
+    def set_base_links_quat(self, quat, links_idx=None, envs_idx=None, *, relative=False, skip_forward=False):
         if links_idx is None:
             links_idx = self._base_links_idx
         quat, links_idx, envs_idx = self._sanitize_io_variables(
@@ -721,20 +731,24 @@ class KinematicSolver(Solver):
             static_rigid_sim_config=self._static_rigid_sim_config,
         )
 
-        kernel_forward_kinematics(
-            envs_idx,
-            links_state=self.links_state,
-            links_info=self.links_info,
-            joints_state=self.joints_state,
-            joints_info=self.joints_info,
-            dofs_state=self.dofs_state,
-            dofs_info=self.dofs_info,
-            entities_info=self.entities_info,
-            rigid_global_info=self._rigid_global_info,
-            static_rigid_sim_config=self._static_rigid_sim_config,
-        )
-        self._is_forward_pos_updated = True
-        self._is_forward_vel_updated = True
+        if not skip_forward:
+            kernel_forward_kinematics(
+                envs_idx,
+                links_state=self.links_state,
+                links_info=self.links_info,
+                joints_state=self.joints_state,
+                joints_info=self.joints_info,
+                dofs_state=self.dofs_state,
+                dofs_info=self.dofs_info,
+                entities_info=self.entities_info,
+                rigid_global_info=self._rigid_global_info,
+                static_rigid_sim_config=self._static_rigid_sim_config,
+            )
+            self._is_forward_pos_updated = True
+            self._is_forward_vel_updated = True
+        else:
+            self._is_forward_pos_updated = False
+            self._is_forward_vel_updated = False
 
     def set_base_links_quat_grad(self, links_idx, envs_idx, relative, quat_grad):
         if links_idx is None:
@@ -766,8 +780,8 @@ class KinematicSolver(Solver):
                 and envs_idx.dtype == torch.bool
             ):
                 qs_data = data[(slice(None), *qs_mask)]
-                if qpos.ndim == 2:
-                    # Note that it is necessary to create a new temporary view because it will be modified in-place
+                if qpos.ndim == 2 and len(qpos) != len(qs_data):
+                    # Note that it is necessary to create a new temporary view because it will be reshaped in-place
                     qs_data.masked_scatter_(envs_idx[:, None], qpos.view_as(qpos))
                 else:
                     qpos = broadcast_tensor(qpos, gs.tc_float, qs_data.shape)
@@ -777,6 +791,8 @@ class KinematicSolver(Solver):
                 assign_indexed_tensor(data, mask, qpos)
                 if mask and isinstance(mask[0], torch.Tensor):
                     envs_idx = mask[0].reshape((-1,))
+            if gs.backend == gs.metal:
+                torch.mps.synchronize()
         else:
             qpos, qs_idx, envs_idx = self._sanitize_io_variables(
                 qpos, qs_idx, self.n_qs, "qs_idx", envs_idx, skip_allocation=True
@@ -829,8 +845,8 @@ class KinematicSolver(Solver):
                     else:
                         dofs_vel.scatter_(0, envs_idx[:, None].expand((-1, dofs_vel.shape[1])), 0.0)
                 else:
-                    if velocity.ndim == 2:
-                        # Note that it is necessary to create a new temporary view because it will be modified in-place
+                    if velocity.ndim == 2 and len(dofs_vel) != len(velocity):
+                        # Note that it is necessary to create a new temporary view because it will be reshaped in-place
                         dofs_vel.masked_scatter_(envs_idx[:, None], velocity.view_as(velocity))
                     else:
                         velocity = broadcast_tensor(velocity, gs.tc_float, dofs_vel.shape)
@@ -843,6 +859,8 @@ class KinematicSolver(Solver):
                     assign_indexed_tensor(vel, mask, velocity)
                 if mask and isinstance(mask[0], torch.Tensor):
                     envs_idx = mask[0].reshape((-1,))
+            if gs.backend == gs.metal:
+                torch.mps.synchronize()
             if not skip_forward and not isinstance(envs_idx, torch.Tensor):
                 envs_idx = self._scene._sanitize_envs_idx(envs_idx)
         else:

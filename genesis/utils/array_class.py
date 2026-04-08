@@ -2,9 +2,11 @@ import dataclasses
 import math
 from enum import IntEnum
 from functools import partial
+from typing import TYPE_CHECKING
 
 import quadrants as qd
 import numpy as np
+import torch
 from typing_extensions import dataclass_transform  # Made it into standard lib from Python 3.12
 
 import genesis as gs
@@ -13,12 +15,22 @@ if not gs._initialized:
     gs.raise_exception("Genesis hasn't been initialized. Did you call `gs.init()`?")
 
 
-V_ANNOTATION = qd.types.ndarray() if gs.use_ndarray else qd.template
-V = qd.ndarray if gs.use_ndarray else qd.field
-V_VEC = qd.Vector.ndarray if gs.use_ndarray else qd.Vector.field
-V_MAT = qd.Matrix.ndarray if gs.use_ndarray else qd.Matrix.field
+if TYPE_CHECKING:
+    V_ANNOTATION = qd.Field | qd.Ndarray
+    V = V_ANNOTATION
+    V_VEC = V_ANNOTATION
+    V_MAT = V_ANNOTATION
 
-DATA_ORIENTED = partial(dataclasses.dataclass, frozen=True) if gs.use_ndarray else qd.data_oriented
+    DATA_ORIENTED = dataclasses.dataclass
+else:
+    V_ANNOTATION = qd.types.ndarray() if gs.use_ndarray else qd.template
+    V = qd.ndarray if gs.use_ndarray else qd.field
+    V_VEC = qd.Vector.ndarray if gs.use_ndarray else qd.Vector.field
+    V_MAT = qd.Matrix.ndarray if gs.use_ndarray else qd.Matrix.field
+
+    DATA_ORIENTED = partial(dataclasses.dataclass, frozen=True) if gs.use_ndarray else qd.data_oriented
+
+
 PLACEHOLDER = V(dtype=gs.qd_float, shape=())
 
 
@@ -294,6 +306,9 @@ class StructConstraintState(metaclass=BASE_METACLASS):
     bw_w: V_ANNOTATION
     # Timers for profiling
     timers: V_ANNOTATION
+    # Always ndarray (not field): graph_do_while requires the same physical ndarray on every call.
+    graph_counter: qd.types.ndarray()
+    early_exit_flag: V_ANNOTATION
 
 
 def get_constraint_state(constraint_solver, solver):
@@ -384,6 +399,8 @@ def get_constraint_state(constraint_solver, solver):
         bw_w=V(dtype=gs.qd_float, shape=maybe_shape((len_constraints_, _B), solver._requires_grad)),
         # Timers
         timers=V(dtype=qd.i64 if gs.backend != gs.metal else qd.i32, shape=(10, _B)),
+        graph_counter=qd.ndarray(qd.i32, shape=()),
+        early_exit_flag=V(dtype=qd.i32, shape=()),
     )
 
 
@@ -705,11 +722,15 @@ class StructColliderInfo(metaclass=BASE_METACLASS):
     vert_neighbors: V_ANNOTATION
     vert_neighbor_start: V_ANNOTATION
     vert_n_neighbors: V_ANNOTATION
+    # (i_ga, i_gb) -> dense pair index, or -1 if invalid. Used by SAP broadphase, narrowphase, and contact cache.
     collision_pair_idx: V_ANNOTATION
     max_possible_pairs: V_ANNOTATION
     max_collision_pairs: V_ANNOTATION
     max_contact_pairs: V_ANNOTATION
     max_collision_pairs_broad: V_ANNOTATION
+    # Compact list of valid collision pairs. Used by all-vs-all broadphase to dispatch valid pairs to GPU threads.
+    n_valid_pairs: V_ANNOTATION
+    valid_collision_pairs: V_ANNOTATION
     # Terrain fields
     terrain_hf: V_ANNOTATION
     terrain_rc: V_ANNOTATION
@@ -724,7 +745,7 @@ class StructColliderInfo(metaclass=BASE_METACLASS):
     diff_normal_tolerance: V_ANNOTATION
 
 
-def get_collider_info(solver, n_vert_neighbors, collider_static_config, **kwargs):
+def get_collider_info(solver, n_vert_neighbors, n_valid_pairs, collider_static_config, **kwargs):
     for geom in solver.geoms:
         if geom.type == gs.GEOM_TYPE.TERRAIN:
             terrain_hf_shape = geom.entity.terrain_hf.shape
@@ -741,6 +762,8 @@ def get_collider_info(solver, n_vert_neighbors, collider_static_config, **kwargs
         max_collision_pairs=V(dtype=gs.qd_int, shape=()),
         max_contact_pairs=V(dtype=gs.qd_int, shape=()),
         max_collision_pairs_broad=V(dtype=gs.qd_int, shape=()),
+        n_valid_pairs=V_SCALAR_FROM(dtype=gs.qd_int, value=n_valid_pairs),
+        valid_collision_pairs=V(dtype=gs.qd_ivec2, shape=(max(n_valid_pairs, 1),)),
         terrain_hf=V(dtype=gs.qd_float, shape=terrain_hf_shape),
         terrain_rc=V(dtype=gs.qd_int, shape=(2,)),
         terrain_scale=V(dtype=gs.qd_float, shape=(2,)),
@@ -1316,8 +1339,8 @@ class StructDofsInfo(metaclass=BASE_METACLASS):
     motion_ang: V_ANNOTATION
     motion_vel: V_ANNOTATION
     limit: V_ANNOTATION
-    kp: V_ANNOTATION
-    kv: V_ANNOTATION
+    act_gain: V_ANNOTATION
+    act_bias: V_ANNOTATION
     force_range: V_ANNOTATION
 
 
@@ -1334,8 +1357,8 @@ def get_dofs_info(solver):
         motion_ang=V(dtype=gs.qd_vec3, shape=shape),
         motion_vel=V(dtype=gs.qd_vec3, shape=shape),
         limit=V(dtype=gs.qd_vec2, shape=shape),
-        kp=V(dtype=gs.qd_float, shape=shape),
-        kv=V(dtype=gs.qd_float, shape=shape),
+        act_gain=V(dtype=gs.qd_float, shape=shape),
+        act_bias=V(dtype=gs.qd_vec3, shape=shape),
         force_range=V(dtype=gs.qd_vec2, shape=shape),
     )
 
@@ -2010,6 +2033,8 @@ class StructRigidSimStaticConfig(metaclass=AutoInitMeta):
     integrator: int
     solver_type: int
     requires_grad: bool
+    prefer_parallel_linesearch: int = -1  # -1 = None (auto), 0 = False, 1 = True
+    broadphase_traversal: int = 0
     enable_tiled_cholesky_mass_matrix: bool = False
     enable_tiled_cholesky_hessian: bool = False
     tiled_n_dofs_per_entity: int = -1

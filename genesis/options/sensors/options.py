@@ -18,7 +18,7 @@ from genesis.typing import (
     Vec3FArrayType,
     Vec3FType,
     Vec4FType,
-    _is_sequence,
+    is_sequence,
 )
 
 from ..options import Options
@@ -38,7 +38,7 @@ else:
     NonNegativeUnboundedFloat = Annotated[float, Field(ge=0, strict=False)]
     LaxNonNegativeUnboundedVec3FType = Annotated[
         tuple[NonNegativeUnboundedFloat, NonNegativeUnboundedFloat, NonNegativeUnboundedFloat],
-        BeforeValidator(lambda v: v if _is_sequence(v) else (v,) * 3),
+        BeforeValidator(lambda v: v if is_sequence(v) else (v,) * 3),
         Field(strict=False),
     ]
 CrossCouplingAxisType = RotationMatrixType | UnitIntervalVec3Type | float
@@ -375,7 +375,8 @@ class IMU(RigidSensorOptionsMixin["IMUSensor"], NoisySensorOptionsMixin["IMUSens
 
 class Proximity(RigidSensorOptionsMixin["ProximitySensor"], NoisySensorOptionsMixin["ProximitySensor"]):
     """
-    Proximity sensor that reports distance and nearest point from probe positions to tracked mesh surfaces.
+    Proximity sensor that reports the nearest distances from probe positions to tracked mesh surfaces.
+    The read() output will provide the distances, and the nearest points can be accessed with `sensor.nearest_points`.
 
     Attached to a rigid entity link. Takes a list of local probe positions and a list of global link indices
     to track; for each probe, outputs the distance and nearest point (world frame) to the closest mesh
@@ -439,7 +440,7 @@ class Raycaster(RigidSensorOptionsMixin["RaycasterSensor"]):
     pattern: RaycastPattern
     min_range: NonNegativeFloat = 0.0
     max_range: PositiveFloat = 20.0
-    no_hit_value: float
+    no_hit_value: float = float("nan")
     return_world_frame: StrictBool = False
 
     debug_sphere_radius: PositiveFloat = 0.02

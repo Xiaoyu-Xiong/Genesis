@@ -292,7 +292,6 @@ class Mesh(RBC):
                 color_factor = tuple(np.array(visual.main_color, dtype=np.float32) / 255.0)
         elif isinstance(surface.texture, gs.textures.ColorTexture):
             color_factor = surface.texture.color
-            metadata["is_visual_overwritten"] = True
         elif (isinstance(visual, trimesh.visual.color.ColorVisuals) and visual.defined) or (
             isinstance(visual, trimesh.visual.color.VertexColor) and visual.vertex_colors.size > 0
         ):
@@ -303,6 +302,8 @@ class Mesh(RBC):
             color_factor = (1.0, 1.0, 1.0, 1.0)
 
         if must_update_surface:
+            metadata["is_visual_overwritten"] = isinstance(surface.texture, gs.textures.ColorTexture)
+
             color_texture = mu.create_texture(color_image, color_factor, "srgb")
             opacity_texture = None
             if color_texture is not None:
@@ -361,7 +362,7 @@ class Mesh(RBC):
         )
 
     @classmethod
-    def from_morph_surface(cls, morph, surface=None):
+    def from_morph_surface(cls, morph, surface=None) -> "list[gs.Mesh] | gs.Mesh":
         """
         Create a genesis.Mesh from morph and surface options.
 
@@ -392,7 +393,7 @@ class Mesh(RBC):
         elif isinstance(morph, gs.options.morphs.Sphere):
             tmesh = mu.create_sphere(radius=morph.radius)
         else:
-            gs.raise_exception()
+            gs.raise_exception(f"Morph {morph} not supported by this method.")
 
         return cls.from_trimesh(tmesh, surface=surface)
 

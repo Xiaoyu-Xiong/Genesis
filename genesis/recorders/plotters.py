@@ -1,5 +1,6 @@
 import io
 import itertools
+import logging
 import sys
 import threading
 import time
@@ -43,6 +44,10 @@ try:
 except ImportError:
     pass
 
+
+LOGGER = logging.getLogger(__name__)
+
+
 MPL_PLOTTER_RESCALE_MIN_X = 0.5
 MPL_PLOTTER_RESCALE_RATIO_X = 0.15
 MPL_PLOTTER_RESCALE_RATIO_Y = 0.15
@@ -74,12 +79,16 @@ class BasePlotter(Recorder):
         if self._options.save_to_filename:
 
             def _get_video_frame_buffer(plotter):
-                # Make sure that all the data in the pipe has been processed before rendering anything
-                if not plotter._frames_buffer:
-                    if plotter._data_queue is not None and not plotter._data_queue.empty():
-                        while not plotter._frames_buffer:
-                            time.sleep(0.1)
-
+                # Wait for the plotter to produce a frame. When the plotter runs in a background thread,
+                # it may have already dequeued data but not yet appended the rendered frame to the buffer.
+                # When not threaded, frames are produced synchronously before this call, so an empty
+                # buffer means something went wrong — the None check handles that case too.
+                while not plotter._frames_buffer:
+                    if plotter._processor_thread is None or not plotter._processor_thread.is_alive():
+                        gs.raise_exception(
+                            f"[{type(plotter).__name__}] No frame available and plotter thread is not running."
+                        )
+                    time.sleep(0.01)
                 return plotter._frames_buffer.pop(0)
 
             self.video_writer = self._manager.add_recorder(
@@ -269,9 +278,9 @@ class BasePyQtPlotter(BasePlotter):
         if self.widget:
             try:
                 self.widget.close()
-                gs.logger.debug(f"[{type(self).__name__}] closed PyQtGraph window")
+                (gs.logger or LOGGER).debug(f"[{type(self).__name__}] closed PyQtGraph window")
             except Exception as e:
-                gs.logger.warning(f"[{type(self).__name__}] Error closing window: {e}")
+                (gs.logger or LOGGER).warning(f"[{type(self).__name__}] Error closing window: {e}")
             finally:
                 self.plot_widgets.clear()
                 self.widget = None
@@ -395,10 +404,10 @@ class BaseMPLPlotter(BasePlotter):
 
                 plt.close(self.fig)
                 if logger_exists:
-                    gs.logger.debug(f"[{type(self).__name__}] Closed matplotlib window")
+                    (gs.logger or LOGGER).debug(f"[{type(self).__name__}] Closed matplotlib window")
             except Exception as e:
                 if logger_exists:
-                    gs.logger.warning(f"[{type(self).__name__}] Error closing window: {e}")
+                    (gs.logger or LOGGER).warning(f"[{type(self).__name__}] Error closing window: {e}")
             finally:
                 self.fig = None
 
