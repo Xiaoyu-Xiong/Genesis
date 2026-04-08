@@ -120,7 +120,23 @@ class ObserveActionIR(StrictModel):
             "Prefer the list form when observing multiple bodies with the same fields and tag at the same time."
         ),
     )
-    fields: tuple[Literal["pos", "quat", "vel", "ang", "qpos", "dofs_position", "dofs_velocity"], ...] = Field(
+    fields: tuple[
+        Literal[
+            "pos",
+            "quat",
+            "vel",
+            "ang",
+            "qpos",
+            "dofs_position",
+            "dofs_velocity",
+            "bbox_min",
+            "bbox_max",
+            "bbox_size",
+            "vertex_disp_mean",
+            "vertex_disp_max",
+        ],
+        ...,
+    ] = Field(
         default=("pos", "quat", "vel", "ang"),
         min_length=1,
     )
@@ -135,7 +151,24 @@ class ObserveActionIR(StrictModel):
     @field_validator("fields")
     @classmethod
     def _dedupe_fields(
-        cls, value: tuple[Literal["pos", "quat", "vel", "ang", "qpos", "dofs_position", "dofs_velocity"], ...]
+        cls,
+        value: tuple[
+            Literal[
+                "pos",
+                "quat",
+                "vel",
+                "ang",
+                "qpos",
+                "dofs_position",
+                "dofs_velocity",
+                "bbox_min",
+                "bbox_max",
+                "bbox_size",
+                "vertex_disp_mean",
+                "vertex_disp_max",
+            ],
+            ...,
+        ],
     ) -> tuple[str, ...]:
         deduped: list[str] = []
         seen: set[str] = set()

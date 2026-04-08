@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from ..defaults import DEFAULTS
 from ..ir_schema import (
     BodyIR,
     BoxShapeIR,
@@ -9,6 +10,7 @@ from ..ir_schema import (
     CylinderShapeIR,
     MJCFShapeIR,
     MeshShapeIR,
+    PBDElasticMaterialIR,
     SphereShapeIR,
     URDFShapeIR,
 )
@@ -21,15 +23,18 @@ def body_morph_source(body: BodyIR) -> str:
     pos_src = fmt_tuple(pose.pos)
     quat_src = fmt_tuple(pose.quat)
     fixed_src = body.fixed
+    tet_kwarg = ""
+    if body.is_deformable:
+        tet_kwarg = f", tet_resolution={DEFAULTS.deformable.tet_resolution}"
 
     if isinstance(shape, SphereShapeIR):
-        return f"gs.morphs.Sphere(radius={shape.radius}, pos={pos_src}, quat={quat_src}, fixed={fixed_src})"
+        return f"gs.morphs.Sphere(radius={shape.radius}, pos={pos_src}, quat={quat_src}, fixed={fixed_src}{tet_kwarg})"
     if isinstance(shape, BoxShapeIR):
-        return f"gs.morphs.Box(size={fmt_tuple(shape.size)}, pos={pos_src}, quat={quat_src}, fixed={fixed_src})"
+        return f"gs.morphs.Box(size={fmt_tuple(shape.size)}, pos={pos_src}, quat={quat_src}, fixed={fixed_src}{tet_kwarg})"
     if isinstance(shape, CylinderShapeIR):
         return (
             f"gs.morphs.Cylinder(radius={shape.radius}, height={shape.height}, "
-            f"pos={pos_src}, quat={quat_src}, fixed={fixed_src})"
+            f"pos={pos_src}, quat={quat_src}, fixed={fixed_src}{tet_kwarg})"
         )
     if isinstance(shape, MeshShapeIR):
         return (
@@ -67,6 +72,29 @@ def body_morph_source(body: BodyIR) -> str:
         )
 
     raise TypeError(f"Unsupported shape IR: {type(shape).__name__}")
+
+
+def body_material_source(body: BodyIR) -> str | None:
+    if body.is_deformable:
+        material = body.deformable_material
+        if not isinstance(material, PBDElasticMaterialIR):
+            raise TypeError(f"Unsupported deformable material IR: {type(material).__name__}")
+        friction = body.collision.friction if body.collision.friction is not None else DEFAULTS.deformable.friction
+        kwargs = [
+            f"rho={material.rho}",
+            f"static_friction={friction}",
+            f"kinetic_friction={friction}",
+            f"stretch_compliance={material.stretch_compliance}",
+            f"volume_compliance={material.volume_compliance}",
+            f"stretch_relaxation={DEFAULTS.deformable.stretch_relaxation}",
+            f"bending_relaxation={DEFAULTS.deformable.bending_relaxation}",
+            f"volume_relaxation={DEFAULTS.deformable.volume_relaxation}",
+        ]
+        return f"gs.materials.PBD.Elastic({', '.join(kwargs)})"
+    kwargs = material_kwargs_from_collision(rho=body.rho, collision=body.collision)
+    if not kwargs:
+        return None
+    return f"gs.materials.Rigid({', '.join(kwargs)})"
 
 
 def material_kwargs_from_collision(

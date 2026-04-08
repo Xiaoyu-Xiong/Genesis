@@ -5,7 +5,6 @@ import json
 from typing import Any
 
 from ..tool_library import (
-    GeneratorParameterOverrides,
     build_compact_generator_tool_context,
     build_generator_tool_context,
 )
@@ -87,7 +86,6 @@ def build_input_digest(
     video_duration_sec: float | None,
     sample_every_sec: float,
     max_frames: int,
-    parameter_overrides: GeneratorParameterOverrides | None = None,
 ) -> dict[str, Any]:
     execution = event_pack.get("execution")
     sim_duration_sec = None
@@ -107,7 +105,6 @@ def build_input_digest(
         "task_prompt": task,
         "generator_tool_context": build_generator_tool_context(
             xml_generation_enabled=True,
-            parameter_overrides=parameter_overrides,
         ),
         "video_meta": {
             "video_path": str(event_pack.get("render", {}).get("video_path", "")),
@@ -142,7 +139,6 @@ def build_compact_input_digest(
     video_duration_sec: float | None,
     sample_every_sec: float,
     max_frames: int,
-    parameter_overrides: GeneratorParameterOverrides | None = None,
 ) -> dict[str, Any]:
     execution = event_pack.get("execution")
     sim_duration_sec = None
@@ -170,7 +166,6 @@ def build_compact_input_digest(
         "task_prompt": task,
         "generator_tool_context": build_compact_generator_tool_context(
             xml_generation_enabled=True,
-            parameter_overrides=parameter_overrides,
         ),
         "video_meta": {
             "video_duration_sec": video_duration_sec,

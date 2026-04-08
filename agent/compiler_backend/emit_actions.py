@@ -211,16 +211,31 @@ def emit_action_loop(
             for entity_name in iter_entity_names(action.entity):
                 entity_var = entity_vars[entity_name]
                 emit(1, "_state = {}")
+                emit(1, f"_deformable_observation_state = _get_deformable_observation_state({entity_var})")
                 emit(1, f"_floating_base_root_state = _get_floating_base_root_state({entity_var})")
                 for field in action.fields:
-                    getter = getter_by_field[field]
-                    if field in {"pos", "quat", "vel", "ang"}:
-                        emit(1, f"if _floating_base_root_state is not None and {field!r} in _floating_base_root_state:")
-                        emit(2, f"_state[{field!r}] = _floating_base_root_state[{field!r}]")
+                    if field in {"bbox_min", "bbox_max", "bbox_size", "vertex_disp_mean", "vertex_disp_max"}:
+                        emit(1, f"if _deformable_observation_state is not None and {field!r} in _deformable_observation_state:")
+                        emit(2, f"_state[{field!r}] = _deformable_observation_state[{field!r}]")
                         emit(1, "else:")
-                        emit(2, f"_state[{field!r}] = _to_serializable({entity_var}.{getter}())")
+                        emit(2, f"raise ValueError('Field `{field}` is not available for entity `{entity_name}`.')")
                     else:
-                        emit(1, f"_state[{field!r}] = _to_serializable({entity_var}.{getter}())")
+                        getter = getter_by_field[field]
+                        if field in {"pos", "vel"}:
+                            emit(1, f"if _deformable_observation_state is not None and {field!r} in _deformable_observation_state:")
+                            emit(2, f"_state[{field!r}] = _deformable_observation_state[{field!r}]")
+                            emit(1, "elif _floating_base_root_state is not None and "
+                                 f"{field!r} in _floating_base_root_state:")
+                            emit(2, f"_state[{field!r}] = _floating_base_root_state[{field!r}]")
+                            emit(1, "else:")
+                            emit(2, f"_state[{field!r}] = _to_serializable({entity_var}.{getter}())")
+                        elif field in {"quat", "ang"}:
+                            emit(1, f"if _floating_base_root_state is not None and {field!r} in _floating_base_root_state:")
+                            emit(2, f"_state[{field!r}] = _floating_base_root_state[{field!r}]")
+                            emit(1, "else:")
+                            emit(2, f"_state[{field!r}] = _to_serializable({entity_var}.{getter}())")
+                        else:
+                            emit(1, f"_state[{field!r}] = _to_serializable({entity_var}.{getter}())")
 
                 emit(1, "_event = {")
                 emit(2, "'type': 'observation',")

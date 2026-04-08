@@ -1008,6 +1008,7 @@ def generate_tetgen_config_from_morph(morph):
             f"Expected an instance of a class that inherits from TetGenMixin, but got an instance of {type(morph).name}."
         )
     return dict(
+        tet_resolution=morph.tet_resolution,
         order=morph.order,
         mindihedral=morph.mindihedral,
         minratio=morph.minratio,

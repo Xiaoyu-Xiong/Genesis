@@ -11,7 +11,10 @@ from . import mesh as mu
 
 
 def box_to_elements(pos=(0, 0, 0), size=(1, 1, 1), tet_cfg=dict()):
+    resolution = _tet_resolution(tet_cfg)
     trimesh_obj = trimesh.creation.box(extents=size)
+    trimesh_obj = _subdivide_surface_mesh(trimesh_obj, resolution)
+    tet_cfg = _primitive_tet_cfg(tet_cfg, characteristic_size=max(size), resolution=resolution)
     trimesh_obj.vertices += np.array(pos)
     verts, elems = mu.tetrahedralize_mesh(trimesh_obj, tet_cfg)
 
@@ -19,7 +22,9 @@ def box_to_elements(pos=(0, 0, 0), size=(1, 1, 1), tet_cfg=dict()):
 
 
 def sphere_to_elements(pos=(0, 0, 0), radius=0.5, tet_cfg=dict()):
-    trimesh_obj = trimesh.creation.icosphere(subdivisions=3, radius=1.0)
+    resolution = _tet_resolution(tet_cfg)
+    trimesh_obj = trimesh.creation.icosphere(subdivisions=max(1, resolution), radius=1.0)
+    tet_cfg = _primitive_tet_cfg(tet_cfg, characteristic_size=2.0 * radius, resolution=resolution)
     trimesh_obj.vertices *= np.array(radius)
     trimesh_obj.vertices += np.array(pos)
     verts, elems = mu.tetrahedralize_mesh(trimesh_obj, tet_cfg)
@@ -27,8 +32,16 @@ def sphere_to_elements(pos=(0, 0, 0), radius=0.5, tet_cfg=dict()):
     return verts, elems
 
 
-def cylinder_to_elements():
-    raise NotImplementedError
+def cylinder_to_elements(pos=(0, 0, 0), radius=0.5, height=1.0, tet_cfg=dict()):
+    resolution = _tet_resolution(tet_cfg)
+    sections = max(16, 8 * resolution)
+    trimesh_obj = trimesh.creation.cylinder(radius=radius, height=height, sections=sections)
+    trimesh_obj = _subdivide_surface_mesh(trimesh_obj, resolution)
+    tet_cfg = _primitive_tet_cfg(tet_cfg, characteristic_size=max(2.0 * radius, height), resolution=resolution)
+    trimesh_obj.vertices += np.array(pos)
+    verts, elems = mu.tetrahedralize_mesh(trimesh_obj, tet_cfg)
+
+    return verts, elems
 
 
 def mesh_to_elements(file, pos=(0, 0, 0), scale=1.0, tet_cfg=dict()):
@@ -98,3 +111,23 @@ def split_all_surface_tets(verts, elems):
     # remove the bad elements from the original elements
     elems = np.concatenate([elems[~all_on_surface], new_elems], axis=0)
     return verts, elems
+
+
+def _tet_resolution(tet_cfg: dict) -> int:
+    return max(1, int(tet_cfg.get("tet_resolution", 3)))
+
+
+def _subdivide_surface_mesh(mesh: trimesh.Trimesh, resolution: int) -> trimesh.Trimesh:
+    refined = mesh
+    for _ in range(max(0, resolution - 1)):
+        refined = refined.subdivide()
+    return refined
+
+
+def _primitive_tet_cfg(tet_cfg: dict, *, characteristic_size: float, resolution: int) -> dict:
+    cfg = dict(tet_cfg)
+    if float(cfg.get("maxvolume", -1.0)) > 0:
+        return cfg
+    target_edge = float(characteristic_size) / float(max(2, 2 * resolution + 1))
+    cfg["maxvolume"] = max((target_edge**3) / 6.0, 1e-9)
+    return cfg

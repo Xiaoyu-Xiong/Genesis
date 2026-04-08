@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..ir_schema import RigidIR
 from ..llm_generator.constraints.general_constraints import parse_sanitize_validate
-from .overrides import GeneratorParameterOverrides, apply_generator_parameter_overrides
+from .overrides import apply_system_defaults
 from .program_constraints import validate_program_constraints
 from .tool_specs import (
     build_generation_bootstrap_payload,
@@ -39,7 +39,6 @@ class GeneralIRAgentToolLibrary:
         mesh_task_default: str | None = None,
         target_sim_duration_sec: float | None = None,
         sim_duration_tolerance_sec: float = 0.75,
-        parameter_overrides: GeneratorParameterOverrides | None = None,
     ) -> None:
         self.required_shape_kind = required_shape_kind
         self.required_shape_file = required_shape_file
@@ -51,7 +50,6 @@ class GeneralIRAgentToolLibrary:
         self.mesh_task_default = mesh_task_default
         self.target_sim_duration_sec = target_sim_duration_sec
         self.sim_duration_tolerance_sec = sim_duration_tolerance_sec
-        self.parameter_overrides = parameter_overrides
         self._generated_xml_results_by_body: dict[str, XMLGenerationResult] = {}
         self._generated_mesh_results_by_body: dict[str, MeshGenerationResult] = {}
         self.generated_xml_shape_files_by_body: dict[str, str] = {}
@@ -165,7 +163,7 @@ class GeneralIRAgentToolLibrary:
         target_sim_duration_sec: float | None = None,
         sim_duration_tolerance_sec: float | None = None,
     ) -> list[str]:
-        program = self.apply_parameter_overrides(program)
+        program = self.apply_system_defaults(program)
         return validate_program_constraints(
             program,
             required_shape_kind=self.required_shape_kind,
@@ -194,8 +192,8 @@ class GeneralIRAgentToolLibrary:
     def generated_mesh_results_by_body(self) -> dict[str, MeshGenerationResult]:
         return dict(self._generated_mesh_results_by_body)
 
-    def apply_parameter_overrides(self, program: RigidIR) -> RigidIR:
-        return apply_generator_parameter_overrides(program, self.parameter_overrides)
+    def apply_system_defaults(self, program: RigidIR) -> RigidIR:
+        return apply_system_defaults(program)
 
     @staticmethod
     def _parse_arguments(arguments_json: str | None) -> dict[str, Any]:
@@ -219,7 +217,6 @@ class GeneralIRAgentToolLibrary:
             generated_xml_paths_by_body=self.generated_xml_shape_files_by_body,
             mesh_generation_enabled=self.mesh_generation_fn is not None,
             generated_mesh_paths_by_body=self.generated_mesh_shape_files_by_body,
-            parameter_overrides=self.parameter_overrides,
         )
 
     def _generate_articulated_xml(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -385,5 +382,5 @@ class GeneralIRAgentToolLibrary:
         if errors:
             return {"ok": False, "errors": errors}
 
-        program = self.apply_parameter_overrides(program)
+        program = self.apply_system_defaults(program)
         return {"ok": True, "errors": [], "normalized_ir": program.model_dump(mode="json")}

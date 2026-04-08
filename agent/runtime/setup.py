@@ -3,9 +3,10 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from ..defaults import DEFAULTS
 from ..ir_schema import RigidIR
 from .actuators import configure_actuators
-from .builders import apply_collision_overrides, build_body_morph, build_rigid_material
+from .builders import apply_collision_overrides, build_body_material, build_body_morph, build_rigid_material
 from .helpers import get_follow_target_entity
 from .models import RuntimeContext, RuntimeState
 
@@ -38,6 +39,7 @@ def configure_headless_if_needed(program: RigidIR) -> None:
 
 def ensure_genesis_initialized(gs: Any, program: RigidIR) -> None:
     requested_backend = gs.cpu if program.scene.backend == "cpu" else gs.gpu
+    has_deformable_bodies = any(body.is_deformable for body in program.bodies)
     if getattr(gs, "_initialized", False):
         active_backend = getattr(gs, "backend", None)
         # if active_backend != requested_backend:
@@ -46,7 +48,10 @@ def ensure_genesis_initialized(gs: Any, program: RigidIR) -> None:
         #         f"Active backend={active_backend}, requested backend={requested_backend}."
         #     )
         return
-    gs.init(backend=requested_backend)
+    init_kwargs: dict[str, Any] = {"backend": requested_backend}
+    if has_deformable_bodies:
+        init_kwargs["precision"] = DEFAULTS.deformable.genesis_precision
+    gs.init(**init_kwargs)
 
 
 def create_runtime_context(gs: Any, program: RigidIR) -> RuntimeContext:
@@ -59,14 +64,27 @@ def create_runtime_context(gs: Any, program: RigidIR) -> RuntimeContext:
             camera_fov=viewer.camera_fov,
         )
 
-    scene = gs.Scene(
-        sim_options=gs.options.SimOptions(
+    has_deformable_bodies = any(body.is_deformable for body in program.bodies)
+    scene_kwargs: dict[str, Any] = {
+        "sim_options": gs.options.SimOptions(
             dt=program.scene.sim.dt,
             gravity=tuple(program.scene.sim.gravity),
         ),
-        viewer_options=viewer_options,
-        show_viewer=program.scene.show_viewer,
-    )
+        "viewer_options": viewer_options,
+        "show_viewer": program.scene.show_viewer,
+    }
+    if has_deformable_bodies:
+        scene_kwargs["pbd_options"] = gs.options.PBDOptions(
+            particle_size=DEFAULTS.deformable.particle_size,
+            max_stretch_solver_iterations=DEFAULTS.deformable.max_stretch_solver_iterations,
+            max_bending_solver_iterations=DEFAULTS.deformable.max_bending_solver_iterations,
+            max_volume_solver_iterations=DEFAULTS.deformable.max_volume_solver_iterations,
+            max_density_solver_iterations=DEFAULTS.deformable.max_density_solver_iterations,
+            max_viscosity_solver_iterations=DEFAULTS.deformable.max_viscosity_solver_iterations,
+            lower_bound=DEFAULTS.deformable.lower_bound,
+            upper_bound=DEFAULTS.deformable.upper_bound,
+        )
+    scene = gs.Scene(**scene_kwargs)
 
     render = program.scene.render
     camera = None
@@ -89,18 +107,32 @@ def create_runtime_context(gs: Any, program: RigidIR) -> RuntimeContext:
             "morph": gs.morphs.Plane(),
             "name": "ground",
         }
-        ground_material = build_rigid_material(gs, rho=None, collision=program.scene.ground_collision)
-        if ground_material is not None:
-            ground_kwargs["material"] = ground_material
+        if has_deformable_bodies:
+            friction = (
+                program.scene.ground_collision.friction
+                if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
+                else None
+            )
+            ground_kwargs["material"] = gs.materials.Rigid(friction=friction, needs_coup=False)
+        else:
+            ground_material = build_rigid_material(gs, rho=None, collision=program.scene.ground_collision)
+            if ground_material is not None:
+                ground_kwargs["material"] = ground_material
         entities["ground"] = scene.add_entity(**ground_kwargs)
+    elif has_deformable_bodies and render is not None:
+        scene.add_entity(
+            morph=gs.morphs.Plane(collision=False),
+            name="_visual_ground",
+        )
 
     for body in program.bodies:
         add_entity_kwargs: dict[str, Any] = {
             "morph": build_body_morph(gs, body),
-            "visualize_contact": body.visualize_contact,
             "name": body.name,
         }
-        body_material = build_rigid_material(gs, rho=body.rho, collision=body.collision)
+        if not body.is_deformable:
+            add_entity_kwargs["visualize_contact"] = body.visualize_contact
+        body_material = build_body_material(gs, body)
         if body_material is not None:
             add_entity_kwargs["material"] = body_material
         body_entity = scene.add_entity(**add_entity_kwargs)
@@ -118,11 +150,16 @@ def create_runtime_context(gs: Any, program: RigidIR) -> RuntimeContext:
 
 def build_runtime_context(program: RigidIR, runtime: RuntimeContext, state: RuntimeState) -> None:
     for body in program.bodies:
-        apply_collision_overrides(runtime.body_entities[body.name], body.collision)
+        if not body.is_deformable:
+            apply_collision_overrides(runtime.body_entities[body.name], body.collision)
     if program.scene.add_ground:
         apply_collision_overrides(runtime.entities["ground"], program.scene.ground_collision)
     state.actuators_by_entity = {
-        body.name: configure_actuators(runtime.body_entities[body.name], body.actuators)
+        body.name: (
+            configure_actuators(runtime.body_entities[body.name], body.actuators)
+            if body.is_articulated
+            else {}
+        )
         for body in program.bodies
     }
     _configure_follow_camera(program, runtime)

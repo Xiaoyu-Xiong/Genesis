@@ -308,7 +308,7 @@ def generate_ir_with_tool_agent(
             if successful_validate_result is not None:
                 try:
                     program = parse_sanitize_validate(successful_validate_result["normalized_ir"], normalize=normalize)
-                    program = tool_library.apply_parameter_overrides(program)
+                    program = tool_library.apply_system_defaults(program)
                     constraint_errors = tool_library.validate_program_constraints(program)
                     if constraint_errors:
                         raise ValueError("; ".join(constraint_errors))
@@ -338,7 +338,7 @@ def generate_ir_with_tool_agent(
         try:
             payload = extract_first_json_object(assistant_content)
             program = parse_sanitize_validate(payload, normalize=normalize)
-            program = tool_library.apply_parameter_overrides(program)
+            program = tool_library.apply_system_defaults(program)
             constraint_errors = tool_library.validate_program_constraints(program)
             if constraint_errors:
                 raise ValueError("; ".join(constraint_errors))

@@ -162,6 +162,12 @@ class SAPCouplerOptions(BaseCouplerOptions):
         Vert would be preferable when the mesh is very coarse, such as a single cube or a tetrahedron.
     enable_rigid_fem_contact : bool, optional
         Whether to enable coupling between rigid and FEM solvers. Defaults to True.
+    contact_candidate_capacity_scale : int, optional
+        Multiplier applied to SAP contact-candidate buffer capacities. Increase this for very dense contact scenes
+        if SAP contact query buffers overflow. Defaults to 1.
+    contact_pair_capacity_scale : int, optional
+        Multiplier applied to SAP finalized contact-pair buffer capacities. Increase this for very dense contact scenes
+        if SAP finalized contact buffers overflow. Defaults to 1.
     """
 
     n_sap_iterations: PositiveInt = 5
@@ -182,6 +188,8 @@ class SAPCouplerOptions(BaseCouplerOptions):
     rigid_floor_contact_type: Literal["tet", "vert", "none"] = "tet"
     enable_rigid_fem_contact: StrictBool = True
     rigid_rigid_contact_type: Literal["tet", "vert", "none"] = "tet"
+    contact_candidate_capacity_scale: PositiveInt = 1
+    contact_pair_capacity_scale: PositiveInt = 1
 
 
 class IPCCouplerOptions(BaseCouplerOptions):

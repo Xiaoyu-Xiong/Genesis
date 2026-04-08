@@ -3,6 +3,7 @@ import numpy as np
 import trimesh
 
 import genesis as gs
+import genesis.utils.element as eu
 import genesis.utils.geom as gu
 import genesis.utils.mesh as mu
 from genesis.engine.entities.particle_entity import ParticleEntity
@@ -516,7 +517,25 @@ class PBD3DEntity(PBDTetEntity):
         self._mass = self._vmesh.volume * self.material.rho
 
         tet_cfg = mu.generate_tetgen_config_from_morph(self.morph)
-        particles, elems, *_ = self._mesh.tetrahedralize(tet_cfg)
+        if isinstance(self._morph, gs.options.morphs.Box):
+            particles, elems = eu.box_to_elements(pos=(0.0, 0.0, 0.0), size=tuple(self._morph.size), tet_cfg=tet_cfg)
+            particles = gu.transform_by_quat(particles, np.asarray(self._morph.quat, dtype=gs.np_float))
+            particles = particles + np.asarray(self._morph.pos, dtype=gs.np_float)
+        elif isinstance(self._morph, gs.options.morphs.Sphere):
+            particles, elems = eu.sphere_to_elements(pos=(0.0, 0.0, 0.0), radius=float(self._morph.radius), tet_cfg=tet_cfg)
+            particles = gu.transform_by_quat(particles, np.asarray(self._morph.quat, dtype=gs.np_float))
+            particles = particles + np.asarray(self._morph.pos, dtype=gs.np_float)
+        elif isinstance(self._morph, gs.options.morphs.Cylinder):
+            particles, elems = eu.cylinder_to_elements(
+                pos=(0.0, 0.0, 0.0),
+                radius=float(self._morph.radius),
+                height=float(self._morph.height),
+                tet_cfg=tet_cfg,
+            )
+            particles = gu.transform_by_quat(particles, np.asarray(self._morph.quat, dtype=gs.np_float))
+            particles = particles + np.asarray(self._morph.pos, dtype=gs.np_float)
+        else:
+            particles, elems, *_ = self._mesh.tetrahedralize(tet_cfg)
         self._particles = particles.astype(gs.np_float, copy=False)
         self._init_particles_offset = gs.tensor(self._particles) - gs.tensor(self._morph.pos)
 

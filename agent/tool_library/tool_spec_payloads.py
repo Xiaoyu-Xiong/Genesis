@@ -2,15 +2,22 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..defaults import DEFAULTS
 from ..ir_schema import IR_VERSION, RigidIR
 from ..llm_generator.constraints.general_constraints import ALLOWED_OBSERVE_FIELDS, default_render_config
-from .overrides import GeneratorParameterOverrides
 from .tool_spec_rules import (
     ARTICULATED_BODY_MESH_POLICY,
     ARTICULATED_BODY_XML_POLICY,
     ARTICULATED_DECISION_POLICY,
     BODY_COUNT_POLICY,
     BODY_NAMING_POLICY,
+    DEFORMABLE_ACTION_POLICY,
+    DEFORMABLE_BODY_POLICY,
+    DEFORMABLE_GEOMETRY_POLICY,
+    DEFORMABLE_MATERIAL_POLICY,
+    DEFORMABLE_MESH_ASSET_POLICY,
+    DEFORMABLE_OBSERVE_POLICY,
+    DEFORMABLE_SCENE_POLICY,
     DYNAMIC_SCENE_POLICY,
     FIXED_BODY_NOTE,
     IR_CONCISENESS_POLICY,
@@ -35,17 +42,12 @@ def build_generation_guide_payload(
     generated_xml_paths_by_body: dict[str, str] | None,
     mesh_generation_enabled: bool = False,
     generated_mesh_paths_by_body: dict[str, str] | None = None,
-    parameter_overrides: GeneratorParameterOverrides | None = None,
 ) -> dict[str, Any]:
-    effective_dt = 0.01 if parameter_overrides is None or parameter_overrides.sim_dt is None else parameter_overrides.sim_dt
+    effective_dt = DEFAULTS.runtime.sim_dt
     effective_render = default_render_config()
-    if parameter_overrides is not None:
-        if parameter_overrides.render_every_n_steps is not None:
-            effective_render["render_every_n_steps"] = parameter_overrides.render_every_n_steps
-        if parameter_overrides.render_res is not None:
-            effective_render["res"] = list(parameter_overrides.render_res)
-        if parameter_overrides.sim_dt is not None and parameter_overrides.render_every_n_steps is not None:
-            effective_render["fps"] = max(1, int(round(1.0 / (effective_dt * effective_render["render_every_n_steps"]))))
+    effective_render["render_every_n_steps"] = DEFAULTS.runtime.render_every_n_steps
+    effective_render["res"] = list(DEFAULTS.runtime.render_res)
+    effective_render["fps"] = max(1, min(240, int(round(1.0 / (effective_dt * DEFAULTS.runtime.render_every_n_steps)))))
 
     constraints = _build_constraints(
         required_shape_kind=required_shape_kind,
@@ -59,7 +61,6 @@ def build_generation_guide_payload(
         generated_xml_paths_by_body=generated_xml_paths_by_body,
         mesh_generation_enabled=mesh_generation_enabled,
         generated_mesh_paths_by_body=generated_mesh_paths_by_body,
-        parameter_overrides=parameter_overrides,
     )
     templates = _build_templates(effective_dt=effective_dt, effective_render=effective_render)
     return {"ok": True, "mode": "general_rigid_scene", "constraints": constraints, "templates": templates}
@@ -69,13 +70,30 @@ def build_observation_field_guide_payload() -> dict[str, Any]:
     return {
         "ok": True,
         "fields": {
-            "pos": {"meaning": "world-frame position of body origin", "dimension": 3},
+            "pos": {
+                "meaning": "world-frame position of the body origin for rigid bodies, or center-of-mass position for deformable PBD bodies",
+                "dimension": 3,
+            },
             "quat": {"meaning": "world-frame orientation quaternion (w,x,y,z)", "dimension": 4},
-            "vel": {"meaning": "world-frame linear velocity", "dimension": 3},
+            "vel": {
+                "meaning": "world-frame linear velocity for rigid bodies, or center-of-mass average velocity for deformable PBD bodies",
+                "dimension": 3,
+            },
             "ang": {"meaning": "world-frame angular velocity", "dimension": 3},
             "qpos": {"meaning": "generalized joint position state (articulated only)", "dimension": "N"},
             "dofs_position": {"meaning": "local dof positions (articulated only)", "dimension": "N"},
             "dofs_velocity": {"meaning": "local dof velocities (articulated only)", "dimension": "N"},
+            "bbox_min": {"meaning": "axis-aligned bounding box minimum corner for the current body state", "dimension": 3},
+            "bbox_max": {"meaning": "axis-aligned bounding box maximum corner for the current body state", "dimension": 3},
+            "bbox_size": {"meaning": "axis-aligned bounding box size for the current body state", "dimension": 3},
+            "vertex_disp_mean": {
+                "meaning": "mean vertex displacement magnitude relative to the deformable body's initial configuration",
+                "dimension": 1,
+            },
+            "vertex_disp_max": {
+                "meaning": "maximum vertex displacement magnitude relative to the deformable body's initial configuration",
+                "dimension": 1,
+            },
         },
     }
 
@@ -97,7 +115,6 @@ def build_generation_bootstrap_payload(
     generated_xml_paths_by_body: dict[str, str] | None,
     mesh_generation_enabled: bool = False,
     generated_mesh_paths_by_body: dict[str, str] | None = None,
-    parameter_overrides: GeneratorParameterOverrides | None = None,
 ) -> dict[str, Any]:
     return {
         "ok": True,
@@ -113,7 +130,6 @@ def build_generation_bootstrap_payload(
             generated_xml_paths_by_body=generated_xml_paths_by_body,
             mesh_generation_enabled=mesh_generation_enabled,
             generated_mesh_paths_by_body=generated_mesh_paths_by_body,
-            parameter_overrides=parameter_overrides,
         ),
         "observation_field_guide": build_observation_field_guide_payload(),
         "schema": build_schema_payload()["schema"],
@@ -133,11 +149,11 @@ def _build_constraints(
     generated_xml_paths_by_body: dict[str, str] | None,
     mesh_generation_enabled: bool,
     generated_mesh_paths_by_body: dict[str, str] | None,
-    parameter_overrides: GeneratorParameterOverrides | None,
 ) -> dict[str, Any]:
     constraints: dict[str, Any] = {
         "ir_version": IR_VERSION,
         "allowed_shape_kinds": ["sphere", "box", "cylinder", "mesh", "mjcf", "urdf"],
+        "supported_simulation_kinds": ["rigid", "pbd"],
         "multi_body_supported": True,
         "multi_articulated_supported": True,
         "root_structure_note": ROOT_STRUCTURE_NOTE,
@@ -150,6 +166,13 @@ def _build_constraints(
         "mesh_reuse_policy": MESH_REUSE_POLICY,
         "mesh_local_frame_policy": MESH_LOCAL_FRAME_POLICY,
         "articulated_body_mesh_policy": ARTICULATED_BODY_MESH_POLICY,
+        "deformable_body_policy": DEFORMABLE_BODY_POLICY,
+        "deformable_geometry_policy": DEFORMABLE_GEOMETRY_POLICY,
+        "deformable_material_policy": DEFORMABLE_MATERIAL_POLICY,
+        "deformable_action_policy": DEFORMABLE_ACTION_POLICY,
+        "deformable_observe_policy": DEFORMABLE_OBSERVE_POLICY,
+        "deformable_mesh_asset_policy": DEFORMABLE_MESH_ASSET_POLICY,
+        "deformable_scene_policy": DEFORMABLE_SCENE_POLICY,
         "ir_conciseness_policy": IR_CONCISENESS_POLICY,
         "dynamic_scene_policy": DYNAMIC_SCENE_POLICY,
         "fixed_body_support": True,
@@ -169,7 +192,7 @@ def _build_constraints(
             ),
         },
         "allowed_observe_fields": sorted(ALLOWED_OBSERVE_FIELDS),
-        "backend_default": "cpu",
+        "backend_default": DEFAULTS.optimization.backend,
         "show_viewer_default": False,
         "render_required": True,
         "default_render_enabled": True,
@@ -204,18 +227,14 @@ def _build_constraints(
             },
         }
     constraints["pre_sim_only_actions"] = ["set_pose", "set_dofs_position", "set_dofs_velocity"]
-    if parameter_overrides is not None:
-        constraints["fixed_parameter_overrides"] = parameter_overrides.as_dict()
-        constraints["fixed_parameter_override_policy"] = (
-            "These parameters are fixed by the system. Treat them as hard constraints and do not try to "
-            "change or work around them."
-        )
     constraints["parameter_notes"] = _build_parameter_notes()
     constraints["parameter_relationship_notes"] = _build_parameter_relationship_notes()
     if target_sim_duration_sec is not None:
         constraints["target_sim_duration_sec"] = target_sim_duration_sec
         constraints["sim_duration_tolerance_sec"] = duration_tolerance_sec
-        constraints["sim_duration_definition"] = "sim_duration_sec = final_step * scene.sim.dt"
+        constraints["sim_duration_definition"] = (
+            "sim_duration_sec is determined by final_step under the system simulation timestep."
+        )
     constraints["xml_generation_is_available"] = xml_generation_enabled
     constraints["mesh_generation_is_available"] = mesh_generation_enabled
     if generated_xml_paths_by_body is not None:
@@ -238,10 +257,10 @@ def _build_parameter_notes() -> dict[str, str]:
             "Impact bounciness. Higher values create more rebound and usually make contact behavior less stable."
         ),
         "scene.ground_collision.friction": (
-            "Contact friction coefficient. Higher values resist sliding more strongly, but do not guarantee perfectly non-slipping contact."
+            "Contact friction coefficient. Higher values resist sliding more strongly, but do not guarantee perfectly non-slipping contact. Use 0.8 as a reasonable default."
         ),
         "bodies[].collision.friction": (
-            "Contact friction coefficient. Higher values resist sliding more strongly, but do not guarantee perfectly non-slipping contact."
+            "Contact friction coefficient. Higher values resist sliding more strongly, but do not guarantee perfectly non-slipping contact. Use 0.8 as a reasonable default."
         ),
         "bodies[].rho": (
             "Material density. Higher rho makes the body heavier and increases inertia, but does not change geometric size."
@@ -251,8 +270,8 @@ def _build_parameter_notes() -> dict[str, str]:
             "task-level motion design."
         ),
         "bodies[].fixed": (
-            "Whether a body is fixed in the world. Use this for primitive, mesh, or URDF obstacles, tables, and props "
-            "that should not fall under gravity. For MJCF, express a fixed base in the XML itself."
+            "Whether a rigid body is fixed in the world. Use this for rigid primitive, rigid mesh, or URDF obstacles, "
+            "tables, and props that should not fall under gravity. For MJCF, express a fixed base in the XML itself."
         ),
         "bodies[].actuators[].kp": (
             "Position-control stiffness. Increasing kp makes tracking more aggressive, but if it is too large the "
@@ -271,6 +290,22 @@ def _build_parameter_notes() -> dict[str, str]:
         ),
         "SetTorqueActionIR.values": (
             "Direct force/torque commands for motor actuators. These do not provide position tracking on their own."
+        ),
+        "bodies[].simulation_kind": (
+            "Choose `pbd` when soft-body deformation visually makes the task closer to the prompt. Otherwise prefer `rigid`."
+        ),
+        "bodies[].deformable_material.stretch_compliance": (
+            "PBD stretch compliance. Lower values make the soft body stiffer in edge-length preservation; higher "
+            "values make it stretch and sag more easily. Very stiff elastic solids are often around 1e-8 to 1e-6, "
+            "softer jelly-like solids around 1e-6 to 1e-4, and very floppy bodies can go higher. If the body is too "
+            "floppy, decrease this value by about 3x to 10x; if it is too rigid, increase it by about 3x to 10x. Use 1e-4 as default for a moderately soft material with clearly visible deformation."
+        ),
+        "bodies[].deformable_material.volume_compliance": (
+            "PBD volume compliance. Lower values preserve volume more strongly; higher values allow more compression. "
+            "If the body collapses or squashes too much, decrease this value; if it stays too incompressible, increase it. Use 1e-5 as default for visibly compressible but not completely mushy behavior."
+        ),
+        "bodies[].deformable_material.rho": (
+            "Density for PBD elastic bodies. Larger values make the soft body heavier without changing its geometry."
         ),
         "ApplyExternalWrenchActionIR.force": (
             "External force disturbance applied to a body or selected links. It is not an actuator command. Its "
@@ -327,7 +362,7 @@ def _build_parameter_relationship_notes() -> dict[str, str]:
 def _build_templates(*, effective_dt: float, effective_render: dict[str, Any]) -> dict[str, Any]:
     return {
         "minimal_scene": {
-            "backend": "cpu",
+            "backend": DEFAULTS.optimization.backend,
             "show_viewer": False,
             "add_ground": True,
             "sim": {"dt": effective_dt, "gravity": [0.0, 0.0, -9.81]},
@@ -350,6 +385,25 @@ def _build_templates(*, effective_dt: float, effective_render: dict[str, Any]) -
             "fixed": True,
             "shape": {"kind": "mesh", "file": "path/to/tray.obj", "scale": 1.0},
             "initial_pose": {"pos": [0.8, 0.0, 0.12], "quat": [1.0, 0.0, 0.0, 0.0]},
+        },
+        "deformable_body_example": {
+            "name": "soft_cylinder",
+            "simulation_kind": "pbd",
+            "shape": {"kind": "cylinder", "radius": 0.08, "height": 0.24},
+            "deformable_material": {
+                "kind": "elastic",
+                "rho": 1100.0,
+                "stretch_compliance": 1e-4,
+                "volume_compliance": 1e-5
+            },
+            "initial_pose": {"pos": [0.0, 0.0, 0.4], "quat": [1.0, 0.0, 0.0, 0.0]},
+        },
+        "deformable_scene_example": {
+            "backend": DEFAULTS.optimization.backend,
+            "show_viewer": False,
+            "add_ground": True,
+            "sim": {"dt": effective_dt, "gravity": [0.0, 0.0, -9.81]},
+            "render": effective_render,
         },
         "mesh_reuse_example": [
             {
@@ -405,6 +459,12 @@ def _build_templates(*, effective_dt: float, effective_render: dict[str, Any]) -
             "entity": ["striker", "domino_01", "domino_02"],
             "fields": ["pos", "quat", "vel", "ang"],
             "tag": "early_state_multi",
+        },
+        "deformable_observe_example": {
+            "op": "observe",
+            "entity": "soft_cylinder",
+            "fields": ["pos", "vel", "bbox_size", "vertex_disp_max"],
+            "tag": "soft_response",
         },
         "shapes": {
             "sphere": {"kind": "sphere", "radius": 0.2},

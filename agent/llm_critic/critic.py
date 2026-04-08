@@ -5,7 +5,6 @@ from pathlib import Path
 
 from ..io_utils import load_json_object
 from ..llm_generator.client import OpenAIRequestError, OpenAIResponsesClient, coerce_content_to_text
-from ..tool_library import GeneratorParameterOverrides
 from .digest import (
     build_compact_input_digest,
     build_input_digest,
@@ -38,7 +37,6 @@ class CriticEvaluationInput:
     sample_every_sec: float = 0.5
     max_frames: int = 24
     max_width: int = 640
-    generator_parameter_overrides: GeneratorParameterOverrides | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -83,7 +81,6 @@ def evaluate_prompt_event_video(
             video_duration_sec=video_duration_sec,
             sample_every_sec=eval_input.sample_every_sec,
             max_frames=eval_input.max_frames,
-            parameter_overrides=eval_input.generator_parameter_overrides,
         )
         content = build_compact_critic_user_content(
             task=eval_input.task,
@@ -103,7 +100,6 @@ def evaluate_prompt_event_video(
             video_duration_sec=video_duration_sec,
             sample_every_sec=eval_input.sample_every_sec,
             max_frames=eval_input.max_frames,
-            parameter_overrides=eval_input.generator_parameter_overrides,
         )
         content = build_critic_user_content(
             task=eval_input.task,

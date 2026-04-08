@@ -6,7 +6,7 @@ from typing import Any
 
 from ..ir_schema import RigidIR, parse_ir_payload
 
-LLM_EVENT_PACK_VERSION = "genesis.rigid.event_pack.v1"
+LLM_EVENT_PACK_VERSION = "genesis.rigid.event_pack.v2"
 
 
 def _is_number(value: Any) -> bool:
@@ -64,6 +64,11 @@ def _event_derived(event: Mapping[str, Any]) -> dict[str, Any]:
     qpos = _as_float_list(state.get("qpos"))
     dofs_position = _as_float_list(state.get("dofs_position"))
     dofs_velocity = _as_float_list(state.get("dofs_velocity"))
+    bbox_min = _as_float_list(state.get("bbox_min"))
+    bbox_max = _as_float_list(state.get("bbox_max"))
+    bbox_size = _as_float_list(state.get("bbox_size"))
+    deformation_mean = float(state["vertex_disp_mean"]) if _is_number(state.get("vertex_disp_mean")) else None
+    deformation_max = float(state["vertex_disp_max"]) if _is_number(state.get("vertex_disp_max")) else None
 
     contacts = event.get("contacts", {})
     contact_count = None
@@ -78,12 +83,19 @@ def _event_derived(event: Mapping[str, Any]) -> dict[str, Any]:
         "dofs_position_l2_norm": _vec_norm(dofs_position),
         "dofs_velocity_l2_norm": _vec_norm(dofs_velocity),
         "contact_count": contact_count,
+        "bbox_height": bbox_size[2] if bbox_size is not None and len(bbox_size) >= 3 else None,
+        "deformation_mean": deformation_mean,
+        "deformation_max": deformation_max,
     }
     if quat is not None and len(quat) >= 4:
         derived["quat_w"] = quat[0]
     if qpos is not None:
         derived["qpos_l2_norm"] = _vec_norm(qpos)
         derived["qpos_dim"] = len(qpos)
+    if bbox_min is not None:
+        derived["bbox_min_norm"] = _vec_norm(bbox_min)
+    if bbox_max is not None:
+        derived["bbox_max_norm"] = _vec_norm(bbox_max)
     return _clean_none_fields(derived)
 
 

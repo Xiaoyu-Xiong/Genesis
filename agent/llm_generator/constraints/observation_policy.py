@@ -3,7 +3,20 @@ from __future__ import annotations
 from ...ir_schema import ObserveActionIR, RigidIR, StepActionIR
 from .payload_normalization import GeneralIRValidationError
 
-ALLOWED_OBSERVE_FIELDS = {"pos", "quat", "vel", "ang", "qpos", "dofs_position", "dofs_velocity"}
+ALLOWED_OBSERVE_FIELDS = {
+    "pos",
+    "quat",
+    "vel",
+    "ang",
+    "qpos",
+    "dofs_position",
+    "dofs_velocity",
+    "bbox_min",
+    "bbox_max",
+    "bbox_size",
+    "vertex_disp_mean",
+    "vertex_disp_max",
+}
 
 
 def validate_observation_policy(program: RigidIR) -> None:

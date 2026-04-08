@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..defaults import DEFAULTS
 from ..ir_schema import (
     BodyIR,
     BoxShapeIR,
@@ -9,6 +10,7 @@ from ..ir_schema import (
     CylinderShapeIR,
     MJCFShapeIR,
     MeshShapeIR,
+    PBDElasticMaterialIR,
     SphereShapeIR,
     URDFShapeIR,
 )
@@ -20,13 +22,23 @@ def build_body_morph(gs: Any, body: BodyIR) -> Any:
     pos = tuple(pose.pos)
     quat = tuple(pose.quat)
     fixed = body.fixed
+    tet_kwargs: dict[str, Any] = {}
+    if body.is_deformable:
+        tet_kwargs["tet_resolution"] = DEFAULTS.deformable.tet_resolution
 
     if isinstance(shape, SphereShapeIR):
-        return gs.morphs.Sphere(radius=shape.radius, pos=pos, quat=quat, fixed=fixed)
+        return gs.morphs.Sphere(radius=shape.radius, pos=pos, quat=quat, fixed=fixed, **tet_kwargs)
     if isinstance(shape, BoxShapeIR):
-        return gs.morphs.Box(size=tuple(shape.size), pos=pos, quat=quat, fixed=fixed)
+        return gs.morphs.Box(size=tuple(shape.size), pos=pos, quat=quat, fixed=fixed, **tet_kwargs)
     if isinstance(shape, CylinderShapeIR):
-        return gs.morphs.Cylinder(radius=shape.radius, height=shape.height, pos=pos, quat=quat, fixed=fixed)
+        return gs.morphs.Cylinder(
+            radius=shape.radius,
+            height=shape.height,
+            pos=pos,
+            quat=quat,
+            fixed=fixed,
+            **tet_kwargs,
+        )
     if isinstance(shape, MeshShapeIR):
         return gs.morphs.Mesh(file=shape.file, scale=shape.scale, pos=pos, quat=quat, fixed=fixed)
     if isinstance(shape, MJCFShapeIR):
@@ -51,6 +63,26 @@ def build_body_morph(gs: Any, body: BodyIR) -> Any:
         )
 
     raise TypeError(f"Unsupported shape IR: {type(shape).__name__}")
+
+
+def build_body_material(gs: Any, body: BodyIR) -> Any | None:
+    if body.is_deformable:
+        material = body.deformable_material
+        if not isinstance(material, PBDElasticMaterialIR):
+            raise TypeError(f"Unsupported deformable material IR: {type(material).__name__}")
+        friction = body.collision.friction if body.collision.friction is not None else DEFAULTS.deformable.friction
+        kwargs: dict[str, Any] = {
+            "rho": material.rho,
+            "static_friction": friction,
+            "kinetic_friction": friction,
+            "stretch_compliance": material.stretch_compliance,
+            "volume_compliance": material.volume_compliance,
+            "stretch_relaxation": DEFAULTS.deformable.stretch_relaxation,
+            "bending_relaxation": DEFAULTS.deformable.bending_relaxation,
+            "volume_relaxation": DEFAULTS.deformable.volume_relaxation,
+        }
+        return gs.materials.PBD.Elastic(**kwargs)
+    return build_rigid_material(gs, rho=body.rho, collision=body.collision)
 
 
 def build_rigid_material(

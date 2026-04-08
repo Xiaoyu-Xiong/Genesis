@@ -7,6 +7,8 @@ from pydantic import Field, model_validator
 
 from .actions import (
     ActionIR,
+    ApplyExternalWrenchActionIR,
+    ObserveActionIR,
     SetDofsPositionActionIR,
     SetDofsVelocityActionIR,
     SetPoseActionIR,
@@ -37,16 +39,17 @@ class RigidIR(StrictModel):
         body_names: set[str] = set()
         bodies_by_name: dict[str, BodyIR] = {}
         actuator_kind_by_entity: dict[str, dict[str, str]] = {}
+        deformable_body_names: set[str] = set()
 
         for body in self.bodies:
             if body.name in body_names:
                 raise ValueError(f"Duplicate body name: `{body.name}`.")
             body_names.add(body.name)
             bodies_by_name[body.name] = body
-            if self.scene.add_ground and body.name == "ground":
-                raise ValueError("Body name `ground` is reserved when `scene.add_ground=true`.")
+            if body.is_deformable:
+                deformable_body_names.add(body.name)
 
-            is_articulated_shape = isinstance(body.shape, (MJCFShapeIR, URDFShapeIR))
+            is_articulated_shape = body.is_articulated
             if len(body.actuators) > 0 and not is_articulated_shape:
                 raise ValueError(f"`bodies[{body.name}].actuators` requires an articulated shape (`mjcf` or `urdf`).")
 
@@ -64,12 +67,15 @@ class RigidIR(StrictModel):
                     )
             actuator_kind_by_entity[body.name] = actuator_kind_by_name
 
+        if "ground" in body_names and self.scene.add_ground:
+            raise ValueError("Body name `ground` is reserved when `scene.add_ground=true`.")
+
         if not self.scene.add_ground and self.scene.ground_collision is not None:
             raise ValueError("`scene.ground_collision` requires `scene.add_ground=true`.")
-
         allowed_entities = set(body_names)
         if self.scene.add_ground:
             allowed_entities.add("ground")
+        rigid_observe_fields = {"pos", "quat", "vel", "ang", "qpos", "dofs_position", "dofs_velocity"}
         if self.scene.render is not None and self.scene.render.follow_entity is not None:
             follow_entity = self.scene.render.follow_entity.entity
             if follow_entity not in allowed_entities:
@@ -81,6 +87,7 @@ class RigidIR(StrictModel):
         current_step = 0
         for index, action in enumerate(self.actions):
             entity_selector = getattr(action, "entity", None)
+            selected_entities = _selected_entities(entity_selector)
             for entity in _selected_entities(entity_selector):
                 if entity not in allowed_entities:
                     raise ValueError(
@@ -133,6 +140,45 @@ class RigidIR(StrictModel):
                     raise ValueError(
                         f"Action[{index}] `{action.op}` requires a `motor` actuator, "
                         f"but actuator `{action.actuator}` on `{action.entity}` is `{actuator_kind}`."
+                    )
+            if any(entity in deformable_body_names for entity in selected_entities):
+                if isinstance(
+                    action,
+                    (
+                        SetPoseActionIR,
+                        SetDofsPositionActionIR,
+                        SetDofsVelocityActionIR,
+                        ApplyExternalWrenchActionIR,
+                        SetTargetPosActionIR,
+                        SetTorqueActionIR,
+                    ),
+                ):
+                    raise ValueError(
+                        f"Action[{index}] `{action.op}` is not supported for deformable PBD bodies in v1."
+                    )
+                if isinstance(action, ObserveActionIR):
+                    if action.include_contacts:
+                        raise ValueError(
+                            f"Action[{index}] observe on deformable PBD bodies does not support `include_contacts=true` in v1."
+                        )
+                    if any(entity not in deformable_body_names for entity in selected_entities):
+                        raise ValueError(
+                            f"Action[{index}] observe cannot mix deformable PBD bodies with rigid bodies in one "
+                            "multi-entity observation because their supported fields differ."
+                        )
+                    allowed_deformable_fields = {"pos", "vel", "bbox_min", "bbox_max", "bbox_size", "vertex_disp_mean", "vertex_disp_max"}
+                    invalid_fields = [field for field in action.fields if field not in allowed_deformable_fields]
+                    if invalid_fields:
+                        raise ValueError(
+                            f"Action[{index}] observe on deformable PBD bodies cannot use fields {invalid_fields}. "
+                            f"Allowed fields: {sorted(allowed_deformable_fields)}."
+                        )
+            elif isinstance(action, ObserveActionIR):
+                invalid_fields = [field for field in action.fields if field not in rigid_observe_fields]
+                if invalid_fields:
+                    raise ValueError(
+                        f"Action[{index}] observe on rigid bodies cannot use fields {invalid_fields}. "
+                        f"These fields are deformable-only."
                     )
             if hasattr(action, "steps"):
                 current_step += int(action.steps)

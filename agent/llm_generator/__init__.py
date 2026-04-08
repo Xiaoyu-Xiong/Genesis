@@ -17,13 +17,12 @@ from .agents import (
 )
 from .client import OpenAIRequestError, OpenAIResponsesClient
 from .constraints import GeneralIRValidationError
-from ..tool_library import GeneralIRAgentToolLibrary, GeneratorParameterOverrides
+from ..tool_library import GeneralIRAgentToolLibrary
 
 __all__ = [
     "OpenAIResponsesClient",
     "OpenAIRequestError",
     "GeneralIRAgentToolLibrary",
-    "GeneratorParameterOverrides",
     "GeneralIRValidationError",
     "XMLGenerationAttemptLog",
     "XMLGenerationError",

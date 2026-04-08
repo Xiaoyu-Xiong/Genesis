@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 import fcntl
 import multiprocessing as mp
 from pathlib import Path
 from typing import Any
 
+from ..defaults import DEFAULTS
 from ..io_utils import dump_json
 from ..llm_critic import CriticEvaluationInput, evaluate_prompt_event_video
 from ..llm_generator import OpenAIResponsesClient, generate_ir_two_agent
 from ..llm_generator.constraints import parse_sanitize_validate
 from ..runtime import build_llm_event_pack, run_rigid_ir
-from ..tool_library import GeneratorParameterOverrides
 from .feedback import build_generator_feedback_package
 
 _SIMULATION_LOCK_PATH = Path(__file__).resolve().parents[1] / "runs" / ".simulation.lock"
@@ -21,35 +21,28 @@ _SIMULATION_LOCK_PATH = Path(__file__).resolve().parents[1] / "runs" / ".simulat
 
 @dataclass(slots=True)
 class OptimizationConfig:
-    model: str = "gpt-5.4"
+    model: str = DEFAULTS.optimization.model
     xml_model: str | None = None
     critic_model: str | None = None
     hosted_prompt_id: str | None = None
     hosted_prompt_version: str | None = None
     critic_hosted_prompt_id: str | None = None
     critic_hosted_prompt_version: str | None = None
-    critic_prompt_variant: str = "full"
+    critic_prompt_variant: str = DEFAULTS.optimization.critic_prompt_variant
     temperature: float | None = None
     critic_temperature: float | None = None
     reasoning_effort: str | None = None
     critic_reasoning_effort: str | None = None
-    backend: str = "cpu"
-    max_opt_rounds: int = 3
-    generator_max_rounds: int = 12
-    xml_max_attempts: int = 4
-    timeout_sec: float = 600.0
+    backend: str = DEFAULTS.optimization.backend
+    max_opt_rounds: int = DEFAULTS.optimization.max_opt_rounds
+    generator_max_rounds: int = DEFAULTS.optimization.max_attempts
+    xml_max_attempts: int = DEFAULTS.optimization.xml_max_attempts
+    timeout_sec: float = DEFAULTS.optimization.timeout_sec
     assets_dir: str = "agent/generated_assets"
     mesh_assets_dir: str = "agent/generated_meshes"
-    generator_parameter_overrides: GeneratorParameterOverrides = field(
-        default_factory=lambda: GeneratorParameterOverrides(
-            sim_dt=0.001,
-            render_every_n_steps=10,
-            render_res=(640, 480),
-        )
-    )
-    sample_every_sec: float = 0.5
-    max_frames: int = 24
-    max_width: int = 640
+    sample_every_sec: float = DEFAULTS.optimization.sample_every_sec
+    max_frames: int = DEFAULTS.optimization.max_frames
+    max_width: int = DEFAULTS.optimization.max_width
     output_root: str | None = None
     api_key_env: str = "OPENAI_API_KEY"
     base_url_env: str = "OPENAI_BASE_URL"
@@ -149,7 +142,6 @@ def optimize_prompt(
             previous_xml_texts_by_body=previous_xml_texts_by_body,
             hosted_prompt_id=config.hosted_prompt_id,
             hosted_prompt_version=config.hosted_prompt_version,
-            parameter_overrides=config.generator_parameter_overrides,
         )
 
         ir_generated = round_dir / "ir.generated.json"
@@ -205,7 +197,6 @@ def optimize_prompt(
                     sample_every_sec=config.sample_every_sec,
                     max_frames=config.max_frames,
                     max_width=config.max_width,
-                    generator_parameter_overrides=config.generator_parameter_overrides,
                 ),
                 temperature=config.critic_temperature,
                 reasoning_effort=config.critic_reasoning_effort or config.reasoning_effort,
@@ -398,7 +389,6 @@ def _generation_log_payload(result, config: OptimizationConfig) -> dict[str, Any
         "model": result.model,
         "mode": result.mode,
         "articulated_requested": result.articulated_requested,
-        "generator_parameter_overrides": config.generator_parameter_overrides.as_dict(),
         "ir_rounds": result.ir_result.rounds,
         "xml_results_by_body": {
             body_name: {
@@ -459,8 +449,8 @@ def _build_synthetic_critic_analysis(
     crash_evidence.append(f"Critic fallback reason: {error_text}")
 
     scene_fix = (
-        "Keep the fixed simulation/render overrides unchanged. Revise scene setup to avoid unstable contact "
-        "configurations, interpenetration, or impossible initial placements."
+        "Revise scene setup to avoid unstable contact configurations, interpenetration, or impossible initial "
+        "placements. Do not rely on changing simulator timing or render cadence to fix the failure."
     )
     body_fix = (
         "Revise robot geometry, joint layout, wheel axis orientation, or mass distribution so the model can step "

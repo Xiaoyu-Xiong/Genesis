@@ -4,8 +4,8 @@ ROOT_STRUCTURE_NOTE = "Use top-level `bodies` list."
 BODY_COUNT_POLICY = "Multiple bodies are allowed, including multiple articulated bodies."
 BODY_NAMING_POLICY = "Each body.name must be unique. Actions refer to bodies through the `entity` field."
 FIXED_BODY_NOTE = (
-    "Use `bodies[].fixed=true` for fixed primitive, mesh, or URDF objects such as obstacles, tables, and targets. "
-    "For MJCF bodies, encode a fixed base inside the XML itself."
+    "Use `bodies[].fixed=true` for fixed rigid primitive bodies, rigid mesh bodies, or URDF objects such as obstacles, "
+    "tables, and targets. For MJCF bodies, encode a fixed base inside the XML itself."
 )
 ARTICULATED_BODY_XML_POLICY = (
     "Each articulated body should have its own XML asset. When XML generation is used, call "
@@ -47,6 +47,39 @@ DYNAMIC_SCENE_POLICY = (
     "meaningful contact-rich interactions instead of mostly static tableaux. Favor behaviors that make the scene "
     "evolve noticeably over the requested duration."
 )
+DEFORMABLE_BODY_POLICY = (
+    "Use `simulation_kind='pbd'` when soft-body deformation will visually make the scene closer to the prompts; "
+    "otherwise prefer rigid bodies."
+)
+DEFORMABLE_GEOMETRY_POLICY = (
+    "In deformable v1, PBD bodies may only use `sphere`, `box`, `cylinder`, or `mesh` shapes."
+)
+DEFORMABLE_MATERIAL_POLICY = (
+    "In deformable v1, the only supported deformable material is PBD elastic material. When specifying it, only set "
+    "`rho`, `stretch_compliance`, and `volume_compliance`; particle size and solver iteration hyperparameters are "
+    "fixed by the system. Lower compliance makes the body stiffer; higher compliance makes it softer or more compressible. "
+    "A good default initial guess for clearly visible but still controlled softness is `stretch_compliance=1e-4` and "
+    "`volume_compliance=1e-5`."
+)
+DEFORMABLE_ACTION_POLICY = (
+    "In deformable v1, PBD bodies are passive soft bodies. Do not use actuators, `set_pose`, `set_dofs_position`, "
+    "`set_dofs_velocity`, `set_target_pos`, `set_torque`, or `apply_external_wrench` on them."
+)
+DEFORMABLE_OBSERVE_POLICY = (
+    "For PBD bodies, observe deformable-friendly fields such as `pos`, `vel`, `bbox_min`, `bbox_max`, `bbox_size`, "
+    "`vertex_disp_mean`, and `vertex_disp_max` instead of rigid-only pose/joint fields. Do not mix deformable and "
+    "rigid bodies in the same multi-entity `observe` action, and do not use `include_contacts=true` on deformable "
+    "bodies in v1."
+)
+DEFORMABLE_MESH_ASSET_POLICY = (
+    "Do not call the mesh generation tool to create deformable geometry in v1. Deformable mesh bodies may only use "
+    "preexisting mesh files."
+)
+DEFORMABLE_SCENE_POLICY = (
+    "In deformable PBD scenes, standard `scene.add_ground` semantics remain available. When `scene.add_ground=true`, "
+    "the runtime configures the ground so rigid bodies collide with it while PBD bodies continue to use PBD boundary "
+    "handling instead of rigid-geometry coupling."
+)
 
 COMPACT_HARD_RULE_KEYS = (
     "root_structure_note",
@@ -58,12 +91,18 @@ COMPACT_HARD_RULE_KEYS = (
     "mesh_reuse_policy",
     "mesh_local_frame_policy",
     "articulated_body_mesh_policy",
+    "deformable_body_policy",
+    "deformable_geometry_policy",
+    "deformable_material_policy",
+    "deformable_action_policy",
+    "deformable_observe_policy",
+    "deformable_mesh_asset_policy",
+    "deformable_scene_policy",
     "fixed_body_note",
     "pre_sim_only_actions",
     "articulated_motion_policy",
     "ir_conciseness_policy",
     "dynamic_scene_policy",
-    "fixed_parameter_override_policy",
 )
 
 
@@ -74,6 +113,13 @@ def build_ir_agent_process_requirements(*, mesh_generation_available: bool) -> l
         "- Use `shape.kind='mesh'` only for non-articulated bodies. Mesh bodies should reference a mesh asset file and may be fixed or movable.",
         f"- {ARTICULATED_DECISION_POLICY}",
         f"- {MESH_DECISION_POLICY}",
+        f"- {DEFORMABLE_BODY_POLICY}",
+        f"- {DEFORMABLE_GEOMETRY_POLICY}",
+        f"- {DEFORMABLE_MATERIAL_POLICY}",
+        f"- {DEFORMABLE_ACTION_POLICY}",
+        f"- {DEFORMABLE_OBSERVE_POLICY}",
+        f"- {DEFORMABLE_MESH_ASSET_POLICY}",
+        f"- {DEFORMABLE_SCENE_POLICY}",
         f"- {DYNAMIC_SCENE_POLICY}",
         "- `observe`, `set_pose`, and `apply_external_wrench` may target a single body or a list of body names via the `entity` field.",
         f"- {IR_CONCISENESS_POLICY}",

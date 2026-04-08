@@ -177,6 +177,8 @@ class SAPCoupler(RBC):
         self._linesearch_max_step_size = options.linesearch_max_step_size
         self._hydroelastic_stiffness = options.hydroelastic_stiffness
         self._point_contact_stiffness = options.point_contact_stiffness
+        self._contact_candidate_capacity_scale = options.contact_candidate_capacity_scale
+        self._contact_pair_capacity_scale = options.contact_pair_capacity_scale
         if gs.qd_float == qd.f32:
             gs.raise_exception(
                 "SAPCoupler does not support 32bits precision. Please specify precision='64' when initializing Genesis."
@@ -495,9 +497,10 @@ class SAPCoupler(RBC):
             gradient=gs.qd_float,  # gradient vector
             impulse=gs.qd_float,  # impulse vector
         )
+        rigid_n_dofs = max(1, self.rigid_solver.n_dofs)
 
         self.rigid_state_dof = rigid_state_dof.field(
-            shape=(self.sim._B, self.rigid_solver.n_dofs), needs_grad=False, layout=qd.Layout.SOA
+            shape=(self.sim._B, rigid_n_dofs), needs_grad=False, layout=qd.Layout.SOA
         )
 
         pcg_rigid_state_dof = qd.types.struct(
@@ -509,7 +512,7 @@ class SAPCoupler(RBC):
         )
 
         self.pcg_rigid_state_dof = pcg_rigid_state_dof.field(
-            shape=(self.sim._B, self.rigid_solver.n_dofs), needs_grad=False, layout=qd.Layout.SOA
+            shape=(self.sim._B, rigid_n_dofs), needs_grad=False, layout=qd.Layout.SOA
         )
 
         linesearch_rigid_state_dof = qd.types.struct(
@@ -517,7 +520,7 @@ class SAPCoupler(RBC):
             dp=gs.qd_float,  # A @ dv
         )
         self.linesearch_rigid_state_dof = linesearch_rigid_state_dof.field(
-            shape=(self.sim._B, self.rigid_solver.n_dofs), needs_grad=False, layout=qd.Layout.SOA
+            shape=(self.sim._B, rigid_n_dofs), needs_grad=False, layout=qd.Layout.SOA
         )
 
     def _init_pcg_fields(self):
@@ -581,6 +584,12 @@ class SAPCoupler(RBC):
         if overflow:
             message = "Overflowed In Contact Query: \n"
             for contact in self.contact_handlers:
+                if hasattr(contact, "n_contact_candidates") and hasattr(contact, "max_contact_candidates"):
+                    if contact.n_contact_candidates[None] > contact.max_contact_candidates:
+                        message += (
+                            f"{contact.name} max contact candidates: {contact.max_contact_candidates}"
+                            f", using {contact.n_contact_candidates[None]}\n"
+                        )
                 if contact.n_contact_pairs[None] > contact.max_contact_pairs:
                     message += (
                         f"{contact.name} max contact pairs: {contact.max_contact_pairs}"
@@ -1924,8 +1933,9 @@ class RigidConstraintHandler(BaseConstraintHandler):
             sap_info=self.sap_constraint_info_type,  # SAP info for the constraint
         )
         self.constraints = self.constraint_type.field(shape=(self.max_constraints,))
-        self.Jt = qd.field(gs.qd_float, shape=(self.max_constraints, self.rigid_solver.n_dofs))
-        self.M_inv_Jt = qd.field(gs.qd_float, shape=(self.max_constraints, self.rigid_solver.n_dofs))
+        rigid_n_dofs = max(1, self.rigid_solver.n_dofs)
+        self.Jt = qd.field(gs.qd_float, shape=(self.max_constraints, rigid_n_dofs))
+        self.M_inv_Jt = qd.field(gs.qd_float, shape=(self.max_constraints, rigid_n_dofs))
         self.W = qd.field(gs.qd_float, shape=(self.max_constraints,))
 
     @qd.kernel
@@ -2582,7 +2592,9 @@ class FEMFloorTetContactHandler(FEMContactHandler):
             distance=gs.qd_vec4,  # distance vector for the element
         )
         self.n_contact_candidates = qd.field(gs.qd_int, shape=())
-        self.max_contact_candidates = self.fem_solver.n_surface_elements * self.fem_solver._B
+        self.max_contact_candidates = (
+            self.fem_solver.n_surface_elements * self.fem_solver._B * self.coupler._contact_candidate_capacity_scale
+        )
         self.contact_candidates = self.contact_candidate_type.field(shape=(self.max_contact_candidates,))
 
         self.contact_pair_type = qd.types.struct(
@@ -2592,7 +2604,9 @@ class FEMFloorTetContactHandler(FEMContactHandler):
             contact_pos=gs.qd_vec3,  # contact position
             sap_info=self.sap_contact_info_type,  # contact info
         )
-        self.max_contact_pairs = self.fem_solver.n_surface_elements * self.fem_solver._B
+        self.max_contact_pairs = (
+            self.fem_solver.n_surface_elements * self.fem_solver._B * self.coupler._contact_pair_capacity_scale
+        )
         self.contact_pairs = self.contact_pair_type.field(shape=(self.max_contact_pairs,))
 
     @qd.func
@@ -2773,7 +2787,12 @@ class FEMSelfTetContactHandler(FEMContactHandler):
             distance0=gs.qd_vec4,  # distance vector for element0
         )
         self.n_contact_candidates = qd.field(gs.qd_int, shape=())
-        self.max_contact_candidates = self.fem_solver.n_surface_elements * self.fem_solver._B * 8
+        self.max_contact_candidates = (
+            self.fem_solver.n_surface_elements
+            * self.fem_solver._B
+            * 8
+            * self.coupler._contact_candidate_capacity_scale
+        )
         self.contact_candidates = self.contact_candidate_type.field(shape=(self.max_contact_candidates,))
 
         self.contact_pair_type = qd.types.struct(
@@ -2788,7 +2807,9 @@ class FEMSelfTetContactHandler(FEMContactHandler):
             contact_pos=gs.qd_vec3,  # contact position
             sap_info=self.sap_contact_info_type,  # contact info
         )
-        self.max_contact_pairs = self.fem_solver.n_surface_elements * self.fem_solver._B
+        self.max_contact_pairs = (
+            self.fem_solver.n_surface_elements * self.fem_solver._B * self.coupler._contact_pair_capacity_scale
+        )
         self.contact_pairs = self.contact_pair_type.field(shape=(self.max_contact_pairs,))
 
     @qd.func
@@ -3134,7 +3155,9 @@ class FEMFloorVertContactHandler(FEMContactHandler):
             contact_pos=gs.qd_vec3,  # contact position
             sap_info=self.sap_contact_info_type,  # contact info
         )
-        self.max_contact_pairs = self.fem_solver.n_surface_elements * self.fem_solver._B
+        self.max_contact_pairs = (
+            self.fem_solver.n_surface_elements * self.fem_solver._B * self.coupler._contact_pair_capacity_scale
+        )
         self.contact_pairs = self.contact_pair_type.field(shape=(self.max_contact_pairs,))
 
     @qd.func
@@ -3226,10 +3249,11 @@ class RigidFloorVertContactHandler(RigidContactHandler):
             contact_pos=gs.qd_vec3,  # contact position
             sap_info=self.sap_contact_info_type,  # contact info
         )
-        self.max_contact_pairs = self.rigid_solver.n_free_verts * self.sim._B
+        self.max_contact_pairs = self.rigid_solver.n_free_verts * self.sim._B * self.coupler._contact_pair_capacity_scale
         self.contact_pairs = self.contact_pair_type.field(shape=(self.max_contact_pairs,))
-        self.Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, self.rigid_solver.n_dofs))
-        self.M_inv_Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, self.rigid_solver.n_dofs))
+        rigid_n_dofs = max(1, self.rigid_solver.n_dofs)
+        self.Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, rigid_n_dofs))
+        self.M_inv_Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, rigid_n_dofs))
         self.W = qd.field(gs.qd_mat3, shape=(self.max_contact_pairs,))
 
     @qd.func
@@ -3290,7 +3314,12 @@ class RigidFloorTetContactHandler(RigidContactHandler):
             distance=gs.qd_vec4,  # distance vector for the element
         )
         self.n_contact_candidates = qd.field(gs.qd_int, shape=())
-        self.max_contact_candidates = self.coupler.rigid_volume_elems.shape[0] * self.sim._B * 8
+        self.max_contact_candidates = (
+            self.coupler.rigid_volume_elems.shape[0]
+            * self.sim._B
+            * 8
+            * self.coupler._contact_candidate_capacity_scale
+        )
         self.contact_candidates = self.contact_candidate_type.field(shape=(self.max_contact_candidates,))
 
         self.contact_pair_type = qd.types.struct(
@@ -3299,10 +3328,13 @@ class RigidFloorTetContactHandler(RigidContactHandler):
             contact_pos=gs.qd_vec3,  # contact position
             sap_info=self.sap_contact_info_type,  # contact info
         )
-        self.max_contact_pairs = self.coupler.rigid_volume_elems.shape[0] * self.sim._B
+        self.max_contact_pairs = (
+            self.coupler.rigid_volume_elems.shape[0] * self.sim._B * self.coupler._contact_pair_capacity_scale
+        )
         self.contact_pairs = self.contact_pair_type.field(shape=(self.max_contact_pairs,))
-        self.Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, self.rigid_solver.n_dofs))
-        self.M_inv_Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, self.rigid_solver.n_dofs))
+        rigid_n_dofs = max(1, self.rigid_solver.n_dofs)
+        self.Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, rigid_n_dofs))
+        self.M_inv_Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, rigid_n_dofs))
         self.W = qd.field(gs.qd_mat3, shape=(self.max_contact_pairs,))
 
     @qd.func
@@ -3449,7 +3481,10 @@ class RigidFemTriTetContactHandler(RigidFEMContactHandler):
         )
         self.n_contact_candidates = qd.field(gs.qd_int, shape=())
         self.max_contact_candidates = (
-            max(self.fem_solver.n_surface_elements, self.rigid_solver.n_faces) * self.fem_solver._B * 8
+            max(self.fem_solver.n_surface_elements, self.rigid_solver.n_faces)
+            * self.fem_solver._B
+            * 8
+            * self.coupler._contact_candidate_capacity_scale
         )
         self.contact_candidates = self.contact_candidate_type.field(shape=(self.max_contact_candidates,))
         self.contact_pair_type = qd.types.struct(
@@ -3463,10 +3498,15 @@ class RigidFemTriTetContactHandler(RigidFEMContactHandler):
             contact_pos=gs.qd_vec3,  # contact position
             sap_info=self.sap_contact_info_type,  # contact info
         )
-        self.max_contact_pairs = max(self.fem_solver.n_surface_elements, self.rigid_solver.n_faces) * self.fem_solver._B
+        self.max_contact_pairs = (
+            max(self.fem_solver.n_surface_elements, self.rigid_solver.n_faces)
+            * self.fem_solver._B
+            * self.coupler._contact_pair_capacity_scale
+        )
         self.contact_pairs = self.contact_pair_type.field(shape=(self.max_contact_pairs,))
-        self.Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, self.rigid_solver.n_dofs))
-        self.M_inv_Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, self.rigid_solver.n_dofs))
+        rigid_n_dofs = max(1, self.rigid_solver.n_dofs)
+        self.Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, rigid_n_dofs))
+        self.M_inv_Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, rigid_n_dofs))
         self.W = qd.field(gs.qd_mat3, shape=(self.max_contact_pairs,))
 
     @qd.func
@@ -3791,7 +3831,12 @@ class RigidRigidTetContactHandler(RigidRigidContactHandler):
             distance0=gs.qd_vec4,  # distance vector for element0
         )
         self.n_contact_candidates = qd.field(gs.qd_int, shape=())
-        self.max_contact_candidates = self.coupler.rigid_volume_elems.shape[0] * self.sim._B * 8
+        self.max_contact_candidates = (
+            self.coupler.rigid_volume_elems.shape[0]
+            * self.sim._B
+            * 8
+            * self.coupler._contact_candidate_capacity_scale
+        )
         self.contact_candidates = self.contact_candidate_type.field(shape=(self.max_contact_candidates,))
 
         self.contact_pair_type = qd.types.struct(
@@ -3804,10 +3849,13 @@ class RigidRigidTetContactHandler(RigidRigidContactHandler):
             contact_pos=gs.qd_vec3,  # contact position
             sap_info=self.sap_contact_info_type,  # contact info
         )
-        self.max_contact_pairs = self.coupler.rigid_volume_elems.shape[0] * self.sim._B
+        self.max_contact_pairs = (
+            self.coupler.rigid_volume_elems.shape[0] * self.sim._B * self.coupler._contact_pair_capacity_scale
+        )
         self.contact_pairs = self.contact_pair_type.field(shape=(self.max_contact_pairs,))
-        self.Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, self.rigid_solver.n_dofs))
-        self.M_inv_Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, self.rigid_solver.n_dofs))
+        rigid_n_dofs = max(1, self.rigid_solver.n_dofs)
+        self.Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, rigid_n_dofs))
+        self.M_inv_Jt = qd.field(gs.qd_vec3, shape=(self.max_contact_pairs, rigid_n_dofs))
         self.W = qd.field(gs.qd_mat3, shape=(self.max_contact_pairs,))
 
     @qd.func

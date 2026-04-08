@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from ..defaults import DEFAULTS
 from ..ir_schema import RenderIR, RigidIR
 from .formatting import fmt_tuple, safe_var_name
-from .morph_material import body_morph_source, emit_collision_overrides, material_kwargs_from_collision
+from .morph_material import body_material_source, body_morph_source, emit_collision_overrides, material_kwargs_from_collision
 
 
 @dataclass(frozen=True)
@@ -17,17 +18,32 @@ class SceneEmitContext:
 
 def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> SceneEmitContext:
     backend_expr = "gs.cpu" if program.scene.backend == "cpu" else "gs.gpu"
+    has_deformable_bodies = any(body.is_deformable for body in program.bodies)
     if not program.scene.show_viewer:
         emit(1, 'os.environ.setdefault("PYOPENGL_PLATFORM", "egl")')
         emit(1, 'os.environ.setdefault("MUJOCO_GL", "egl")')
         emit(1, 'os.environ.setdefault("PYGLET_HEADLESS", "1")')
         emit(1)
-    emit(1, f"gs.init(backend={backend_expr})")
+    if has_deformable_bodies:
+        emit(1, f"gs.init(backend={backend_expr}, precision={DEFAULTS.deformable.genesis_precision!r})")
+    else:
+        emit(1, f"gs.init(backend={backend_expr})")
     emit(1, "scene = gs.Scene(")
     emit(2, "sim_options=gs.options.SimOptions(")
     emit(3, f"dt={program.scene.sim.dt},")
     emit(3, f"gravity={fmt_tuple(program.scene.sim.gravity)},")
     emit(2, "),")
+    if has_deformable_bodies:
+        emit(2, "pbd_options=gs.options.PBDOptions(")
+        emit(3, f"particle_size={DEFAULTS.deformable.particle_size},")
+        emit(3, f"max_stretch_solver_iterations={DEFAULTS.deformable.max_stretch_solver_iterations},")
+        emit(3, f"max_bending_solver_iterations={DEFAULTS.deformable.max_bending_solver_iterations},")
+        emit(3, f"max_volume_solver_iterations={DEFAULTS.deformable.max_volume_solver_iterations},")
+        emit(3, f"max_density_solver_iterations={DEFAULTS.deformable.max_density_solver_iterations},")
+        emit(3, f"max_viscosity_solver_iterations={DEFAULTS.deformable.max_viscosity_solver_iterations},")
+        emit(3, f"lower_bound={fmt_tuple(DEFAULTS.deformable.lower_bound)},")
+        emit(3, f"upper_bound={fmt_tuple(DEFAULTS.deformable.upper_bound)},")
+        emit(2, "),")
     if program.scene.viewer is not None:
         viewer = program.scene.viewer
         emit(2, "viewer_options=gs.options.ViewerOptions(")
@@ -44,18 +60,39 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
     if program.scene.add_ground:
         ground_var = safe_var_name("ground")
         entity_vars["ground"] = ground_var
-        ground_material_kwargs = material_kwargs_from_collision(
-            rho=None,
-            collision=program.scene.ground_collision,
-        )
-        if ground_material_kwargs:
-            emit(
-                1,
-                f"{ground_var} = scene.add_entity("
-                f"gs.morphs.Plane(), material=gs.materials.Rigid({', '.join(ground_material_kwargs)}), name='ground')",
+        if has_deformable_bodies:
+            friction = (
+                program.scene.ground_collision.friction
+                if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
+                else None
             )
+            if friction is not None:
+                emit(
+                    1,
+                    f"{ground_var} = scene.add_entity("
+                    f"gs.morphs.Plane(), material=gs.materials.Rigid(friction={friction}, needs_coup=False), name='ground')",
+                )
+            else:
+                emit(
+                    1,
+                    f"{ground_var} = scene.add_entity("
+                    "gs.morphs.Plane(), material=gs.materials.Rigid(needs_coup=False), name='ground')",
+                )
         else:
-            emit(1, f"{ground_var} = scene.add_entity(gs.morphs.Plane(), name='ground')")
+            ground_material_kwargs = material_kwargs_from_collision(
+                rho=None,
+                collision=program.scene.ground_collision,
+            )
+            if ground_material_kwargs:
+                emit(
+                    1,
+                    f"{ground_var} = scene.add_entity("
+                    f"gs.morphs.Plane(), material=gs.materials.Rigid({', '.join(ground_material_kwargs)}), name='ground')",
+                )
+            else:
+                emit(1, f"{ground_var} = scene.add_entity(gs.morphs.Plane(), name='ground')")
+    elif has_deformable_bodies and render is not None:
+        emit(1, "_visual_ground = scene.add_entity(gs.morphs.Plane(collision=False), name='_visual_ground')")
 
     body_vars: dict[str, str] = {}
     for body in program.bodies:
@@ -64,10 +101,11 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
         entity_vars[body.name] = body_var
         emit(1, f"{body_var} = scene.add_entity(")
         emit(2, f"morph={body_morph_source(body)},")
-        body_material_kwargs = material_kwargs_from_collision(rho=body.rho, collision=body.collision)
-        if body_material_kwargs:
-            emit(2, f"material=gs.materials.Rigid({', '.join(body_material_kwargs)}),")
-        emit(2, f"visualize_contact={body.visualize_contact},")
+        body_material = body_material_source(body)
+        if body_material is not None:
+            emit(2, f"material={body_material},")
+        if not body.is_deformable:
+            emit(2, f"visualize_contact={body.visualize_contact},")
         emit(2, f"name={body.name!r},")
         emit(1, ")")
         emit(1)
@@ -101,7 +139,8 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
         emit(2, f"fix_orientation={follow.fix_orientation},")
         emit(1, ")")
     for body in program.bodies:
-        emit_collision_overrides(emit, entity_var=body_vars[body.name], collision=body.collision)
+        if not body.is_deformable:
+            emit_collision_overrides(emit, entity_var=body_vars[body.name], collision=body.collision)
     if program.scene.add_ground:
         emit_collision_overrides(
             emit,

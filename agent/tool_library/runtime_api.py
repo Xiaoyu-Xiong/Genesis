@@ -7,7 +7,6 @@ from typing import Any
 from ..compiler_backend import CompiledRigidArtifact, compile_rigid_ir_to_file, compile_rigid_ir_to_source
 from ..ir_schema import RigidIR, normalize_ir, parse_ir_payload
 from ..runtime import build_llm_event_pack, run_rigid_ir
-from .overrides import GeneratorParameterOverrides
 
 
 class RigidToolLibrary:
@@ -25,9 +24,10 @@ class RigidToolLibrary:
     - `generation_call_tool`: execute one generation tool call locally.
 
     Scope of current IR:
-    - Multiple bodies per program (`bodies`), including primitive bodies, non-articulated mesh bodies,
-      and multiple articulated MJCF/URDF bodies.
-    - Action space includes pose edits, dof writes, external wrench application, and actuator controls.
+    - Multiple bodies per program (`bodies`), including rigid primitive bodies, non-articulated mesh bodies,
+      deformable PBD bodies, and multiple articulated MJCF/URDF bodies.
+    - Action space includes pose edits, dof writes, external wrench application, actuator controls,
+      and deformable observation fields.
     """
 
     def ir_schema(self) -> dict[str, Any]:
@@ -94,7 +94,6 @@ class RigidToolLibrary:
         assets_dir: str = "agent/generated_assets",
         mesh_assets_dir: str = "agent/generated_meshes",
         force_primitive_mode: bool = False,
-        parameter_overrides: GeneratorParameterOverrides | None = None,
     ) -> RigidIR:
         from ..llm_generator import OpenAIResponsesClient, generate_ir_two_agent
 
@@ -116,7 +115,6 @@ class RigidToolLibrary:
             assets_dir=assets_dir,
             mesh_assets_dir=mesh_assets_dir,
             force_primitive_mode=force_primitive_mode,
-            parameter_overrides=parameter_overrides,
             hosted_prompt_id=hosted_prompt_id,
             hosted_prompt_version=hosted_prompt_version,
         )

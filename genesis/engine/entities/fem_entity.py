@@ -434,7 +434,12 @@ class FEMEntity(Entity):
                     tet_cfg=self.tet_cfg,
                 )
             elif isinstance(self.morph, gs.options.morphs.Cylinder):
-                verts, elems = eu.cylinder_to_elements()
+                verts, elems = eu.cylinder_to_elements(
+                    pos=self._morph.pos,
+                    radius=self._morph.radius,
+                    height=self._morph.height,
+                    tet_cfg=self.tet_cfg,
+                )
             elif isinstance(self.morph, gs.options.morphs.Mesh):
                 # We don't need to proces UVs here because the tetrahedralization process append new vertices
                 # and faces at the end of the vertex list, thus the original UVs are preserved at the beginning.

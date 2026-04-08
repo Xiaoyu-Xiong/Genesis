@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from .overrides import GeneratorParameterOverrides
 from .tool_specs import (
     COMPACT_HARD_RULE_KEYS,
     build_generation_guide_payload,
@@ -16,7 +15,6 @@ def build_generator_tool_context(
     *,
     xml_generation_enabled: bool = True,
     mesh_generation_enabled: bool = True,
-    parameter_overrides: GeneratorParameterOverrides | None = None,
 ) -> dict[str, Any]:
     guide = build_generation_guide_payload(
         required_shape_kind=None,
@@ -30,7 +28,6 @@ def build_generator_tool_context(
         generated_xml_paths_by_body=None,
         mesh_generation_enabled=mesh_generation_enabled,
         generated_mesh_paths_by_body=None,
-        parameter_overrides=parameter_overrides,
     )
     constraints = dict(guide["constraints"])
     constraints["direct_state_actions_pre_step_only"] = [
@@ -62,7 +59,6 @@ def build_compact_generator_tool_context(
     *,
     xml_generation_enabled: bool = True,
     mesh_generation_enabled: bool = True,
-    parameter_overrides: GeneratorParameterOverrides | None = None,
 ) -> dict[str, Any]:
     guide = build_generation_guide_payload(
         required_shape_kind=None,
@@ -76,7 +72,6 @@ def build_compact_generator_tool_context(
         generated_xml_paths_by_body=None,
         mesh_generation_enabled=mesh_generation_enabled,
         generated_mesh_paths_by_body=None,
-        parameter_overrides=parameter_overrides,
     )
     constraints = guide["constraints"]
     parameter_notes = constraints.get("parameter_notes", {})
@@ -89,6 +84,10 @@ def build_compact_generator_tool_context(
         "bodies[].rho",
         "bodies[].shape.default_armature",
         "bodies[].fixed",
+        "bodies[].simulation_kind",
+        "bodies[].deformable_material.stretch_compliance",
+        "bodies[].deformable_material.volume_compliance",
+        "bodies[].deformable_material.rho",
         "bodies[].actuators[].kp",
         "bodies[].actuators[].kv",
         "bodies[].actuators[].force_range",
@@ -124,7 +123,6 @@ def build_compact_generator_tool_context(
                 "MJCF generation path, and supported action ops."
             ),
         },
-        "fixed_parameter_overrides": constraints.get("fixed_parameter_overrides"),
         "parameter_notes": {
             key: parameter_notes[key]
             for key in compact_parameter_keys

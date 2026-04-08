@@ -43,6 +43,8 @@ class TetGenMixin(Options):
     A mixin to introduce TetGen-related options into morph classes that support tetrahedralization using TetGen.
     """
 
+    tet_resolution: PositiveInt = 3
+
     # FEM specific
     order: PositiveInt = 1
 

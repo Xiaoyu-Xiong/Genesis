@@ -29,13 +29,14 @@ Your job:
 - Prefer a small number of major issues with detailed modifications over a long list of shallow comments.
 - In addition to correctness, consider IR conciseness (but not at the expense of clarity). If multiple actions can be merged into one equivalent multi-entity action without changing behavior, prefer that as the cleaner formulation. This is only a suggestion, but should not be used to determine success vs failure.
 - When the task leaves scene composition open-ended, provide suggestions leading to visible motion, meaningful contact, and noticeable evolution over time. Do not treat this as hard requirement and use it to judge success.
+- For deformable or soft-body tasks, evaluate both whole-body motion and visible deformation. Use deformable observation fields such as bounding-box changes and vertex-displacement summaries when present, and do not judge soft bodies by rigid-body pose stability alone.
 - Base all suggested fixes on the provided generator tool-library capability only.
-- Respect any fixed parameter overrides exposed in the generator tool context; do not recommend changing them.
 - Do not suggest unavailable controllers, target-tracking systems, sensors, or new runtime abilities that the current tool library cannot express.
 - Every item in `priority_fixes` must be implementable through the provided tool library and current IR/XML path.
 - Do not over-focus on duration alone; prioritize content correctness, physical plausibility, and control logic.
 - For each major issue, make the `fix` field concrete: name the IR field(s) or actuator setting(s) to adjust, the direction of change, and the intended effect on behavior.
 - For mesh objects, calibrate their direction and scale from the video evidence, and if applicable, provide specific adjustments to their quaterinion and scale fields with the intended effect on behavior.
+- For deformable PBD bodies, prefer fixes that adjust `deformable_material.stretch_compliance`, `deformable_material.volume_compliance`, or `deformable_material.rho` before suggesting hidden solver hyperparameters, because the deformable v1 pipeline intentionally fixes those internal settings.
 - When performing numerical parameter tuning, prefer exponential and more aggressive changes if the evidence suggests a major problem (e.g. objects supposed to move are almost static), and prefer smaller, more precise adjustments if the issue seems more borderline.
 - Do not recommend verbose IR rewrites when a shorter equivalent IR is possible.
 
@@ -153,6 +154,7 @@ def build_critic_user_content(
                 "Use the provided parameter notes, parameter relationship notes, and schema descriptions when deciding "
                 "which field is actually responsible for a major problem. "
                 "When a broad task could support a more dynamic scene, do not give full credit to outputs that are technically valid but largely static or visually uneventful. "
+                "If deformable observation fields are present, use them to judge whether the soft body actually deforms in a meaningful way. "
                 "When there are multiple bodies, assign body-specific issues to `by_body` using the actual body names from the IR. "
                 "Also consider whether repeated same-payload actions could be merged using multi-entity `entity` lists "
                 "to keep the IR shorter without changing behavior. "
@@ -207,6 +209,7 @@ def build_compact_critic_user_content(
                 "The compact digest intentionally summarizes only the tool-library capability boundary, key parameter notes, "
                 "and critical multi-body / multi-XML rules. Stay within that capability boundary when proposing fixes. "
                 "When the task is broad and the scene could be more dynamic, treat mostly static outputs as weaker even if they are superficially valid. "
+                "If deformable observation fields are present, use them to assess whether the soft body meaningfully deforms. "
                 "When there are multiple bodies, assign body-specific issues to `by_body` using actual IR body names. "
                 "Also consider whether repeated same-payload actions could be merged using multi-entity `entity` lists "
                 "to keep the IR shorter without changing behavior.\n\n"

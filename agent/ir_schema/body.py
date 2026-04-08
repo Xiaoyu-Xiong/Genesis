@@ -75,6 +75,19 @@ ShapeIR = Annotated[
 ]
 
 
+class PBDElasticMaterialIR(StrictModel):
+    kind: Literal["elastic"] = "elastic"
+    rho: float = Field(gt=0.0)
+    stretch_compliance: float = Field(ge=0.0)
+    volume_compliance: float = Field(ge=0.0)
+
+
+DeformableMaterialIR = Annotated[
+    PBDElasticMaterialIR,
+    Field(discriminator="kind"),
+]
+
+
 class ActuatorForceRangeIR(StrictModel):
     lower: ScalarOrSequence
     upper: ScalarOrSequence
@@ -186,11 +199,13 @@ ActuatorIR = Annotated[
 class BodyIR(StrictModel):
     name: str = Field(default="body", min_length=1)
     shape: ShapeIR
+    simulation_kind: Literal["rigid", "pbd"] = "rigid"
+    deformable_material: DeformableMaterialIR | None = None
     initial_pose: PoseIR = Field(default_factory=PoseIR)
     fixed: bool = Field(
         default=False,
         description=(
-            "Whether this body should be fixed in the world. Use this for obstacles, tables, platforms, "
+            "Whether this rigid body should be fixed in the world. Use this for rigid obstacles, tables, platforms, "
             "or anchored articulated bodies."
         ),
     )
@@ -205,6 +220,14 @@ class BodyIR(StrictModel):
     collision: CollisionIR = Field(default_factory=CollisionIR)
     actuators: tuple[ActuatorIR, ...] = ()
 
+    @property
+    def is_deformable(self) -> bool:
+        return self.simulation_kind == "pbd"
+
+    @property
+    def is_articulated(self) -> bool:
+        return isinstance(self.shape, (MJCFShapeIR, URDFShapeIR))
+
     @model_validator(mode="after")
     def _check_fixed_support(self) -> "BodyIR":
         if self.fixed and isinstance(self.shape, MJCFShapeIR):
@@ -212,4 +235,27 @@ class BodyIR(StrictModel):
                 "`bodies[].fixed=true` is not supported for `mjcf` shapes. "
                 "For MJCF bodies, encode a fixed base directly in the XML (for example by omitting the freejoint)."
             )
+        if self.is_deformable:
+            if self.is_articulated:
+                raise ValueError("`simulation_kind='pbd'` does not support articulated shapes (`mjcf` or `urdf`).")
+            if not isinstance(self.shape, (SphereShapeIR, BoxShapeIR, CylinderShapeIR, MeshShapeIR)):
+                raise ValueError(
+                    "`simulation_kind='pbd'` only supports `sphere`, `box`, `cylinder`, or `mesh` shapes in v1."
+                )
+            if self.deformable_material is None:
+                raise ValueError("`simulation_kind='pbd'` requires `deformable_material`.")
+            if self.rho is not None:
+                raise ValueError("Use `deformable_material.rho` instead of `body.rho` for PBD bodies.")
+            if self.fixed:
+                raise ValueError("`bodies[].fixed=true` is not supported for PBD bodies in deformable v1.")
+            if len(self.actuators) > 0:
+                raise ValueError("PBD bodies do not support `actuators` in deformable v1.")
+            if self.collision.coup_friction is not None or self.collision.coup_restitution is not None:
+                raise ValueError("`coup_friction` and `coup_restitution` are not supported on PBD bodies.")
+            if self.collision.sol_params is not None:
+                raise ValueError("`collision.sol_params` is not supported on PBD bodies.")
+            if self.collision.contact_resistance is not None:
+                raise ValueError("`collision.contact_resistance` is not supported on PBD bodies in deformable v1.")
+        elif self.deformable_material is not None:
+            raise ValueError("`deformable_material` requires `simulation_kind='pbd'`.")
         return self

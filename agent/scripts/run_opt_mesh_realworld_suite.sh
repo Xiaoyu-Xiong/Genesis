@@ -5,78 +5,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 export PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
-MODEL="${MODEL:-gpt-5.4}"
-CRITIC_MODEL="${CRITIC_MODEL:-}"
-REASONING_EFFORT="${REASONING_EFFORT:-xhigh}"
-CRITIC_REASONING_EFFORT="${CRITIC_REASONING_EFFORT:-}"
-CRITIC_PROMPT_VARIANT="${CRITIC_PROMPT_VARIANT:-full}"
-MAX_PARALLEL="${MAX_PARALLEL:-8}"
-BACKEND="${BACKEND:-gpu}"
-MAX_OPT_ROUNDS="${MAX_OPT_ROUNDS:-8}"
-MAX_ATTEMPTS="${MAX_ATTEMPTS:-12}"
-XML_MAX_ATTEMPTS="${XML_MAX_ATTEMPTS:-4}"
-SAMPLE_EVERY_SEC="${SAMPLE_EVERY_SEC:-0.5}"
-MAX_FRAMES="${MAX_FRAMES:-24}"
-TIMEOUT_SEC="${TIMEOUT_SEC:-1000}"
-
-RUN_TS="$(date +%Y%m%d_%H%M%S)"
-RUN_ROOT="${RUN_ROOT:-agent/runs/opt_mesh_realworld_suite/${RUN_TS}}"
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --model)
-      MODEL="$2"
-      shift 2
-      ;;
-    --critic-model)
-      CRITIC_MODEL="$2"
-      shift 2
-      ;;
-    --reasoning-effort)
-      REASONING_EFFORT="$2"
-      shift 2
-      ;;
-    --critic-reasoning-effort)
-      CRITIC_REASONING_EFFORT="$2"
-      shift 2
-      ;;
-    --critic-prompt-variant)
-      CRITIC_PROMPT_VARIANT="$2"
-      shift 2
-      ;;
-    --max-parallel)
-      MAX_PARALLEL="$2"
-      shift 2
-      ;;
-    --gpu)
-      BACKEND="gpu"
-      shift
-      ;;
-    --cpu)
-      BACKEND="cpu"
-      shift
-      ;;
-    --backend)
-      BACKEND="$2"
-      shift 2
-      ;;
-    --run-root)
-      RUN_ROOT="$2"
-      shift 2
-      ;;
-    *)
-      echo "Unknown argument: $1" >&2
-      echo "Usage: $0 [--model MODEL] [--critic-model MODEL] [--reasoning-effort EFFORT] [--critic-reasoning-effort EFFORT] [--critic-prompt-variant full|compact] [--max-parallel N] [--gpu|--cpu|--backend cpu|gpu] [--run-root PATH]" >&2
-      exit 2
-      ;;
-  esac
-done
-
-if [[ "$BACKEND" != "cpu" && "$BACKEND" != "gpu" ]]; then
-  echo "Invalid BACKEND: $BACKEND" >&2
-  exit 2
-fi
-
 LOCAL_PYTHON=""
 if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
   LOCAL_PYTHON="$ROOT_DIR/.venv/bin/python"
@@ -95,6 +23,23 @@ else
     PYTHON_CMD=(uv run python)
   fi
 fi
+
+RUN_TS="$(date +%Y%m%d_%H%M%S)"
+RUN_ROOT="${RUN_ROOT:-agent/runs/opt_mesh_realworld_suite/${RUN_TS}}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --run-root)
+      RUN_ROOT="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      echo "Usage: $0 [--run-root PATH]" >&2
+      exit 2
+      ;;
+  esac
+done
 
 run_cmd() {
   echo "+ $*"
@@ -123,42 +68,14 @@ lab_handling_station|Create a believable lab or medical handling environment wit
 CASES
 
 echo "Run root: $RUN_ROOT"
-echo "Model: $MODEL"
-echo "Critic model: ${CRITIC_MODEL:-<same as model>}"
-echo "Reasoning effort: ${REASONING_EFFORT:-<default>}"
-echo "Critic reasoning effort: ${CRITIC_REASONING_EFFORT:-<same as generator>}"
-echo "Critic prompt variant: ${CRITIC_PROMPT_VARIANT}"
-echo "Max parallel tasks: ${MAX_PARALLEL}"
-echo "Backend: $BACKEND"
 echo "Python: ${PYTHON_CMD[*]}"
 
 opt_cmd=(
   "${PYTHON_CMD[@]}" -m agent.opt.cli optimize-batch
   --tasks-file "$TASK_FILE"
-  --model "$MODEL"
-  --backend "$BACKEND"
-  --max-parallel "$MAX_PARALLEL"
-  --max-opt-rounds "$MAX_OPT_ROUNDS"
-  --max-attempts "$MAX_ATTEMPTS"
-  --xml-max-attempts "$XML_MAX_ATTEMPTS"
-  --timeout-sec "$TIMEOUT_SEC"
-  --sample-every-sec "$SAMPLE_EVERY_SEC"
-  --max-frames "$MAX_FRAMES"
   --out-dir "$RUN_ROOT"
   --out "$RUN_ROOT/summary.json"
 )
-if [[ -n "$CRITIC_MODEL" ]]; then
-  opt_cmd+=(--critic-model "$CRITIC_MODEL")
-fi
-if [[ -n "$REASONING_EFFORT" ]]; then
-  opt_cmd+=(--reasoning-effort "$REASONING_EFFORT")
-fi
-if [[ -n "$CRITIC_REASONING_EFFORT" ]]; then
-  opt_cmd+=(--critic-reasoning-effort "$CRITIC_REASONING_EFFORT")
-fi
-if [[ -n "$CRITIC_PROMPT_VARIANT" ]]; then
-  opt_cmd+=(--critic-prompt-variant "$CRITIC_PROMPT_VARIANT")
-fi
 
 echo "==> optimize-batch"
 run_cmd "${opt_cmd[@]}"

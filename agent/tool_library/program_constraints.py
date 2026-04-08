@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any
 
 from ..ir_schema import (
+    ApplyExternalWrenchActionIR,
+    ObserveActionIR,
     SetDofsPositionActionIR,
     SetDofsVelocityActionIR,
     SetPoseActionIR,
@@ -35,6 +37,7 @@ def validate_program_constraints(
     bodies = program.bodies
     articulated_bodies = [body for body in bodies if body.shape.kind in {"mjcf", "urdf"}]
     mesh_bodies = [body for body in bodies if body.shape.kind == "mesh"]
+    deformable_bodies = [body for body in bodies if body.is_deformable]
 
     if required_shape_kind is not None and not any(body.shape.kind == required_shape_kind for body in bodies):
         actual_kinds = [body.shape.kind for body in bodies]
@@ -56,6 +59,9 @@ def validate_program_constraints(
 
     if enforce_articulated_actuator_control and articulated_bodies:
         errors.extend(_validate_articulated_actuator_control(program, allowed_articulated_joint_names_by_body))
+
+    if deformable_bodies:
+        errors.extend(_validate_deformable_constraints(program))
 
     mjcf_bodies = [body for body in articulated_bodies if body.shape.kind == "mjcf"]
     if xml_generation_enabled and mjcf_bodies:
@@ -88,6 +94,14 @@ def validate_program_constraints(
             continue
         if mesh_generation_enabled and generated_mesh_shape_files_by_body:
             expected_file = generated_mesh_shape_files_by_body.get(body.name)
+            if expected_file is not None and body.is_deformable:
+                errors.append(
+                    f"Deformable mesh body `{body.name}` must use a preexisting mesh asset, not `generate_mesh_asset` output."
+                )
+            if body.is_deformable and actual_file in set(generated_mesh_shape_files_by_body.values()):
+                errors.append(
+                    f"Deformable mesh body `{body.name}` must not reuse a `generate_mesh_asset` output; use a preexisting mesh file instead."
+                )
             if expected_file is not None and actual_file != expected_file:
                 errors.append(
                     f"Generated mesh asset for body `{body.name}` was not attached correctly. "
@@ -180,5 +194,34 @@ def _validate_articulated_actuator_control(
                 errors.append(
                     f"Actuator `{actuator.name}` on body `{body.name}` references unknown joint_names={unknown_joint_names}. "
                     f"Available joint names: {sorted(allowed_joint_set)}."
+                )
+    return errors
+
+
+def _validate_deformable_constraints(program: RigidIR) -> list[str]:
+    errors: list[str] = []
+    deformable_body_names = {body.name for body in program.bodies if body.is_deformable}
+    deformable_observe_fields = {"pos", "vel", "bbox_min", "bbox_max", "bbox_size", "vertex_disp_mean", "vertex_disp_max"}
+    forbidden_action_types = (
+        SetPoseActionIR,
+        SetDofsPositionActionIR,
+        SetDofsVelocityActionIR,
+        ApplyExternalWrenchActionIR,
+        SetTargetPosActionIR,
+        SetTorqueActionIR,
+    )
+
+    for index, action in enumerate(program.actions):
+        selected_entities = _selected_entities(getattr(action, "entity", None))
+        if not any(entity in deformable_body_names for entity in selected_entities):
+            continue
+        if isinstance(action, forbidden_action_types):
+            errors.append(f"Action[{index}] `{action.op}` is not supported for deformable PBD bodies in v1.")
+        if isinstance(action, ObserveActionIR):
+            invalid_fields = [field for field in action.fields if field not in deformable_observe_fields]
+            if invalid_fields:
+                errors.append(
+                    f"Action[{index}] observe on deformable PBD bodies cannot use fields {invalid_fields}. "
+                    f"Allowed fields: {sorted(deformable_observe_fields)}."
                 )
     return errors

@@ -59,7 +59,7 @@ def build_tool_specs(*, xml_generation_enabled: bool, mesh_generation_enabled: b
                             "type": "number",
                             "description": (
                                 "Optional target simulation duration in seconds "
-                                "(compared against final_step * scene.sim.dt)."
+                                "(compared against the resulting program duration under the system simulation timestep)."
                             ),
                         },
                         "sim_duration_tolerance_sec": {

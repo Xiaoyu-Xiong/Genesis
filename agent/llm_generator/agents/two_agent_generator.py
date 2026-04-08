@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..client import OpenAIResponsesClient
-from ...tool_library import GeneralIRAgentToolLibrary, GeneratorParameterOverrides
+from ...tool_library import GeneralIRAgentToolLibrary
 from .ir_agent import IRGenerationResult, generate_ir_with_tool_agent
 from .mesh_agent import MeshGenerationResult, generate_mesh_asset_with_meshy, load_existing_mesh_generation_result
 from .xml_agent import XMLGenerationResult, generate_articulated_xml_with_openai
@@ -274,7 +274,6 @@ def generate_ir_two_agent(
     previous_xml_texts_by_body: dict[str, str] | None = None,
     hosted_prompt_id: str | None = None,
     hosted_prompt_version: str | None = None,
-    parameter_overrides: GeneratorParameterOverrides | None = None,
 ) -> TwoAgentGenerationResult:
     xml_out_dir = _prepare_asset_dir(assets_dir)
     mesh_out_dir = _prepare_asset_dir(mesh_assets_dir)
@@ -309,7 +308,6 @@ def generate_ir_two_agent(
         enforce_articulated_actuator_control=True,
         xml_generation_fn=xml_generation_fn,
         mesh_generation_fn=mesh_generation_fn,
-        parameter_overrides=parameter_overrides,
     )
 
     merged_requirements = _build_additional_requirements(

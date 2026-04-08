@@ -13,6 +13,7 @@ from ..ir_schema import (
     StepActionIR,
 )
 from .helpers import contact_other_entities, count_contacts, get_floating_base_root_state, to_serializable
+from .helpers import get_deformable_observation_state
 from .models import ActuatorBinding, RuntimeContext, RuntimeState
 from .selectors import resolve_dofs_idx_local, resolve_links_idx
 
@@ -144,21 +145,29 @@ def dispatch_action(action_index: int, action: Any, runtime: RuntimeContext, sta
     if isinstance(action, ObserveActionIR):
         for entity_name, target_entity in _target_entities(runtime, action.entity):
             state_dict: dict[str, Any] = {}
+            deformable_observation_state = get_deformable_observation_state(target_entity)
             floating_base_root_state = get_floating_base_root_state(target_entity)
             getter_by_field = {
-                "pos": target_entity.get_pos,
-                "quat": target_entity.get_quat,
-                "vel": target_entity.get_vel,
-                "ang": target_entity.get_ang,
-                "qpos": target_entity.get_qpos,
-                "dofs_position": target_entity.get_dofs_position,
-                "dofs_velocity": target_entity.get_dofs_velocity,
+                "pos": "get_pos",
+                "quat": "get_quat",
+                "vel": "get_vel",
+                "ang": "get_ang",
+                "qpos": "get_qpos",
+                "dofs_position": "get_dofs_position",
+                "dofs_velocity": "get_dofs_velocity",
             }
             for field in action.fields:
-                if floating_base_root_state is not None and field in floating_base_root_state:
+                if deformable_observation_state is not None and field in deformable_observation_state:
+                    state_dict[field] = deformable_observation_state[field]
+                elif floating_base_root_state is not None and field in floating_base_root_state:
                     state_dict[field] = floating_base_root_state[field]
                 else:
-                    state_dict[field] = to_serializable(getter_by_field[field]())
+                    if field not in getter_by_field:
+                        raise ValueError(f"Field `{field}` is not available for entity `{entity_name}`.")
+                    getter = getattr(target_entity, getter_by_field[field], None)
+                    if getter is None:
+                        raise ValueError(f"Field `{field}` is not available for entity `{entity_name}`.")
+                    state_dict[field] = to_serializable(getter())
 
             event: dict[str, Any] = {
                 "type": "observation",

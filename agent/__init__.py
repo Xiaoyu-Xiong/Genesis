@@ -4,7 +4,7 @@ from .llm_critic import evaluate_prompt_event_video
 from .llm_generator import OpenAIResponsesClient, generate_ir_two_agent
 from .opt import optimize_prompt
 from .runtime import LLM_EVENT_PACK_VERSION, build_llm_event_pack, run_rigid_ir
-from .tool_library import TOOLS, GeneratorParameterOverrides, build_generator_tool_context
+from .tool_library import TOOLS, build_generator_tool_context
 
 __all__ = [
     "IR_VERSION",
@@ -13,7 +13,6 @@ __all__ = [
     "parse_ir_payload",
     "normalize_ir",
     "OpenAIResponsesClient",
-    "GeneratorParameterOverrides",
     "build_generator_tool_context",
     "generate_ir_two_agent",
     "evaluate_prompt_event_video",
