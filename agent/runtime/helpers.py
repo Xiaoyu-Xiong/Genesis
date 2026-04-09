@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+import genesis as gs
+
 from ..ir_schema import RenderIR
 
 
@@ -128,12 +130,13 @@ def is_floating_base_entity(entity: Any) -> bool:
         return False
 
 
-def is_pbd_entity(entity: Any) -> bool:
+def is_deformable_entity(entity: Any) -> bool:
     return getattr(entity.__class__, "__name__", "") in {
         "PBD2DEntity",
         "PBD3DEntity",
         "PBDParticleEntity",
         "PBDFreeParticleEntity",
+        "FEMEntity",
     }
 
 
@@ -227,11 +230,18 @@ def _displacement_stats(current_rows: list[list[float]], initial_rows: list[list
 
 
 def get_deformable_observation_state(entity: Any) -> dict[str, Any] | None:
-    if not is_pbd_entity(entity):
+    if not is_deformable_entity(entity):
         return None
     try:
-        pos_tensor = entity.get_particles_pos()
-        vel_tensor = entity.get_particles_vel()
+        if getattr(entity.__class__, "__name__", "") == "FEMEntity":
+            fem_state = entity.get_state()
+            pos_tensor = fem_state.pos
+            vel_tensor = fem_state.vel
+            initial_source = getattr(entity, "init_positions", None)
+        else:
+            pos_tensor = entity.get_particles_pos()
+            vel_tensor = entity.get_particles_vel()
+            initial_source = getattr(entity, "_particles", None)
     except Exception:  # noqa: BLE001
         return None
     pos_rows = _as_vec3_rows(to_serializable(pos_tensor))
@@ -239,7 +249,7 @@ def get_deformable_observation_state(entity: Any) -> dict[str, Any] | None:
     if pos_rows is None or vel_rows is None:
         return None
     bbox_min, bbox_max, bbox_size = _bbox_from_rows(pos_rows)
-    initial_rows = _as_vec3_rows(to_serializable(getattr(entity, "_particles", None)))
+    initial_rows = _as_vec3_rows(to_serializable(initial_source))
     disp_mean, disp_max = _displacement_stats(pos_rows, initial_rows)
     return {
         "pos": _mean_vec3(pos_rows),
@@ -285,13 +295,20 @@ class FollowDeformablePositionProxy:
         pos = get_deformable_entity_com_pos(self._entity)
         if pos is None:
             raise ValueError("Deformable follow target does not have a valid COM position.")
-        return pos
+        pos_tensor = gs.torch.as_tensor(pos, dtype=gs.tc_float, device=gs.device)
+        if envs_idx is None or envs_idx == ():
+            return pos_tensor
+        try:
+            n_envs = len(envs_idx)
+        except TypeError:
+            return pos_tensor
+        return pos_tensor.reshape((1, 3)).expand((n_envs, 3))
 
 
 def get_follow_target_entity(entity: Any) -> Any:
     if is_floating_base_entity(entity):
         return FollowRootPositionProxy(entity)
-    if is_pbd_entity(entity):
+    if is_deformable_entity(entity):
         return FollowDeformablePositionProxy(entity)
     return entity
 

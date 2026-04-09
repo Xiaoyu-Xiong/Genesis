@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..defaults import DEFAULTS
 from .tool_specs import (
     COMPACT_HARD_RULE_KEYS,
     build_generation_guide_payload,
@@ -85,9 +86,6 @@ def build_compact_generator_tool_context(
         "bodies[].shape.default_armature",
         "bodies[].fixed",
         "bodies[].simulation_kind",
-        "bodies[].deformable_material.stretch_compliance",
-        "bodies[].deformable_material.volume_compliance",
-        "bodies[].deformable_material.rho",
         "bodies[].actuators[].kp",
         "bodies[].actuators[].kv",
         "bodies[].actuators[].force_range",
@@ -101,6 +99,22 @@ def build_compact_generator_tool_context(
         "SetPoseActionIR.entity",
         "ApplyExternalWrenchActionIR.entity",
     ]
+    if DEFAULTS.deformable.simulation_backend == "pbd":
+        compact_parameter_keys.extend(
+            [
+                "bodies[].deformable_material.stretch_compliance",
+                "bodies[].deformable_material.volume_compliance",
+                "bodies[].deformable_material.rho",
+            ]
+        )
+    else:
+        compact_parameter_keys.extend(
+            [
+                "bodies[].deformable_material.E",
+                "bodies[].deformable_material.nu",
+                "bodies[].deformable_material.rho",
+            ]
+        )
 
     return {
         "capabilities": {

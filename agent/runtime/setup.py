@@ -38,8 +38,11 @@ def configure_headless_if_needed(program: RigidIR) -> None:
 
 
 def ensure_genesis_initialized(gs: Any, program: RigidIR) -> None:
-    requested_backend = gs.cpu if program.scene.backend == "cpu" else gs.gpu
     has_deformable_bodies = any(body.is_deformable for body in program.bodies)
+    if DEFAULTS.deformable.simulation_backend == "fem_ipc" and has_deformable_bodies:
+        requested_backend = gs.cpu
+    else:
+        requested_backend = gs.cpu if program.scene.backend == "cpu" else gs.gpu
     if getattr(gs, "_initialized", False):
         active_backend = getattr(gs, "backend", None)
         # if active_backend != requested_backend:
@@ -65,6 +68,9 @@ def create_runtime_context(gs: Any, program: RigidIR) -> RuntimeContext:
         )
 
     has_deformable_bodies = any(body.is_deformable for body in program.bodies)
+    if DEFAULTS.deformable.simulation_backend == "fem_ipc" and has_deformable_bodies:
+        program = program.model_copy(deep=True)
+        program.scene.backend = "cpu"
     scene_kwargs: dict[str, Any] = {
         "sim_options": gs.options.SimOptions(
             dt=program.scene.sim.dt,
@@ -74,16 +80,41 @@ def create_runtime_context(gs: Any, program: RigidIR) -> RuntimeContext:
         "show_viewer": program.scene.show_viewer,
     }
     if has_deformable_bodies:
-        scene_kwargs["pbd_options"] = gs.options.PBDOptions(
-            particle_size=DEFAULTS.deformable.particle_size,
-            max_stretch_solver_iterations=DEFAULTS.deformable.max_stretch_solver_iterations,
-            max_bending_solver_iterations=DEFAULTS.deformable.max_bending_solver_iterations,
-            max_volume_solver_iterations=DEFAULTS.deformable.max_volume_solver_iterations,
-            max_density_solver_iterations=DEFAULTS.deformable.max_density_solver_iterations,
-            max_viscosity_solver_iterations=DEFAULTS.deformable.max_viscosity_solver_iterations,
-            lower_bound=DEFAULTS.deformable.lower_bound,
-            upper_bound=DEFAULTS.deformable.upper_bound,
-        )
+        if DEFAULTS.deformable.simulation_backend == "pbd":
+            boundary_friction = (
+                program.scene.ground_collision.friction
+                if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
+                else DEFAULTS.deformable.friction
+            )
+            scene_kwargs["pbd_options"] = gs.options.PBDOptions(
+                particle_size=DEFAULTS.deformable.particle_size,
+                max_stretch_solver_iterations=DEFAULTS.deformable.max_stretch_solver_iterations,
+                max_bending_solver_iterations=DEFAULTS.deformable.max_bending_solver_iterations,
+                max_volume_solver_iterations=DEFAULTS.deformable.max_volume_solver_iterations,
+                max_density_solver_iterations=DEFAULTS.deformable.max_density_solver_iterations,
+                max_viscosity_solver_iterations=DEFAULTS.deformable.max_viscosity_solver_iterations,
+                lower_bound=DEFAULTS.deformable.lower_bound,
+                upper_bound=DEFAULTS.deformable.upper_bound,
+                boundary_static_friction=boundary_friction,
+                boundary_kinetic_friction=boundary_friction,
+            )
+        else:
+            scene_kwargs["fem_options"] = gs.options.FEMOptions()
+            scene_kwargs["coupler_options"] = gs.options.IPCCouplerOptions(
+                contact_d_hat=DEFAULTS.deformable.ipc_contact_d_hat,
+                contact_friction_enable=DEFAULTS.deformable.ipc_contact_friction_enable,
+                contact_resistance=DEFAULTS.deformable.ipc_contact_resistance,
+                contact_eps_velocity=DEFAULTS.deformable.ipc_contact_eps_velocity,
+                contact_constitution=DEFAULTS.deformable.ipc_contact_constitution,
+                collision_detection_method=DEFAULTS.deformable.ipc_collision_detection_method,
+                constraint_strength_translation=DEFAULTS.deformable.ipc_constraint_strength_translation,
+                constraint_strength_rotation=DEFAULTS.deformable.ipc_constraint_strength_rotation,
+                enable_rigid_ground_contact=DEFAULTS.deformable.ipc_enable_rigid_ground_contact,
+                enable_rigid_rigid_contact=DEFAULTS.deformable.ipc_enable_rigid_rigid_contact,
+                two_way_coupling=DEFAULTS.deformable.ipc_two_way_coupling,
+                enable_rigid_dofs_sync=DEFAULTS.deformable.ipc_enable_rigid_dofs_sync,
+                free_base_driven_by_ipc=DEFAULTS.deformable.ipc_free_base_driven_by_ipc,
+            )
     scene = gs.Scene(**scene_kwargs)
 
     render = program.scene.render
@@ -108,17 +139,58 @@ def create_runtime_context(gs: Any, program: RigidIR) -> RuntimeContext:
             "name": "ground",
         }
         if has_deformable_bodies:
-            friction = (
-                program.scene.ground_collision.friction
-                if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
-                else None
-            )
-            ground_kwargs["material"] = gs.materials.Rigid(friction=friction, needs_coup=False)
+            if DEFAULTS.deformable.simulation_backend == "pbd":
+                friction = (
+                    program.scene.ground_collision.friction
+                    if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
+                    else None
+                )
+                ground_kwargs["material"] = gs.materials.Rigid(friction=friction, needs_coup=False)
+            else:
+                friction = (
+                    program.scene.ground_collision.friction
+                    if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
+                    else None
+                )
+                ground_kwargs["material"] = gs.materials.Rigid(
+                    friction=friction,
+                    needs_coup=False,
+                )
         else:
             ground_material = build_rigid_material(gs, rho=None, collision=program.scene.ground_collision)
             if ground_material is not None:
                 ground_kwargs["material"] = ground_material
         entities["ground"] = scene.add_entity(**ground_kwargs)
+        if has_deformable_bodies and DEFAULTS.deformable.simulation_backend == "fem_ipc":
+            ipc_ground_coup_friction = (
+                program.scene.ground_collision.coup_friction
+                if program.scene.ground_collision is not None and program.scene.ground_collision.coup_friction is not None
+                else (
+                    program.scene.ground_collision.friction
+                    if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
+                    else DEFAULTS.deformable.friction
+                )
+            )
+            ipc_ground_coup_restitution = (
+                program.scene.ground_collision.coup_restitution
+                if program.scene.ground_collision is not None and program.scene.ground_collision.coup_restitution is not None
+                else 0.0
+            )
+            ipc_ground_contact_resistance = (
+                program.scene.ground_collision.contact_resistance
+                if program.scene.ground_collision is not None and program.scene.ground_collision.contact_resistance is not None
+                else DEFAULTS.deformable.ipc_contact_resistance
+            )
+            scene.add_entity(
+                morph=gs.morphs.Plane(visualization=False),
+                material=gs.materials.Rigid(
+                    coup_friction=ipc_ground_coup_friction,
+                    coup_restitution=ipc_ground_coup_restitution,
+                    contact_resistance=ipc_ground_contact_resistance,
+                    coup_type="ipc_only",
+                ),
+                name="_ipc_ground",
+            )
     elif has_deformable_bodies and render is not None:
         scene.add_entity(
             morph=gs.morphs.Plane(collision=False),

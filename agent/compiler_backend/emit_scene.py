@@ -17,8 +17,11 @@ class SceneEmitContext:
 
 
 def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> SceneEmitContext:
-    backend_expr = "gs.cpu" if program.scene.backend == "cpu" else "gs.gpu"
     has_deformable_bodies = any(body.is_deformable for body in program.bodies)
+    if DEFAULTS.deformable.simulation_backend == "fem_ipc" and has_deformable_bodies:
+        backend_expr = "gs.cpu"
+    else:
+        backend_expr = "gs.cpu" if program.scene.backend == "cpu" else "gs.gpu"
     if not program.scene.show_viewer:
         emit(1, 'os.environ.setdefault("PYOPENGL_PLATFORM", "egl")')
         emit(1, 'os.environ.setdefault("MUJOCO_GL", "egl")')
@@ -34,16 +37,41 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
     emit(3, f"gravity={fmt_tuple(program.scene.sim.gravity)},")
     emit(2, "),")
     if has_deformable_bodies:
-        emit(2, "pbd_options=gs.options.PBDOptions(")
-        emit(3, f"particle_size={DEFAULTS.deformable.particle_size},")
-        emit(3, f"max_stretch_solver_iterations={DEFAULTS.deformable.max_stretch_solver_iterations},")
-        emit(3, f"max_bending_solver_iterations={DEFAULTS.deformable.max_bending_solver_iterations},")
-        emit(3, f"max_volume_solver_iterations={DEFAULTS.deformable.max_volume_solver_iterations},")
-        emit(3, f"max_density_solver_iterations={DEFAULTS.deformable.max_density_solver_iterations},")
-        emit(3, f"max_viscosity_solver_iterations={DEFAULTS.deformable.max_viscosity_solver_iterations},")
-        emit(3, f"lower_bound={fmt_tuple(DEFAULTS.deformable.lower_bound)},")
-        emit(3, f"upper_bound={fmt_tuple(DEFAULTS.deformable.upper_bound)},")
-        emit(2, "),")
+        if DEFAULTS.deformable.simulation_backend == "pbd":
+            boundary_friction = (
+                program.scene.ground_collision.friction
+                if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
+                else DEFAULTS.deformable.friction
+            )
+            emit(2, "pbd_options=gs.options.PBDOptions(")
+            emit(3, f"particle_size={DEFAULTS.deformable.particle_size},")
+            emit(3, f"max_stretch_solver_iterations={DEFAULTS.deformable.max_stretch_solver_iterations},")
+            emit(3, f"max_bending_solver_iterations={DEFAULTS.deformable.max_bending_solver_iterations},")
+            emit(3, f"max_volume_solver_iterations={DEFAULTS.deformable.max_volume_solver_iterations},")
+            emit(3, f"max_density_solver_iterations={DEFAULTS.deformable.max_density_solver_iterations},")
+            emit(3, f"max_viscosity_solver_iterations={DEFAULTS.deformable.max_viscosity_solver_iterations},")
+            emit(3, f"lower_bound={fmt_tuple(DEFAULTS.deformable.lower_bound)},")
+            emit(3, f"upper_bound={fmt_tuple(DEFAULTS.deformable.upper_bound)},")
+            emit(3, f"boundary_static_friction={boundary_friction},")
+            emit(3, f"boundary_kinetic_friction={boundary_friction},")
+            emit(2, "),")
+        else:
+            emit(2, "fem_options=gs.options.FEMOptions(),")
+            emit(2, "coupler_options=gs.options.IPCCouplerOptions(")
+            emit(3, f"contact_d_hat={DEFAULTS.deformable.ipc_contact_d_hat},")
+            emit(3, f"contact_friction_enable={DEFAULTS.deformable.ipc_contact_friction_enable},")
+            emit(3, f"contact_resistance={DEFAULTS.deformable.ipc_contact_resistance},")
+            emit(3, f"contact_eps_velocity={DEFAULTS.deformable.ipc_contact_eps_velocity},")
+            emit(3, f"contact_constitution={DEFAULTS.deformable.ipc_contact_constitution!r},")
+            emit(3, f"collision_detection_method={DEFAULTS.deformable.ipc_collision_detection_method!r},")
+            emit(3, f"constraint_strength_translation={DEFAULTS.deformable.ipc_constraint_strength_translation},")
+            emit(3, f"constraint_strength_rotation={DEFAULTS.deformable.ipc_constraint_strength_rotation},")
+            emit(3, f"enable_rigid_ground_contact={DEFAULTS.deformable.ipc_enable_rigid_ground_contact},")
+            emit(3, f"enable_rigid_rigid_contact={DEFAULTS.deformable.ipc_enable_rigid_rigid_contact},")
+            emit(3, f"two_way_coupling={DEFAULTS.deformable.ipc_two_way_coupling},")
+            emit(3, f"enable_rigid_dofs_sync={DEFAULTS.deformable.ipc_enable_rigid_dofs_sync},")
+            emit(3, f"free_base_driven_by_ipc={DEFAULTS.deformable.ipc_free_base_driven_by_ipc},")
+            emit(2, "),")
     if program.scene.viewer is not None:
         viewer = program.scene.viewer
         emit(2, "viewer_options=gs.options.ViewerOptions(")
@@ -61,22 +89,63 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
         ground_var = safe_var_name("ground")
         entity_vars["ground"] = ground_var
         if has_deformable_bodies:
-            friction = (
-                program.scene.ground_collision.friction
-                if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
-                else None
-            )
-            if friction is not None:
-                emit(
-                    1,
-                    f"{ground_var} = scene.add_entity("
-                    f"gs.morphs.Plane(), material=gs.materials.Rigid(friction={friction}, needs_coup=False), name='ground')",
+            if DEFAULTS.deformable.simulation_backend == "pbd":
+                friction = (
+                    program.scene.ground_collision.friction
+                    if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
+                    else None
                 )
+                if friction is not None:
+                    emit(
+                        1,
+                        f"{ground_var} = scene.add_entity("
+                        f"gs.morphs.Plane(), material=gs.materials.Rigid(friction={friction}, needs_coup=False), name='ground')",
+                    )
+                else:
+                    emit(
+                        1,
+                        f"{ground_var} = scene.add_entity("
+                        "gs.morphs.Plane(), material=gs.materials.Rigid(needs_coup=False), name='ground')",
+                    )
             else:
+                friction = (
+                    program.scene.ground_collision.friction
+                    if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
+                    else None
+                )
+                kwargs = []
+                if friction is not None:
+                    kwargs.append(f"friction={friction}")
+                kwargs.append("needs_coup=False")
                 emit(
                     1,
                     f"{ground_var} = scene.add_entity("
-                    "gs.morphs.Plane(), material=gs.materials.Rigid(needs_coup=False), name='ground')",
+                    f"gs.morphs.Plane(), material=gs.materials.Rigid({', '.join(kwargs)}), name='ground')",
+                )
+                ipc_ground_coup_friction = (
+                    program.scene.ground_collision.coup_friction
+                    if program.scene.ground_collision is not None and program.scene.ground_collision.coup_friction is not None
+                    else (friction if friction is not None else DEFAULTS.deformable.friction)
+                )
+                ipc_ground_coup_restitution = (
+                    program.scene.ground_collision.coup_restitution
+                    if program.scene.ground_collision is not None and program.scene.ground_collision.coup_restitution is not None
+                    else 0.0
+                )
+                ipc_ground_contact_resistance = (
+                    program.scene.ground_collision.contact_resistance
+                    if program.scene.ground_collision is not None and program.scene.ground_collision.contact_resistance is not None
+                    else DEFAULTS.deformable.ipc_contact_resistance
+                )
+                emit(
+                    1,
+                    "_ipc_ground = scene.add_entity("
+                    "gs.morphs.Plane(visualization=False), "
+                    f"material=gs.materials.Rigid(coup_friction={ipc_ground_coup_friction}, "
+                    f"coup_restitution={ipc_ground_coup_restitution}, "
+                    f"contact_resistance={ipc_ground_contact_resistance}, "
+                    "coup_type='ipc_only'), "
+                    "name='_ipc_ground')",
                 )
         else:
             ground_material_kwargs = material_kwargs_from_collision(

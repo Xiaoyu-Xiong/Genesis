@@ -488,12 +488,37 @@ class Camera(RBC):
 
         # Store the current frame for video recording
         if is_recording:
-            if not (self._recorded_t_prev < 0 or self._recorded_t_prev == self._visualizer.scene._t - 1):
+            if not (self._recorded_t_prev < 0 or self._recorded_t_prev < self._visualizer.scene._t):
                 gs.raise_exception(
-                    "Missing frames in recording. Please call 'camera.render()' after 'every scene.step()'."
+                    "Invalid recording frame order. Please ensure `camera.render()` is called with strictly increasing scene time."
                 )
-            self._recorded_t_prev == self._visualizer.scene._t
-            rgb_frame = tensor_to_array(rgb_arr)
+            rgb_frame = np.array(tensor_to_array(rgb_arr), copy=True)
+            if (
+                rgb_frame.ndim >= 2
+                and rgb_frame.mean() < 2.0
+                and len(self._recorded_imgs) > 0
+                and np.asarray(self._recorded_imgs[-1]).mean() >= 2.0
+            ):
+                was_recording = self._in_recording
+                self._in_recording = False
+                try:
+                    retry_rgb, _, _, _ = self.render(
+                        rgb=True,
+                        depth=depth,
+                        segmentation=segmentation,
+                        colorize_seg=colorize_seg,
+                        normal=normal,
+                        antialiasing=antialiasing,
+                        force_render=True,
+                    )
+                finally:
+                    self._in_recording = was_recording
+                if retry_rgb is not None:
+                    retry_frame = np.array(tensor_to_array(retry_rgb), copy=True)
+                    if retry_frame.mean() >= 2.0:
+                        rgb_arr = retry_rgb
+                        rgb_frame = retry_frame
+            self._recorded_t_prev = self._visualizer.scene._t
             self._recorded_imgs.append(rgb_frame)
 
         return rgb_arr if rgb else None, depth_arr, seg_arr, normal_arr

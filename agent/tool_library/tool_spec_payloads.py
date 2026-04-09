@@ -29,6 +29,10 @@ from .tool_spec_rules import (
 )
 
 
+def _default_scene_backend() -> str:
+    return "cpu" if DEFAULTS.deformable.simulation_backend == "fem_ipc" else DEFAULTS.optimization.backend
+
+
 def build_generation_guide_payload(
     *,
     required_shape_kind: str | None,
@@ -71,12 +75,12 @@ def build_observation_field_guide_payload() -> dict[str, Any]:
         "ok": True,
         "fields": {
             "pos": {
-                "meaning": "world-frame position of the body origin for rigid bodies, or center-of-mass position for deformable PBD bodies",
+                "meaning": "world-frame position of the body origin for rigid bodies, or center-of-mass position for deformable bodies",
                 "dimension": 3,
             },
             "quat": {"meaning": "world-frame orientation quaternion (w,x,y,z)", "dimension": 4},
             "vel": {
-                "meaning": "world-frame linear velocity for rigid bodies, or center-of-mass average velocity for deformable PBD bodies",
+                "meaning": "world-frame linear velocity for rigid bodies, or center-of-mass average velocity for deformable bodies",
                 "dimension": 3,
             },
             "ang": {"meaning": "world-frame angular velocity", "dimension": 3},
@@ -153,7 +157,8 @@ def _build_constraints(
     constraints: dict[str, Any] = {
         "ir_version": IR_VERSION,
         "allowed_shape_kinds": ["sphere", "box", "cylinder", "mesh", "mjcf", "urdf"],
-        "supported_simulation_kinds": ["rigid", "pbd"],
+        "supported_simulation_kinds": ["rigid", "deformable"],
+        "active_deformable_backend": DEFAULTS.deformable.simulation_backend,
         "multi_body_supported": True,
         "multi_articulated_supported": True,
         "root_structure_note": ROOT_STRUCTURE_NOTE,
@@ -192,7 +197,7 @@ def _build_constraints(
             ),
         },
         "allowed_observe_fields": sorted(ALLOWED_OBSERVE_FIELDS),
-        "backend_default": DEFAULTS.optimization.backend,
+        "backend_default": _default_scene_backend(),
         "show_viewer_default": False,
         "render_required": True,
         "default_render_enabled": True,
@@ -245,7 +250,7 @@ def _build_constraints(
 
 
 def _build_parameter_notes() -> dict[str, str]:
-    return {
+    notes = {
         "scene.render.follow_entity.smoothing": (
             "Follow-camera smoothing factor. Higher values make camera motion smoother but increase lag."
         ),
@@ -292,20 +297,7 @@ def _build_parameter_notes() -> dict[str, str]:
             "Direct force/torque commands for motor actuators. These do not provide position tracking on their own."
         ),
         "bodies[].simulation_kind": (
-            "Choose `pbd` when soft-body deformation visually makes the task closer to the prompt. Otherwise prefer `rigid`."
-        ),
-        "bodies[].deformable_material.stretch_compliance": (
-            "PBD stretch compliance. Lower values make the soft body stiffer in edge-length preservation; higher "
-            "values make it stretch and sag more easily. Very stiff elastic solids are often around 1e-8 to 1e-6, "
-            "softer jelly-like solids around 1e-6 to 1e-4, and very floppy bodies can go higher. If the body is too "
-            "floppy, decrease this value by about 3x to 10x; if it is too rigid, increase it by about 3x to 10x. Use 1e-4 as default for a moderately soft material with clearly visible deformation."
-        ),
-        "bodies[].deformable_material.volume_compliance": (
-            "PBD volume compliance. Lower values preserve volume more strongly; higher values allow more compression. "
-            "If the body collapses or squashes too much, decrease this value; if it stays too incompressible, increase it. Use 1e-5 as default for visibly compressible but not completely mushy behavior."
-        ),
-        "bodies[].deformable_material.rho": (
-            "Density for PBD elastic bodies. Larger values make the soft body heavier without changing its geometry."
+            "Choose `deformable` when soft-body deformation visually makes the task closer to the prompt. Otherwise prefer `rigid`."
         ),
         "ApplyExternalWrenchActionIR.force": (
             "External force disturbance applied to a body or selected links. It is not an actuator command. Its "
@@ -337,6 +329,43 @@ def _build_parameter_notes() -> dict[str, str]:
             "external disturbance to several bodies."
         ),
     }
+    if DEFAULTS.deformable.simulation_backend == "pbd":
+        notes["bodies[].deformable_material.stretch_compliance"] = (
+            "PBD stretch compliance. Lower values make the soft body stiffer in edge-length preservation; higher "
+            "values make it stretch and sag more easily. Very stiff elastic solids are often around 1e-8 to 1e-6, "
+            "softer jelly-like solids around 1e-6 to 1e-4, and very floppy bodies can go higher. If the body is too "
+            "floppy, decrease this value by about 3x to 10x; if it is too rigid, increase it by about 3x to 10x. "
+            "Use **3e-5** as default for a moderately soft material with clearly visible deformation."
+        )
+        notes["bodies[].deformable_material.volume_compliance"] = (
+            "PBD volume compliance. Lower values preserve volume more strongly; higher values allow more compression. "
+            "If the body collapses or squashes too much, decrease this value; if it stays too incompressible, increase it. "
+            "Use **3e-6** as default for visibly compressible but not completely mushy behavior."
+        )
+        notes["bodies[].deformable_material.rho"] = (
+            "Density for PBD elastic bodies. Larger values make the soft body heavier without changing its geometry."
+        )
+    else:
+        notes["bodies[].deformable_material.E"] = (
+            "Young's modulus for FEM elastic bodies, measured in Pascals, controls the body's resistance to stretching "
+            "and compression. Higher `E` makes the body stiffer, lower `E` makes it softer. As a rough guide: very "
+            "soft jelly-like solids are often around `1e4` to `1e5`, moderately soft rubbery solids around `1e5` to "
+            "`1e6`, and firmer but still visibly deformable solids around `1e6` to `1e7`. If the body visibly collapses "
+            "too much or cannot support load, increase `E` by about 3x to 10x; if it hardly deforms, decrease `E` by "
+            "about 3x to 10x. Use about **5e5** as a good default initial guess for a medium-elastic soft solid."
+        )
+        notes["bodies[].deformable_material.nu"] = (
+            "Poisson ratio for FEM elastic bodies. Higher values make the material less compressible. "
+            "Use about **0.35** as a good default initial guess for a moderately compressible soft solid."
+        )
+        notes["bodies[].deformable_material.rho"] = (
+            "Density for FEM elastic bodies. Larger values make the deformable body heavier without changing its geometry."
+        )
+        notes["bodies[].initial_pose.pos"] = (
+            "For FEM+IPC scenes, initial placements must avoid penetration and interpenetration. Leave a small positive "
+            "clearance between deformable bodies, rigid bodies, and support surfaces instead of starting in overlap."
+        )
+    return notes
 
 
 def _build_parameter_relationship_notes() -> dict[str, str]:
@@ -360,9 +389,23 @@ def _build_parameter_relationship_notes() -> dict[str, str]:
 
 
 def _build_templates(*, effective_dt: float, effective_render: dict[str, Any]) -> dict[str, Any]:
+    if DEFAULTS.deformable.simulation_backend == "pbd":
+        deformable_material_example = {
+            "kind": "elastic",
+            "rho": 1100.0,
+            "stretch_compliance": 1e-4,
+            "volume_compliance": 1e-5,
+        }
+    else:
+        deformable_material_example = {
+            "kind": "elastic",
+            "rho": 1000.0,
+            "E": 5e5,
+            "nu": 0.35,
+        }
     return {
         "minimal_scene": {
-            "backend": DEFAULTS.optimization.backend,
+            "backend": _default_scene_backend(),
             "show_viewer": False,
             "add_ground": True,
             "sim": {"dt": effective_dt, "gravity": [0.0, 0.0, -9.81]},
@@ -388,18 +431,13 @@ def _build_templates(*, effective_dt: float, effective_render: dict[str, Any]) -
         },
         "deformable_body_example": {
             "name": "soft_cylinder",
-            "simulation_kind": "pbd",
+            "simulation_kind": "deformable",
             "shape": {"kind": "cylinder", "radius": 0.08, "height": 0.24},
-            "deformable_material": {
-                "kind": "elastic",
-                "rho": 1100.0,
-                "stretch_compliance": 1e-4,
-                "volume_compliance": 1e-5
-            },
+            "deformable_material": deformable_material_example,
             "initial_pose": {"pos": [0.0, 0.0, 0.4], "quat": [1.0, 0.0, 0.0, 0.0]},
         },
         "deformable_scene_example": {
-            "backend": DEFAULTS.optimization.backend,
+            "backend": _default_scene_backend(),
             "show_viewer": False,
             "add_ground": True,
             "sim": {"dt": effective_dt, "gravity": [0.0, 0.0, -9.81]},

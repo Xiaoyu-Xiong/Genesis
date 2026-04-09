@@ -8,6 +8,7 @@ from ..ir_schema import (
     BoxShapeIR,
     CollisionIR,
     CylinderShapeIR,
+    FEMElasticMaterialIR,
     MJCFShapeIR,
     MeshShapeIR,
     PBDElasticMaterialIR,
@@ -40,7 +41,7 @@ def build_body_morph(gs: Any, body: BodyIR) -> Any:
             **tet_kwargs,
         )
     if isinstance(shape, MeshShapeIR):
-        return gs.morphs.Mesh(file=shape.file, scale=shape.scale, pos=pos, quat=quat, fixed=fixed)
+        return gs.morphs.Mesh(file=shape.file, scale=shape.scale, pos=pos, quat=quat, fixed=fixed, **tet_kwargs)
     if isinstance(shape, MJCFShapeIR):
         return gs.morphs.MJCF(
             file=shape.file,
@@ -68,21 +69,38 @@ def build_body_morph(gs: Any, body: BodyIR) -> Any:
 def build_body_material(gs: Any, body: BodyIR) -> Any | None:
     if body.is_deformable:
         material = body.deformable_material
-        if not isinstance(material, PBDElasticMaterialIR):
+        if DEFAULTS.deformable.simulation_backend == "pbd":
+            if not isinstance(material, PBDElasticMaterialIR):
+                raise TypeError(f"Unsupported deformable material IR: {type(material).__name__}")
+            friction = body.collision.friction if body.collision.friction is not None else DEFAULTS.deformable.friction
+            kwargs: dict[str, Any] = {
+                "rho": material.rho,
+                "static_friction": friction,
+                "kinetic_friction": friction,
+                "stretch_compliance": material.stretch_compliance,
+                "volume_compliance": material.volume_compliance,
+                "stretch_relaxation": DEFAULTS.deformable.stretch_relaxation,
+                "bending_relaxation": DEFAULTS.deformable.bending_relaxation,
+                "volume_relaxation": DEFAULTS.deformable.volume_relaxation,
+            }
+            return gs.materials.PBD.Elastic(**kwargs)
+
+        if not isinstance(material, FEMElasticMaterialIR):
             raise TypeError(f"Unsupported deformable material IR: {type(material).__name__}")
-        friction = body.collision.friction if body.collision.friction is not None else DEFAULTS.deformable.friction
-        kwargs: dict[str, Any] = {
-            "rho": material.rho,
-            "static_friction": friction,
-            "kinetic_friction": friction,
-            "stretch_compliance": material.stretch_compliance,
-            "volume_compliance": material.volume_compliance,
-            "stretch_relaxation": DEFAULTS.deformable.stretch_relaxation,
-            "bending_relaxation": DEFAULTS.deformable.bending_relaxation,
-            "volume_relaxation": DEFAULTS.deformable.volume_relaxation,
-        }
-        return gs.materials.PBD.Elastic(**kwargs)
-    return build_rigid_material(gs, rho=body.rho, collision=body.collision)
+        return gs.materials.FEM.Elastic(
+            E=material.E,
+            nu=material.nu,
+            rho=material.rho,
+            model=DEFAULTS.deformable.fem_model,
+            hydroelastic_modulus=DEFAULTS.deformable.fem_hydroelastic_modulus,
+            friction_mu=DEFAULTS.deformable.fem_friction_mu,
+            contact_resistance=DEFAULTS.deformable.fem_contact_resistance,
+            hessian_invariant=DEFAULTS.deformable.fem_hessian_invariant,
+        )
+    coup_type_override = None
+    if DEFAULTS.deformable.simulation_backend == "fem_ipc" and not body.is_articulated:
+        coup_type_override = "two_way_soft_constraint"
+    return build_rigid_material(gs, rho=body.rho, collision=body.collision, coup_type_override=coup_type_override)
 
 
 def build_rigid_material(
@@ -90,6 +108,7 @@ def build_rigid_material(
     *,
     rho: float | None,
     collision: CollisionIR | None,
+    coup_type_override: str | None = None,
 ) -> Any | None:
     material_kwargs: dict[str, Any] = {}
     if rho is not None:
@@ -103,6 +122,8 @@ def build_rigid_material(
             material_kwargs["coup_restitution"] = collision.coup_restitution
         if collision.contact_resistance is not None:
             material_kwargs["contact_resistance"] = collision.contact_resistance
+    if coup_type_override is not None:
+        material_kwargs["coup_type"] = coup_type_override
     if not material_kwargs:
         return None
     return gs.materials.Rigid(**material_kwargs)

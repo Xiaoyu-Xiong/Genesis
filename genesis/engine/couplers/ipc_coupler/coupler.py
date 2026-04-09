@@ -723,6 +723,21 @@ class IPCCoupler(RBC):
         self._abd_state_feature = cast(
             AffineBodyStateAccessorFeature, self._ipc_world.features().find(AffineBodyStateAccessorFeature)
         )
+        if self._abd_state_feature is None:
+            requires_abd_state = (
+                self.options.two_way_coupling
+                or any(not entity.base_link.is_fixed for entity in self._entities_by_coup_type.get(COUPLING_TYPE.IPC_ONLY, []))
+                or any(not entity.base_link.is_fixed for entity in self._entities_by_coup_type.get(COUPLING_TYPE.EXTERNAL_ARTICULATION, []))
+            )
+            if requires_abd_state:
+                gs.raise_exception(
+                    "IPC rigid state accessor feature is unavailable in the current libuipc build, but the current "
+                    "coupling configuration requires rigid ABD state retrieval."
+                )
+            gs.logger.warning(
+                "IPC rigid state accessor feature is unavailable; continuing with FEM-only IPC retrieval and Genesis-side rigid fallback."
+            )
+            return
         body_count = self._abd_state_feature.body_count()
 
         # Verify the count matches IPC's ABD body count

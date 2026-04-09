@@ -4,7 +4,22 @@ import hashlib
 import json
 from typing import Any
 
+from ..defaults import DEFAULTS
 from .video_sampler import SampledFrame
+
+
+if DEFAULTS.deformable.simulation_backend == "pbd":
+    _DEFORMABLE_TUNING_GUIDANCE = (
+        "For deformable bodies, prefer fixes that adjust `deformable_material.stretch_compliance`, "
+        "`deformable_material.volume_compliance`, or `deformable_material.rho` before suggesting hidden solver "
+        "hyperparameters, because the deformable v1 pipeline intentionally fixes those internal settings."
+    )
+else:
+    _DEFORMABLE_TUNING_GUIDANCE = (
+        "For deformable bodies, prefer fixes that adjust `deformable_material.E`, `deformable_material.nu`, "
+        "or `deformable_material.rho` before suggesting hidden IPC/FEM solver hyperparameters, because the "
+        "deformable v1 pipeline intentionally fixes those internal settings."
+    )
 
 
 CRITIC_SYSTEM_PROMPT = """You are a simulation critic for robotics/physics outputs.
@@ -33,10 +48,11 @@ Your job:
 - Base all suggested fixes on the provided generator tool-library capability only.
 - Do not suggest unavailable controllers, target-tracking systems, sensors, or new runtime abilities that the current tool library cannot express.
 - Every item in `priority_fixes` must be implementable through the provided tool library and current IR/XML path.
+- If the active deformable backend is FEM+IPC, treat any initial penetration or interpenetration between bodies as a serious setup error and explicitly call it out. Prefer fixes that separate bodies at initialization with a small positive clearance.
 - Do not over-focus on duration alone; prioritize content correctness, physical plausibility, and control logic.
 - For each major issue, make the `fix` field concrete: name the IR field(s) or actuator setting(s) to adjust, the direction of change, and the intended effect on behavior.
 - For mesh objects, calibrate their direction and scale from the video evidence, and if applicable, provide specific adjustments to their quaterinion and scale fields with the intended effect on behavior.
-- For deformable PBD bodies, prefer fixes that adjust `deformable_material.stretch_compliance`, `deformable_material.volume_compliance`, or `deformable_material.rho` before suggesting hidden solver hyperparameters, because the deformable v1 pipeline intentionally fixes those internal settings.
+- """ + _DEFORMABLE_TUNING_GUIDANCE + """
 - When performing numerical parameter tuning, prefer exponential and more aggressive changes if the evidence suggests a major problem (e.g. objects supposed to move are almost static), and prefer smaller, more precise adjustments if the issue seems more borderline.
 - Do not recommend verbose IR rewrites when a shorter equivalent IR is possible.
 

@@ -330,8 +330,14 @@ class Collider:
         valid &= ~geom_is_ipc_only[row]
         valid &= ~geom_is_ipc_only[col]
 
-        # Skip pairs where both links are delegated to IPC
-        valid &= ~(geom_is_ipc_deleg[row] & geom_is_ipc_deleg[col])
+        # Skip delegated-delegated pairs only when IPC is responsible for rigid-rigid contact as well.
+        from genesis.engine.couplers import IPCCoupler
+
+        skip_ipc_delegated_pairs = True
+        if isinstance(self._solver.sim.coupler, IPCCoupler):
+            skip_ipc_delegated_pairs = self._solver.sim.coupler.options.enable_rigid_rigid_contact
+        if skip_ipc_delegated_pairs:
+            valid &= ~(geom_is_ipc_deleg[row] & geom_is_ipc_deleg[col])
 
         # pair of fixed links wrt the world
         valid &= ~(geom_is_fixed[row] & geom_is_fixed[col])

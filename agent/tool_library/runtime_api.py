@@ -25,7 +25,7 @@ class RigidToolLibrary:
 
     Scope of current IR:
     - Multiple bodies per program (`bodies`), including rigid primitive bodies, non-articulated mesh bodies,
-      deformable PBD bodies, and multiple articulated MJCF/URDF bodies.
+      deformable bodies, and multiple articulated MJCF/URDF bodies.
     - Action space includes pose edits, dof writes, external wrench application, actuator controls,
       and deformable observation fields.
     """

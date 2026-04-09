@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..defaults import DEFAULTS
+
 ROOT_STRUCTURE_NOTE = "Use top-level `bodies` list."
 BODY_COUNT_POLICY = "Multiple bodies are allowed, including multiple articulated bodies."
 BODY_NAMING_POLICY = "Each body.name must be unique. Actions refer to bodies through the `entity` field."
@@ -48,37 +50,54 @@ DYNAMIC_SCENE_POLICY = (
     "evolve noticeably over the requested duration."
 )
 DEFORMABLE_BODY_POLICY = (
-    "Use `simulation_kind='pbd'` when soft-body deformation will visually make the scene closer to the prompts; "
+    "Use `simulation_kind='deformable'` when soft-body deformation will visually make the scene closer to the prompts; "
     "otherwise prefer rigid bodies."
 )
 DEFORMABLE_GEOMETRY_POLICY = (
-    "In deformable v1, PBD bodies may only use `sphere`, `box`, `cylinder`, or `mesh` shapes."
+    "In deformable v1, deformable bodies may only use `sphere`, `box`, `cylinder`, or `mesh` shapes."
 )
-DEFORMABLE_MATERIAL_POLICY = (
-    "In deformable v1, the only supported deformable material is PBD elastic material. When specifying it, only set "
-    "`rho`, `stretch_compliance`, and `volume_compliance`; particle size and solver iteration hyperparameters are "
-    "fixed by the system. Lower compliance makes the body stiffer; higher compliance makes it softer or more compressible. "
-    "A good default initial guess for clearly visible but still controlled softness is `stretch_compliance=1e-4` and "
-    "`volume_compliance=1e-5`."
-)
+if DEFAULTS.deformable.simulation_backend == "pbd":
+    DEFORMABLE_MATERIAL_POLICY = (
+        "In deformable v1, the active backend is PBD elastic. When specifying a deformable material, only set "
+        "`rho`, `stretch_compliance`, and `volume_compliance`; particle size and solver iteration hyperparameters are "
+        "fixed by the system. Lower compliance makes the body stiffer; higher compliance makes it softer or more compressible. "
+        "A good default initial guess for clearly visible but still controlled softness is `stretch_compliance=1e-4` and "
+        "`volume_compliance=1e-5`."
+    )
+    DEFORMABLE_SCENE_POLICY = (
+        "In deformable PBD scenes, standard `scene.add_ground` semantics remain available. When `scene.add_ground=true`, "
+        "the runtime configures the ground so rigid bodies collide with it while deformable PBD bodies continue to use "
+        "PBD boundary handling instead of rigid-geometry coupling."
+    )
+else:
+    DEFORMABLE_MATERIAL_POLICY = (
+        "In deformable v1, the active backend is FEM+IPC. When specifying a deformable material, only set "
+        "`rho`, `E`, and `nu`; IPC/FEM solver and contact hyperparameters are fixed by the system. "
+        "Higher `E` makes the body stiffer, lower `E` makes it softer. Higher `nu` makes it less compressible. "
+        "As a rough guide, very soft jelly-like solids are often around `E=1e4` to `1e5`, moderately soft rubbery "
+        "solids around `E=1e5` to `1e6`, and firmer but still visibly deformable solids around `E=1e6` to `1e7`. "
+        "A good default initial guess for a medium-elastic soft solid is `E=5e5`, `nu=0.35`, and `rho=1000`."
+    )
+    DEFORMABLE_SCENE_POLICY = (
+        "In deformable FEM+IPC scenes, standard `scene.add_ground` semantics remain available. When `scene.add_ground=true`, "
+        "the runtime keeps pure rigid-ground and pure rigid-rigid contact on Genesis' rigid solver, while FEM-involving "
+        "contact uses IPC. The ground is represented both as a normal Genesis rigid ground for rigid bodies and as a "
+        "hidden IPC-only plane for FEM-ground contact. When using FEM+IPC, do not generate bodies with initial "
+        "penetration or interpenetration. Leave a small positive clearance between all bodies and support surfaces."
+    )
 DEFORMABLE_ACTION_POLICY = (
-    "In deformable v1, PBD bodies are passive soft bodies. Do not use actuators, `set_pose`, `set_dofs_position`, "
+    "In deformable v1, deformable bodies are passive soft bodies. Do not use actuators, `set_pose`, `set_dofs_position`, "
     "`set_dofs_velocity`, `set_target_pos`, `set_torque`, or `apply_external_wrench` on them."
 )
 DEFORMABLE_OBSERVE_POLICY = (
-    "For PBD bodies, observe deformable-friendly fields such as `pos`, `vel`, `bbox_min`, `bbox_max`, `bbox_size`, "
-    "`vertex_disp_mean`, and `vertex_disp_max` instead of rigid-only pose/joint fields. Do not mix deformable and "
-    "rigid bodies in the same multi-entity `observe` action, and do not use `include_contacts=true` on deformable "
-    "bodies in v1."
+    "For deformable bodies, observe deformable-friendly fields such as `pos`, `vel`, `bbox_min`, `bbox_max`, "
+    "`bbox_size`, `vertex_disp_mean`, and `vertex_disp_max` instead of rigid-only pose/joint fields. Do not mix "
+    "deformable and rigid bodies in the same multi-entity `observe` action, and do not use `include_contacts=true` "
+    "on deformable bodies in v1."
 )
 DEFORMABLE_MESH_ASSET_POLICY = (
     "Do not call the mesh generation tool to create deformable geometry in v1. Deformable mesh bodies may only use "
     "preexisting mesh files."
-)
-DEFORMABLE_SCENE_POLICY = (
-    "In deformable PBD scenes, standard `scene.add_ground` semantics remain available. When `scene.add_ground=true`, "
-    "the runtime configures the ground so rigid bodies collide with it while PBD bodies continue to use PBD boundary "
-    "handling instead of rigid-geometry coupling."
 )
 
 COMPACT_HARD_RULE_KEYS = (

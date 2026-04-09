@@ -8,6 +8,7 @@ from ..ir_schema import (
     BoxShapeIR,
     CollisionIR,
     CylinderShapeIR,
+    FEMElasticMaterialIR,
     MJCFShapeIR,
     MeshShapeIR,
     PBDElasticMaterialIR,
@@ -44,6 +45,7 @@ def body_morph_source(body: BodyIR) -> str:
             f"pos={pos_src}, "
             f"quat={quat_src}, "
             f"fixed={fixed_src}"
+            f"{tet_kwarg}"
             ")"
         )
     if isinstance(shape, MJCFShapeIR):
@@ -77,21 +79,39 @@ def body_morph_source(body: BodyIR) -> str:
 def body_material_source(body: BodyIR) -> str | None:
     if body.is_deformable:
         material = body.deformable_material
-        if not isinstance(material, PBDElasticMaterialIR):
+        if DEFAULTS.deformable.simulation_backend == "pbd":
+            if not isinstance(material, PBDElasticMaterialIR):
+                raise TypeError(f"Unsupported deformable material IR: {type(material).__name__}")
+            friction = body.collision.friction if body.collision.friction is not None else DEFAULTS.deformable.friction
+            kwargs = [
+                f"rho={material.rho}",
+                f"static_friction={friction}",
+                f"kinetic_friction={friction}",
+                f"stretch_compliance={material.stretch_compliance}",
+                f"volume_compliance={material.volume_compliance}",
+                f"stretch_relaxation={DEFAULTS.deformable.stretch_relaxation}",
+                f"bending_relaxation={DEFAULTS.deformable.bending_relaxation}",
+                f"volume_relaxation={DEFAULTS.deformable.volume_relaxation}",
+            ]
+            return f"gs.materials.PBD.Elastic({', '.join(kwargs)})"
+
+        if not isinstance(material, FEMElasticMaterialIR):
             raise TypeError(f"Unsupported deformable material IR: {type(material).__name__}")
-        friction = body.collision.friction if body.collision.friction is not None else DEFAULTS.deformable.friction
         kwargs = [
+            f"E={material.E}",
+            f"nu={material.nu}",
             f"rho={material.rho}",
-            f"static_friction={friction}",
-            f"kinetic_friction={friction}",
-            f"stretch_compliance={material.stretch_compliance}",
-            f"volume_compliance={material.volume_compliance}",
-            f"stretch_relaxation={DEFAULTS.deformable.stretch_relaxation}",
-            f"bending_relaxation={DEFAULTS.deformable.bending_relaxation}",
-            f"volume_relaxation={DEFAULTS.deformable.volume_relaxation}",
+            f"model={DEFAULTS.deformable.fem_model!r}",
+            f"hydroelastic_modulus={DEFAULTS.deformable.fem_hydroelastic_modulus}",
+            f"friction_mu={DEFAULTS.deformable.fem_friction_mu}",
+            f"contact_resistance={DEFAULTS.deformable.fem_contact_resistance!r}",
+            f"hessian_invariant={DEFAULTS.deformable.fem_hessian_invariant}",
         ]
-        return f"gs.materials.PBD.Elastic({', '.join(kwargs)})"
-    kwargs = material_kwargs_from_collision(rho=body.rho, collision=body.collision)
+        return f"gs.materials.FEM.Elastic({', '.join(kwargs)})"
+    coup_type_override = None
+    if DEFAULTS.deformable.simulation_backend == "fem_ipc" and not body.is_articulated:
+        coup_type_override = "two_way_soft_constraint"
+    kwargs = material_kwargs_from_collision(rho=body.rho, collision=body.collision, coup_type_override=coup_type_override)
     if not kwargs:
         return None
     return f"gs.materials.Rigid({', '.join(kwargs)})"
@@ -101,6 +121,7 @@ def material_kwargs_from_collision(
     *,
     rho: float | None,
     collision: CollisionIR | None,
+    coup_type_override: str | None = None,
 ) -> list[str]:
     kwargs: list[str] = []
     if rho is not None:
@@ -114,6 +135,8 @@ def material_kwargs_from_collision(
             kwargs.append(f"coup_restitution={collision.coup_restitution}")
         if collision.contact_resistance is not None:
             kwargs.append(f"contact_resistance={collision.contact_resistance}")
+    if coup_type_override is not None:
+        kwargs.append(f"coup_type={coup_type_override!r}")
     return kwargs
 
 

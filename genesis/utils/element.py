@@ -1,5 +1,6 @@
 import os
 import pickle as pkl
+import math
 
 import numpy as np
 import trimesh
@@ -12,9 +13,10 @@ from . import mesh as mu
 
 def box_to_elements(pos=(0, 0, 0), size=(1, 1, 1), tet_cfg=dict()):
     resolution = _tet_resolution(tet_cfg)
+    target_edge = _primitive_target_edge(feature_sizes=size, resolution=resolution)
     trimesh_obj = trimesh.creation.box(extents=size)
-    trimesh_obj = _subdivide_surface_mesh(trimesh_obj, resolution)
-    tet_cfg = _primitive_tet_cfg(tet_cfg, characteristic_size=max(size), resolution=resolution)
+    trimesh_obj = mu.remesh_surface_mesh(trimesh_obj, edge_len_abs=target_edge, fix=False)
+    tet_cfg = _primitive_tet_cfg(tet_cfg, target_edge=target_edge)
     trimesh_obj.vertices += np.array(pos)
     verts, elems = mu.tetrahedralize_mesh(trimesh_obj, tet_cfg)
 
@@ -23,9 +25,10 @@ def box_to_elements(pos=(0, 0, 0), size=(1, 1, 1), tet_cfg=dict()):
 
 def sphere_to_elements(pos=(0, 0, 0), radius=0.5, tet_cfg=dict()):
     resolution = _tet_resolution(tet_cfg)
-    trimesh_obj = trimesh.creation.icosphere(subdivisions=max(1, resolution), radius=1.0)
-    tet_cfg = _primitive_tet_cfg(tet_cfg, characteristic_size=2.0 * radius, resolution=resolution)
-    trimesh_obj.vertices *= np.array(radius)
+    target_edge = _primitive_target_edge(feature_sizes=(2.0 * radius,), resolution=resolution)
+    trimesh_obj = trimesh.creation.icosphere(subdivisions=max(1, resolution), radius=radius)
+    trimesh_obj = mu.remesh_surface_mesh(trimesh_obj, edge_len_abs=target_edge, fix=False)
+    tet_cfg = _primitive_tet_cfg(tet_cfg, target_edge=target_edge)
     trimesh_obj.vertices += np.array(pos)
     verts, elems = mu.tetrahedralize_mesh(trimesh_obj, tet_cfg)
 
@@ -34,10 +37,11 @@ def sphere_to_elements(pos=(0, 0, 0), radius=0.5, tet_cfg=dict()):
 
 def cylinder_to_elements(pos=(0, 0, 0), radius=0.5, height=1.0, tet_cfg=dict()):
     resolution = _tet_resolution(tet_cfg)
-    sections = max(16, 8 * resolution)
+    target_edge = _primitive_target_edge(feature_sizes=(2.0 * radius, height), resolution=resolution)
+    sections = max(24, int(math.ceil((2.0 * math.pi * radius) / max(target_edge, 1e-9))))
     trimesh_obj = trimesh.creation.cylinder(radius=radius, height=height, sections=sections)
-    trimesh_obj = _subdivide_surface_mesh(trimesh_obj, resolution)
-    tet_cfg = _primitive_tet_cfg(tet_cfg, characteristic_size=max(2.0 * radius, height), resolution=resolution)
+    trimesh_obj = mu.remesh_surface_mesh(trimesh_obj, edge_len_abs=target_edge, fix=False)
+    tet_cfg = _primitive_tet_cfg(tet_cfg, target_edge=target_edge)
     trimesh_obj.vertices += np.array(pos)
     verts, elems = mu.tetrahedralize_mesh(trimesh_obj, tet_cfg)
 
@@ -117,17 +121,17 @@ def _tet_resolution(tet_cfg: dict) -> int:
     return max(1, int(tet_cfg.get("tet_resolution", 3)))
 
 
-def _subdivide_surface_mesh(mesh: trimesh.Trimesh, resolution: int) -> trimesh.Trimesh:
-    refined = mesh
-    for _ in range(max(0, resolution - 1)):
-        refined = refined.subdivide()
-    return refined
+def _primitive_target_edge(*, feature_sizes, resolution: int) -> float:
+    min_feature = max(float(min(feature_sizes)), 1e-6)
+    return min_feature / float(2 * resolution + 1)
 
 
-def _primitive_tet_cfg(tet_cfg: dict, *, characteristic_size: float, resolution: int) -> dict:
+def _primitive_tet_cfg(tet_cfg: dict, *, target_edge: float) -> dict:
     cfg = dict(tet_cfg)
+    cfg["quality"] = True
+    cfg["nobisect"] = False
+    cfg["mindihedral"] = max(int(cfg.get("mindihedral", 10)), 15)
     if float(cfg.get("maxvolume", -1.0)) > 0:
         return cfg
-    target_edge = float(characteristic_size) / float(max(2, 2 * resolution + 1))
-    cfg["maxvolume"] = max((target_edge**3) / 6.0, 1e-9)
+    cfg["maxvolume"] = max((target_edge**3) * math.sqrt(2.0) / 12.0, 1e-9)
     return cfg

@@ -785,29 +785,20 @@ class RasterizerContext:
 
     def on_fem(self):
         if self.sim.fem_solver.is_active:
-            vertices_qd, triangles_qd, uvs_qd = self.sim.fem_solver.get_state_render(self.sim.cur_substep_local)
+            vertices_qd, _triangles_qd, _uvs_qd = self.sim.fem_solver.get_state_render(self.sim.cur_substep_local)
             vertices_all = qd_to_numpy(vertices_qd)
-            triangles_all = qd_to_numpy(triangles_qd).reshape((-1, 3))
-            uvs_all = qd_to_numpy(uvs_qd)
 
             for fem_entity in self.sim.fem_solver.entities:
                 if fem_entity.surface.vis_mode == "visual":
-                    triangles = (
-                        triangles_all[fem_entity.s_start : (fem_entity.s_start + fem_entity.n_surfaces)]
-                        - fem_entity.v_start
-                    )
+                    surf_idx = fem_entity.surface_visual_vertex_indices
+                    triangles_reindexed = fem_entity.surface_triangles_reindexed
                     for idx in self.rendered_envs_idx:
                         vertices = vertices_all[fem_entity.v_start : fem_entity.v_start + fem_entity.n_vertices, idx]
-                        uvs = uvs_all[fem_entity.v_start : fem_entity.v_start + fem_entity.n_vertices]
-                        # Select only vertices used in surface triangles, then reindex triangles against the new vertex list
-                        surf_idx, inv = np.unique(triangles.flat, return_inverse=True)
-                        triangles_reindexed = inv.reshape(triangles.shape)
                         vertices = vertices[surf_idx]
-                        uvs = uvs[surf_idx]
 
                         mesh = trimesh.Trimesh(vertices, triangles_reindexed, process=False)
                         mesh.visual = mu.surface_uvs_to_trimesh_visual(
-                            fem_entity.surface, uvs=uvs, n_verts=fem_entity.n_surface_vertices
+                            fem_entity.surface, uvs=fem_entity.surface_visual_uvs, n_verts=fem_entity.n_surface_vertices
                         )
                         self.add_static_node(
                             fem_entity,
@@ -821,14 +812,15 @@ class RasterizerContext:
 
     def update_fem(self, buffer_updates):
         if self.sim.fem_solver.is_active:
-            vertices_all, triangles_all, _uvs = self.sim.fem_solver.get_state_render(self.sim.cur_substep_local)
+            vertices_all, _triangles_all, _uvs = self.sim.fem_solver.get_state_render(self.sim.cur_substep_local)
             vertices_all = vertices_all.to_numpy(dtype=gs.np_float)
-            triangles_all = triangles_all.to_numpy(dtype=gs.np_int).reshape((-1, 3))
 
             for fem_entity in self.sim.fem_solver.entities:
                 if fem_entity.surface.vis_mode == "visual":
+                    surf_idx = fem_entity.surface_visual_vertex_indices
                     for idx in self.rendered_envs_idx:
                         vertices = vertices_all[fem_entity.v_start : fem_entity.v_start + fem_entity.n_vertices, idx]
+                        vertices = vertices[surf_idx]
 
                         node = self.static_nodes[(idx, fem_entity.uid)]
                         update_data = self._scene.reorder_vertices(node, vertices)

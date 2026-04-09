@@ -115,6 +115,17 @@ class FEMEntity(Entity):
             unique_el = tri2el.flat[unique_idcs]
             self._surface_el_np = unique_el[cnt == 1]
 
+        if self._n_surfaces > 0:
+            surf_idx, inv = np.unique(self._surface_tri_np.reshape(-1), return_inverse=True)
+            self._surface_vis_idx_np = surf_idx.astype(gs.np_int, copy=False)
+            self._surface_tri_reindexed_np = inv.reshape(self._surface_tri_np.shape).astype(gs.np_int, copy=False)
+        else:
+            self._surface_vis_idx_np = np.empty((0,), dtype=gs.np_int)
+            self._surface_tri_reindexed_np = np.empty((0, 3), dtype=gs.np_int)
+        self._surface_visual_uvs_np = None
+        if self._uvs is not None and len(self._surface_vis_idx_np) > 0:
+            self._surface_visual_uvs_np = self._uvs[self._surface_vis_idx_np]
+
         if isinstance(self.sim.coupler, SAPCoupler):
             self.compute_pressure_field()
 
@@ -1124,6 +1135,21 @@ class FEMEntity(Entity):
     def surface_triangles(self):
         """Surface triangles of the FEM mesh."""
         return self._surface_tri_np
+
+    @property
+    def surface_visual_vertex_indices(self):
+        """Indices of vertices participating in the visual surface mesh."""
+        return self._surface_vis_idx_np
+
+    @property
+    def surface_triangles_reindexed(self):
+        """Surface triangles reindexed against surface_visual_vertex_indices."""
+        return self._surface_tri_reindexed_np
+
+    @property
+    def surface_visual_uvs(self):
+        """UV coordinates aligned with surface_visual_vertex_indices, or None if unavailable."""
+        return self._surface_visual_uvs_np
 
     @property
     def uvs(self):

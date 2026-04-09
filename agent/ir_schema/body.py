@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from ..defaults import DEFAULTS
 from .common import ScalarOrSequence, StrictModel, Vec3, dedupe_non_empty_names, length_if_sequence, validate_non_negative_indices
 from .scene import CollisionIR, PoseIR
 
@@ -82,10 +83,31 @@ class PBDElasticMaterialIR(StrictModel):
     volume_compliance: float = Field(ge=0.0)
 
 
-DeformableMaterialIR = Annotated[
-    PBDElasticMaterialIR,
-    Field(discriminator="kind"),
-]
+class FEMElasticMaterialIR(StrictModel):
+    kind: Literal["elastic"] = "elastic"
+    rho: float = Field(
+        gt=0.0,
+        description="Material density in kg/m^3. Higher rho makes the deformable body heavier without changing its size.",
+    )
+    E: float = Field(
+        gt=0.0,
+        description=(
+            "Young's modulus in Pascals. Higher E makes the deformable solid stiffer; lower E makes it softer and "
+            "easier to stretch or compress. Choose E=5e5 as a good default"
+        ),
+    )
+    nu: float = Field(
+        gt=-1.0,
+        lt=0.5,
+        description=(
+            "Poisson ratio. Higher nu makes the solid less compressible and more volume-preserving; lower nu allows "
+            "more volume change under load. Choose nu=0.35 as a good default"
+        ),
+    )
+
+
+CurrentDeformableMaterialIR = PBDElasticMaterialIR if DEFAULTS.deformable.simulation_backend == "pbd" else FEMElasticMaterialIR
+DeformableMaterialIR = CurrentDeformableMaterialIR
 
 
 class ActuatorForceRangeIR(StrictModel):
@@ -199,7 +221,7 @@ ActuatorIR = Annotated[
 class BodyIR(StrictModel):
     name: str = Field(default="body", min_length=1)
     shape: ShapeIR
-    simulation_kind: Literal["rigid", "pbd"] = "rigid"
+    simulation_kind: Literal["rigid", "deformable"] = "rigid"
     deformable_material: DeformableMaterialIR | None = None
     initial_pose: PoseIR = Field(default_factory=PoseIR)
     fixed: bool = Field(
@@ -222,7 +244,14 @@ class BodyIR(StrictModel):
 
     @property
     def is_deformable(self) -> bool:
-        return self.simulation_kind == "pbd"
+        return self.simulation_kind == "deformable"
+
+    @field_validator("simulation_kind", mode="before")
+    @classmethod
+    def _normalize_simulation_kind(cls, value: str) -> str:
+        if value in {"pbd", "fem"}:
+            return "deformable"
+        return value
 
     @property
     def is_articulated(self) -> bool:
@@ -237,25 +266,33 @@ class BodyIR(StrictModel):
             )
         if self.is_deformable:
             if self.is_articulated:
-                raise ValueError("`simulation_kind='pbd'` does not support articulated shapes (`mjcf` or `urdf`).")
+                raise ValueError("`simulation_kind='deformable'` does not support articulated shapes (`mjcf` or `urdf`).")
             if not isinstance(self.shape, (SphereShapeIR, BoxShapeIR, CylinderShapeIR, MeshShapeIR)):
                 raise ValueError(
-                    "`simulation_kind='pbd'` only supports `sphere`, `box`, `cylinder`, or `mesh` shapes in v1."
+                    "`simulation_kind='deformable'` only supports `sphere`, `box`, `cylinder`, or `mesh` shapes in v1."
                 )
             if self.deformable_material is None:
-                raise ValueError("`simulation_kind='pbd'` requires `deformable_material`.")
+                raise ValueError("`simulation_kind='deformable'` requires `deformable_material`.")
             if self.rho is not None:
-                raise ValueError("Use `deformable_material.rho` instead of `body.rho` for PBD bodies.")
+                raise ValueError("Use `deformable_material.rho` instead of `body.rho` for deformable bodies.")
             if self.fixed:
-                raise ValueError("`bodies[].fixed=true` is not supported for PBD bodies in deformable v1.")
+                raise ValueError("`bodies[].fixed=true` is not supported for deformable bodies in deformable v1.")
             if len(self.actuators) > 0:
-                raise ValueError("PBD bodies do not support `actuators` in deformable v1.")
+                raise ValueError("Deformable bodies do not support `actuators` in deformable v1.")
             if self.collision.coup_friction is not None or self.collision.coup_restitution is not None:
-                raise ValueError("`coup_friction` and `coup_restitution` are not supported on PBD bodies.")
+                raise ValueError("`coup_friction` and `coup_restitution` are not supported on deformable bodies.")
             if self.collision.sol_params is not None:
-                raise ValueError("`collision.sol_params` is not supported on PBD bodies.")
-            if self.collision.contact_resistance is not None:
-                raise ValueError("`collision.contact_resistance` is not supported on PBD bodies in deformable v1.")
+                raise ValueError("`collision.sol_params` is not supported on deformable bodies.")
+            if DEFAULTS.deformable.simulation_backend == "pbd":
+                if not isinstance(self.deformable_material, PBDElasticMaterialIR):
+                    raise ValueError("PBD backend requires PBD elastic `deformable_material`.")
+            else:
+                if not isinstance(self.deformable_material, FEMElasticMaterialIR):
+                    raise ValueError("FEM+IPC backend requires FEM elastic `deformable_material`.")
+                if self.collision.friction is not None:
+                    raise ValueError("`collision.friction` is fixed by defaults for FEM+IPC deformable bodies.")
+                if self.collision.contact_resistance is not None:
+                    raise ValueError("`collision.contact_resistance` is fixed by defaults for FEM+IPC deformable bodies.")
         elif self.deformable_material is not None:
-            raise ValueError("`deformable_material` requires `simulation_kind='pbd'`.")
+            raise ValueError("`deformable_material` requires `simulation_kind='deformable'`.")
         return self

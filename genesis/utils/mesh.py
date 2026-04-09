@@ -29,6 +29,7 @@ from .misc import (
     get_src_dir,
     get_tet_cache_dir,
     get_usd_cache_dir,
+    redirect_libc_stderr,
 )
 
 MESH_REPAIR_ERROR_THRESHOLD = 0.01
@@ -188,6 +189,47 @@ def load_mesh(file):
             # try loading without texture data
             return trimesh.load_mesh(file, force="mesh", skip_texture=True)
     return file
+
+
+def remesh_surface_mesh(mesh, edge_len_abs=None, edge_len_ratio=0.01, fix=True):
+    """
+    Isotropically remesh a surface triangle mesh for downstream tetrahedralization.
+    """
+    rm_file_path = get_remesh_path(mesh.vertices, mesh.faces, edge_len_abs, edge_len_ratio, fix)
+
+    is_cached_loaded = False
+    if os.path.exists(rm_file_path):
+        gs.logger.debug("Remeshed file (`.rm`) found in cache.")
+        try:
+            with open(rm_file_path, "rb") as file:
+                verts, faces = pkl.load(file)
+            is_cached_loaded = True
+        except (EOFError, ModuleNotFoundError, pkl.UnpicklingError, TypeError, MemoryError):
+            gs.logger.info("Ignoring corrupted cache.")
+
+    if not is_cached_loaded:
+        with open(os.devnull, "w") as stderr, redirect_libc_stderr(stderr):
+            import pymeshlab
+
+        gs.logger.info("Remeshing for tetrahedralization...")
+        ms = pymeshlab.MeshSet()
+        ms.add_mesh(
+            pymeshlab.Mesh(
+                vertex_matrix=mesh.vertices.astype(np.float64, copy=False),
+                face_matrix=mesh.faces.astype(np.int32, copy=False),
+            )
+        )
+        if edge_len_abs is not None:
+            ms.meshing_isotropic_explicit_remeshing(targetlen=pymeshlab.PureValue(edge_len_abs))
+        else:
+            ms.meshing_isotropic_explicit_remeshing(targetlen=pymeshlab.PercentageValue(edge_len_ratio * 100))
+        m = ms.current_mesh()
+        verts, faces = m.vertex_matrix(), m.face_matrix()
+        os.makedirs(os.path.dirname(rm_file_path), exist_ok=True)
+        with open(rm_file_path, "wb") as file:
+            pkl.dump((verts, faces), file)
+
+    return trimesh.Trimesh(vertices=verts, faces=faces, process=False)
 
 
 def compute_sdf_data(mesh, res):

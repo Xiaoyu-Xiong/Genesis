@@ -216,12 +216,12 @@ def _validate_deformable_constraints(program: RigidIR) -> list[str]:
         if not any(entity in deformable_body_names for entity in selected_entities):
             continue
         if isinstance(action, forbidden_action_types):
-            errors.append(f"Action[{index}] `{action.op}` is not supported for deformable PBD bodies in v1.")
+            errors.append(f"Action[{index}] `{action.op}` is not supported for deformable bodies in v1.")
         if isinstance(action, ObserveActionIR):
             invalid_fields = [field for field in action.fields if field not in deformable_observe_fields]
             if invalid_fields:
                 errors.append(
-                    f"Action[{index}] observe on deformable PBD bodies cannot use fields {invalid_fields}. "
+                    f"Action[{index}] observe on deformable bodies cannot use fields {invalid_fields}. "
                     f"Allowed fields: {sorted(deformable_observe_fields)}."
                 )
     return errors

@@ -154,23 +154,23 @@ class RigidIR(StrictModel):
                     ),
                 ):
                     raise ValueError(
-                        f"Action[{index}] `{action.op}` is not supported for deformable PBD bodies in v1."
+                        f"Action[{index}] `{action.op}` is not supported for deformable bodies in v1."
                     )
                 if isinstance(action, ObserveActionIR):
                     if action.include_contacts:
                         raise ValueError(
-                            f"Action[{index}] observe on deformable PBD bodies does not support `include_contacts=true` in v1."
+                            f"Action[{index}] observe on deformable bodies does not support `include_contacts=true` in v1."
                         )
                     if any(entity not in deformable_body_names for entity in selected_entities):
                         raise ValueError(
-                            f"Action[{index}] observe cannot mix deformable PBD bodies with rigid bodies in one "
+                            f"Action[{index}] observe cannot mix deformable bodies with rigid bodies in one "
                             "multi-entity observation because their supported fields differ."
                         )
                     allowed_deformable_fields = {"pos", "vel", "bbox_min", "bbox_max", "bbox_size", "vertex_disp_mean", "vertex_disp_max"}
                     invalid_fields = [field for field in action.fields if field not in allowed_deformable_fields]
                     if invalid_fields:
                         raise ValueError(
-                            f"Action[{index}] observe on deformable PBD bodies cannot use fields {invalid_fields}. "
+                            f"Action[{index}] observe on deformable bodies cannot use fields {invalid_fields}. "
                             f"Allowed fields: {sorted(allowed_deformable_fields)}."
                         )
             elif isinstance(action, ObserveActionIR):

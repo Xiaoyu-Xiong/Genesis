@@ -1,5 +1,3 @@
-import os
-import pickle as pkl
 from typing import Any
 
 import fast_simplification
@@ -12,7 +10,6 @@ import genesis.utils.gltf as gltf_utils
 import genesis.utils.particle as pu
 from genesis.options.surfaces import Surface
 from genesis.repr_base import RBC
-from genesis.utils.misc import redirect_libc_stderr
 
 
 class Mesh(RBC):
@@ -129,40 +126,7 @@ class Mesh(RBC):
         """
         Remesh for tetrahedralization.
         """
-        rm_file_path = mu.get_remesh_path(self.verts, self.faces, edge_len_abs, edge_len_ratio, fix)
-
-        is_cached_loaded = False
-        if os.path.exists(rm_file_path):
-            gs.logger.debug("Remeshed file (`.rm`) found in cache.")
-            try:
-                with open(rm_file_path, "rb") as file:
-                    verts, faces = pkl.load(file)
-                is_cached_loaded = True
-            except (EOFError, ModuleNotFoundError, pkl.UnpicklingError, TypeError, MemoryError):
-                gs.logger.info("Ignoring corrupted cache.")
-
-        if not is_cached_loaded:
-            # Importing pymeshlab is very slow and not used very often. Let's delay import.
-            with open(os.devnull, "w") as stderr, redirect_libc_stderr(stderr):
-                import pymeshlab
-
-            gs.logger.info("Remeshing for tetrahedralization...")
-            ms = pymeshlab.MeshSet()
-            ms.add_mesh(pymeshlab.Mesh(vertex_matrix=self.verts, face_matrix=self.faces))
-            if edge_len_abs is not None:
-                ms.meshing_isotropic_explicit_remeshing(targetlen=pymeshlab.PureValue(edge_len_abs))
-            else:
-                ms.meshing_isotropic_explicit_remeshing(targetlen=pymeshlab.PercentageValue(edge_len_ratio * 100))
-            m = ms.current_mesh()
-            verts, faces = m.vertex_matrix(), m.face_matrix()
-            # Maybe we need to fix the mesh in some extreme cases with open3d
-            # if fix:
-            #     verts, faces = pymeshfix.clean_from_arrays(verts, faces)
-            os.makedirs(os.path.dirname(rm_file_path), exist_ok=True)
-            with open(rm_file_path, "wb") as file:
-                pkl.dump((verts, faces), file)
-
-        self._mesh = trimesh.Trimesh(vertices=verts, faces=faces)
+        self._mesh = mu.remesh_surface_mesh(self._mesh, edge_len_abs=edge_len_abs, edge_len_ratio=edge_len_ratio, fix=fix)
         self.clear_visuals()
 
     def tetrahedralize(self, tet_cfg):
