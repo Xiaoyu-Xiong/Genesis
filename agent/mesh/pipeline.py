@@ -26,6 +26,7 @@ from .pipeline_steps import (
     slugify_prompt,
     time_stage,
 )
+from .texture_transfer import transfer_texture_to_repaired_mesh
 
 
 def default_mesh_output_dir(prompt: str, *, root: Path = Path("agent/generated_meshes")) -> Path:
@@ -132,6 +133,28 @@ def generate_meshy_mesh_from_text(
         profile_sec=profile_sec,
     )
 
+    texture_transfer_result = None
+    if (
+        texture_result is not None
+        and texture_result.ok
+        and texture_result.textured_mesh_path is not None
+        and repair_result is not None
+        and repair_result.ok
+    ):
+        base_color_path = texture_result.texture_paths.get("base_color")
+        if base_color_path is not None:
+            texture_transfer_result = time_stage(
+                profile_sec,
+                "texture_transfer_total",
+                lambda: transfer_texture_to_repaired_mesh(
+                    source_mesh_path=texture_result.textured_mesh_path,
+                    source_base_color_path=base_color_path,
+                    target_mesh_path=repair_result.output_mesh_path,
+                    output_dir=output_dir,
+                    alignment_translation=repair_result.centroid_before_translation,
+                ),
+            )
+
     dump_json(final_manifold_result.to_dict(), output_dir / "manifold_check.json")
     profile_sec["total"] = time.monotonic() - total_start
     dump_json(profile_sec, output_dir / "profile.json")
@@ -152,6 +175,8 @@ def generate_meshy_mesh_from_text(
         metadata["texture"] = texture_result.to_dict()
     if repair_result is not None:
         metadata["repair"] = repair_result.to_dict()
+    if texture_transfer_result is not None:
+        metadata["texture_transfer"] = texture_transfer_result.to_dict()
     if repair_attempts:
         metadata["repair_attempts"] = [attempt.to_dict() for attempt in repair_attempts]
     dump_json(metadata, generation_result.metadata_path)
@@ -160,6 +185,7 @@ def generate_meshy_mesh_from_text(
         generation=generation_result,
         texture=texture_result,
         repair=repair_result,
+        texture_transfer=texture_transfer_result,
         repair_attempts=tuple(repair_attempts),
         raw_manifold=raw_manifold_result,
         manifold=final_manifold_result,

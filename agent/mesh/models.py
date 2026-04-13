@@ -270,6 +270,44 @@ class MeshRepairResult:
 
 
 @dataclass(slots=True)
+class MeshTextureTransferResult:
+    ok: bool
+    source_mesh_path: Path
+    source_base_color_path: Path
+    target_mesh_path: Path
+    output_mesh_path: Path | None
+    output_mtl_path: Path | None
+    output_texture_path: Path | None
+    alignment_translation: tuple[float, float, float] | None = None
+    source_texture_size: tuple[int, int] | None = None
+    parameterization_filter: str | None = None
+    transfer_filter: str | None = None
+    debug_dir: Path | None = None
+    filter_script_path: Path | None = None
+    stage_durations_sec: dict[str, float] = field(default_factory=dict)
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "source_mesh_path": str(self.source_mesh_path),
+            "source_base_color_path": str(self.source_base_color_path),
+            "target_mesh_path": str(self.target_mesh_path),
+            "output_mesh_path": None if self.output_mesh_path is None else str(self.output_mesh_path),
+            "output_mtl_path": None if self.output_mtl_path is None else str(self.output_mtl_path),
+            "output_texture_path": None if self.output_texture_path is None else str(self.output_texture_path),
+            "alignment_translation": list(self.alignment_translation) if self.alignment_translation is not None else None,
+            "source_texture_size": list(self.source_texture_size) if self.source_texture_size is not None else None,
+            "parameterization_filter": self.parameterization_filter,
+            "transfer_filter": self.transfer_filter,
+            "debug_dir": None if self.debug_dir is None else str(self.debug_dir),
+            "filter_script_path": None if self.filter_script_path is None else str(self.filter_script_path),
+            "stage_durations_sec": self.stage_durations_sec,
+            "error": self.error,
+        }
+
+
+@dataclass(slots=True)
 class MeshManifoldCheckResult:
     ok: bool
     mesh_path: Path
@@ -304,6 +342,7 @@ class TextToMeshBundle:
     generation: MeshyGenerationResult
     texture: MeshyTextureResult | None = None
     repair: MeshRepairResult | None = None
+    texture_transfer: MeshTextureTransferResult | None = None
     repair_attempts: tuple[MeshRepairResult, ...] = ()
     raw_manifold: MeshManifoldCheckResult | None = None
     manifold: MeshManifoldCheckResult | None = None
@@ -315,6 +354,8 @@ class TextToMeshBundle:
             data["texture"] = self.texture.to_dict()
         if self.repair is not None:
             data["repair"] = self.repair.to_dict()
+        if self.texture_transfer is not None:
+            data["texture_transfer"] = self.texture_transfer.to_dict()
         if self.repair_attempts:
             data["repair_attempts"] = [item.to_dict() for item in self.repair_attempts]
         if self.raw_manifold is not None:

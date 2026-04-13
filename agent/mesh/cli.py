@@ -17,7 +17,6 @@ from .models import (
     MeshyTextureConfig,
 )
 from .pipeline import default_mesh_output_dir, generate_meshy_mesh_from_text, parse_extra_payload
-from .render_views import render_textured_mesh_views
 from .sanity import run_mesh_manifold_check
 
 
@@ -100,6 +99,8 @@ def _cmd_manifold_check(args: argparse.Namespace) -> None:
 
 
 def _cmd_render_textured_views(args: argparse.Namespace) -> None:
+    from .render_views import render_textured_mesh_views
+
     outputs = render_textured_mesh_views(
         mesh_path=args.mesh,
         out_dir=args.out_dir,
@@ -394,7 +395,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser_render = subparsers.add_parser(
         "render-textured-views",
-        help="Render multi-view PNGs for a textured raw OBJ asset using Genesis.",
+        help="Render multi-view PNGs for a textured OBJ asset using Genesis.",
     )
     parser_render.add_argument("--mesh", type=Path, required=True, help="Path to the textured OBJ file.")
     parser_render.add_argument("--out-dir", type=Path, required=True, help="Directory for rendered PNG views.")

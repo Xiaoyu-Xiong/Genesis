@@ -15,12 +15,19 @@ from .models import (
     MeshyTextureConfig,
     MeshyTextureResult,
     MeshyRequestError,
+    MeshTextureTransferResult,
     TextToMeshBundle,
 )
 from .pipeline import default_mesh_output_dir, generate_meshy_mesh_from_text, parse_extra_payload
 from .postprocess import repair_mesh_for_simulation
-from .render_views import render_textured_mesh_views
 from .sanity import run_mesh_manifold_check
+from .texture_transfer import transfer_texture_to_repaired_mesh
+
+
+def render_textured_mesh_views(*args, **kwargs):
+    from .render_views import render_textured_mesh_views as _impl
+
+    return _impl(*args, **kwargs)
 
 __all__ = [
     "MESH_FORMAT_VALUES",
@@ -37,6 +44,7 @@ __all__ = [
     "MeshyTextureConfig",
     "MeshyTextureResult",
     "MeshyRequestError",
+    "MeshTextureTransferResult",
     "TextToMeshBundle",
     "default_mesh_output_dir",
     "generate_meshy_mesh_from_text",
@@ -45,5 +53,6 @@ __all__ = [
     "repair_mesh_for_simulation",
     "render_textured_mesh_views",
     "run_mesh_manifold_check",
+    "transfer_texture_to_repaired_mesh",
     "MeshyClient",
 ]

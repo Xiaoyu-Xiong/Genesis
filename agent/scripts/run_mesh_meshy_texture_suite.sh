@@ -116,7 +116,7 @@ while IFS='|' read -r case_id prompt; do
   case_dir="$RUN_ROOT/$case_id"
   result_json="$case_dir/result.json"
   render_json="$case_dir/render_views/result.json"
-  textured_obj="$case_dir/textured/model.obj"
+  textured_obj="$case_dir/processed/repaired.obj"
   mkdir -p "$case_dir"
 
   echo "==> [$case_id] generate textured mesh"
@@ -146,7 +146,7 @@ while IFS='|' read -r case_id prompt; do
     if [[ -f "$case_dir/manifold_check.json" ]] && grep -q '"ok": true' "$case_dir/manifold_check.json"; then
       repaired_ok="true"
     fi
-    if [[ -f "$textured_obj" && -f "$case_dir/textured/model.mtl" && -f "$case_dir/textured/base_color.png" ]]; then
+    if [[ -f "$textured_obj" && -f "$case_dir/processed/repaired.mtl" && -f "$case_dir/processed/base_color.png" ]]; then
       texture_ok="true"
     fi
     if [[ -f "$case_dir/profile.json" ]]; then
