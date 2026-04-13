@@ -535,7 +535,14 @@ class PBD3DEntity(PBDTetEntity):
             particles = gu.transform_by_quat(particles, np.asarray(self._morph.quat, dtype=gs.np_float))
             particles = particles + np.asarray(self._morph.pos, dtype=gs.np_float)
         else:
-            particles, elems, *_ = self._mesh.tetrahedralize(tet_cfg)
+            particles, elems, *_ = eu.mesh_to_elements(
+                file=self._morph.file,
+                pos=(0.0, 0.0, 0.0),
+                scale=self._morph.scale,
+                tet_cfg=tet_cfg,
+            )
+            particles = gu.transform_by_quat(particles, np.asarray(self._morph.quat, dtype=gs.np_float))
+            particles = particles + np.asarray(self._morph.pos, dtype=gs.np_float)
         self._particles = particles.astype(gs.np_float, copy=False)
         self._init_particles_offset = gs.tensor(self._particles) - gs.tensor(self._morph.pos)
 

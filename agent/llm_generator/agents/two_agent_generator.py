@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from ...mesh.summary import estimate_scaled_bbox_size, load_mesh_asset_summary
 from ..client import OpenAIResponsesClient
 from ...tool_library import GeneralIRAgentToolLibrary
 from .ir_agent import IRGenerationResult, generate_ir_with_tool_agent
@@ -93,15 +94,22 @@ def _previous_mesh_path_by_body(previous_ir_json: dict[str, Any] | None) -> dict
 def _previous_mesh_summaries_by_body(previous_ir_json: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     paths_by_body = _previous_mesh_path_by_body(previous_ir_json)
     summaries: dict[str, dict[str, Any]] = {}
+    bodies_any = previous_ir_json.get("bodies") if isinstance(previous_ir_json, dict) else None
+    previous_bodies = [body for body in bodies_any if isinstance(body, dict)] if isinstance(bodies_any, list) else []
+    body_payload_by_name = {
+        body.get("name"): body for body in previous_bodies if isinstance(body.get("name"), str) and body.get("name")
+    }
     for body_name, path_str in sorted(paths_by_body.items()):
         path = Path(path_str)
         if not path.exists():
             continue
-        summary: dict[str, Any] = {"mesh_path": path_str}
-        try:
-            summary["mesh_bytes"] = path.stat().st_size
-        except Exception:  # noqa: BLE001
-            pass
+        summary = load_mesh_asset_summary(path)
+        previous_body = body_payload_by_name.get(body_name, {})
+        shape = previous_body.get("shape") if isinstance(previous_body, dict) else {}
+        scale = shape.get("scale") if isinstance(shape, dict) else None
+        if isinstance(scale, int | float) and not isinstance(scale, bool):
+            summary["applied_scale"] = float(scale)
+            summary["estimated_bbox_size_after_scale"] = estimate_scaled_bbox_size(summary.get("bbox_size"), float(scale))
         existing = load_existing_mesh_generation_result(path)
         if existing is not None:
             summary["raw_manifold_ok"] = existing.raw_manifold_ok

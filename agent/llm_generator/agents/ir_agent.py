@@ -57,7 +57,7 @@ def _tool_result_message(tool_call_id: str, name: str, result: dict[str, Any]) -
         "role": "tool",
         "tool_call_id": tool_call_id,
         "name": name,
-        "content": json.dumps(result, ensure_ascii=False),
+        "content": json.dumps(result, ensure_ascii=False, default=str),
     }
 
 

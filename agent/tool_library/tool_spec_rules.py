@@ -29,11 +29,22 @@ MESH_DECISION_POLICY = (
 )
 MESH_REUSE_POLICY = (
     "If several non-articulated bodies intentionally share the same geometry, generate the mesh asset once "
-    "and reuse the same `shape.file` across those bodies."
+    "and reuse the same `shape.file` across those bodies. If reusing one mesh would not cause a clearly noticeable "
+    "visual loss, prefer reusing the mesh instead of generating near-duplicate assets."
 )
 MESH_LOCAL_FRAME_POLICY = (
     "Generated mesh assets are post-processed so their geometric centroid is at the local origin. "
     "Use the returned axis-aligned bounding box to choose sensible world placement and scale."
+)
+MESH_SCALE_POLICY = (
+    "For mesh bodies, if the imported or generated mesh is globally too large or too small for the scene, adjust "
+    "`bodies[].shape.scale` to resize the whole mesh uniformly. Prefer changing `shape.scale` for overall mesh size "
+    "corrections instead of changing the mesh file, density, stiffness, or unrelated parameters."
+)
+MESH_BBOX_POLICY = (
+    "When mesh bounding-box metadata is provided, use `bbox_size` in mesh-local pre-scale units to estimate an "
+    "appropriate `bodies[].shape.scale`. Estimate the final world-size first, then choose `shape.scale` from that "
+    "evidence instead of guessing."
 )
 ARTICULATED_BODY_MESH_POLICY = (
     "Articulated bodies should be represented via MJCF/URDF and use only simple primitive geoms inside XML. "
@@ -62,7 +73,7 @@ if DEFAULTS.deformable.simulation_backend == "pbd":
         "`rho`, `stretch_compliance`, and `volume_compliance`; particle size and solver iteration hyperparameters are "
         "fixed by the system. Lower compliance makes the body stiffer; higher compliance makes it softer or more compressible. "
         "A good default initial guess for clearly visible but still controlled softness is `stretch_compliance=1e-4` and "
-        "`volume_compliance=1e-5`."
+        "`volume_compliance=1e-5`. Keep all density values in the range `300` to `3000` kg/m^3."
     )
     DEFORMABLE_SCENE_POLICY = (
         "In deformable PBD scenes, standard `scene.add_ground` semantics remain available. When `scene.add_ground=true`, "
@@ -74,9 +85,10 @@ else:
         "In deformable v1, the active backend is FEM+IPC. When specifying a deformable material, only set "
         "`rho`, `E`, and `nu`; IPC/FEM solver and contact hyperparameters are fixed by the system. "
         "Higher `E` makes the body stiffer, lower `E` makes it softer. Higher `nu` makes it less compressible. "
-        "As a rough guide, very soft jelly-like solids are often around `E=1e4` to `1e5`, moderately soft rubbery "
-        "solids around `E=1e5` to `1e6`, and firmer but still visibly deformable solids around `E=1e6` to `1e7`. "
-        "A good default initial guess for a medium-elastic soft solid is `E=5e5`, `nu=0.35`, and `rho=1000`."
+        "As a rough guide, very soft jelly-like solids are often around `E=1e4` to `5e4`, moderately soft rubbery "
+        "solids around `E=5e4` to `5e5`, and firmer but still visibly deformable solids around `E=5e5` to `5e6`. "
+        "A good default initial guess for a medium-elastic soft solid is `E=1e5`, `nu=0.35`, and `rho=1000`. "
+        "Keep all density values in the range `300` to `3000` kg/m^3."
     )
     DEFORMABLE_SCENE_POLICY = (
         "In deformable FEM+IPC scenes, standard `scene.add_ground` semantics remain available. When `scene.add_ground=true`, "
@@ -96,8 +108,10 @@ DEFORMABLE_OBSERVE_POLICY = (
     "on deformable bodies in v1."
 )
 DEFORMABLE_MESH_ASSET_POLICY = (
-    "Do not call the mesh generation tool to create deformable geometry in v1. Deformable mesh bodies may only use "
-    "preexisting mesh files."
+    "Deformable mesh bodies may use `generate_mesh_asset` outputs. When generating "
+    "deformable mesh geometry, the mesh must be manifold-ready and suitable for FEM/PBD preprocessing; keep the shape "
+    "simple, watertight, and thick enough for stable tetrahedralization, and leave positive clearance from the ground "
+    "and nearby bodies at initialization."
 )
 
 COMPACT_HARD_RULE_KEYS = (
@@ -109,6 +123,8 @@ COMPACT_HARD_RULE_KEYS = (
     "mesh_decision_policy",
     "mesh_reuse_policy",
     "mesh_local_frame_policy",
+    "mesh_scale_policy",
+    "mesh_bbox_policy",
     "articulated_body_mesh_policy",
     "deformable_body_policy",
     "deformable_geometry_policy",
@@ -132,6 +148,8 @@ def build_ir_agent_process_requirements(*, mesh_generation_available: bool) -> l
         "- Use `shape.kind='mesh'` only for non-articulated bodies. Mesh bodies should reference a mesh asset file and may be fixed or movable.",
         f"- {ARTICULATED_DECISION_POLICY}",
         f"- {MESH_DECISION_POLICY}",
+        f"- {MESH_SCALE_POLICY}",
+        f"- {MESH_BBOX_POLICY}",
         f"- {DEFORMABLE_BODY_POLICY}",
         f"- {DEFORMABLE_GEOMETRY_POLICY}",
         f"- {DEFORMABLE_MATERIAL_POLICY}",
@@ -150,12 +168,13 @@ def build_ir_agent_process_requirements(*, mesh_generation_available: bool) -> l
     if mesh_generation_available:
         lines.extend(
             [
-                "- If a non-articulated body needs a generated mesh asset and tool is available, call generate_mesh_asset once for that body.",
+                "- If a non-articulated rigid or deformable body needs a generated mesh asset and the tool is available, call generate_mesh_asset once for that body.",
                 "- Every generate_mesh_asset tool call must include the target `body_name`.",
                 f"- {MESH_LOCAL_FRAME_POLICY}",
                 "- If several non-articulated bodies intentionally share one geometry, use the same `reuse_key` when calling generate_mesh_asset so one generated asset can be reused.",
                 "- If multiple mesh bodies need generated assets, batch those generate_mesh_asset tool calls in one response when possible.",
                 "- Reuse the same generated mesh path across multiple bodies when they intentionally share the same object geometry (for example several identical crates or barriers). Do not regenerate duplicate mesh assets in that case.",
+                "- If repeating the same mesh will not noticeably hurt the visual result, prefer reusing one generated mesh across multiple bodies instead of generating many near-duplicate meshes.",
             ]
         )
     else:

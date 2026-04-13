@@ -215,6 +215,8 @@ class MeshManifoldCheckResult:
     is_watertight: bool
     is_winding_consistent: bool
     volume: float | None
+    tetgen_ready: bool | None = None
+    tetgen_message: str | None = None
     error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -227,6 +229,8 @@ class MeshManifoldCheckResult:
             "is_watertight": self.is_watertight,
             "is_winding_consistent": self.is_winding_consistent,
             "volume": self.volume,
+            "tetgen_ready": self.tetgen_ready,
+            "tetgen_message": self.tetgen_message,
             "error": self.error,
         }
 

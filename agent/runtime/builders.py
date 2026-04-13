@@ -99,7 +99,10 @@ def build_body_material(gs: Any, body: BodyIR) -> Any | None:
         )
     coup_type_override = None
     if DEFAULTS.deformable.simulation_backend == "fem_ipc" and not body.is_articulated:
-        coup_type_override = "two_way_soft_constraint"
+        if body.fixed:
+            coup_type_override = "ipc_only"
+        else:
+            coup_type_override = "two_way_soft_constraint"
     return build_rigid_material(gs, rho=body.rho, collision=body.collision, coup_type_override=coup_type_override)
 
 

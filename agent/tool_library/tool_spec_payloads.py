@@ -22,9 +22,11 @@ from .tool_spec_rules import (
     FIXED_BODY_NOTE,
     IR_CONCISENESS_POLICY,
     MESH_BODY_POLICY,
+    MESH_BBOX_POLICY,
     MESH_DECISION_POLICY,
     MESH_LOCAL_FRAME_POLICY,
     MESH_REUSE_POLICY,
+    MESH_SCALE_POLICY,
     ROOT_STRUCTURE_NOTE,
 )
 
@@ -46,6 +48,7 @@ def build_generation_guide_payload(
     generated_xml_paths_by_body: dict[str, str] | None,
     mesh_generation_enabled: bool = False,
     generated_mesh_paths_by_body: dict[str, str] | None = None,
+    generated_mesh_summaries_by_body: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     effective_dt = DEFAULTS.runtime.sim_dt
     effective_render = default_render_config()
@@ -65,6 +68,7 @@ def build_generation_guide_payload(
         generated_xml_paths_by_body=generated_xml_paths_by_body,
         mesh_generation_enabled=mesh_generation_enabled,
         generated_mesh_paths_by_body=generated_mesh_paths_by_body,
+        generated_mesh_summaries_by_body=generated_mesh_summaries_by_body,
     )
     templates = _build_templates(effective_dt=effective_dt, effective_render=effective_render)
     return {"ok": True, "mode": "general_rigid_scene", "constraints": constraints, "templates": templates}
@@ -119,6 +123,7 @@ def build_generation_bootstrap_payload(
     generated_xml_paths_by_body: dict[str, str] | None,
     mesh_generation_enabled: bool = False,
     generated_mesh_paths_by_body: dict[str, str] | None = None,
+    generated_mesh_summaries_by_body: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "ok": True,
@@ -134,6 +139,7 @@ def build_generation_bootstrap_payload(
             generated_xml_paths_by_body=generated_xml_paths_by_body,
             mesh_generation_enabled=mesh_generation_enabled,
             generated_mesh_paths_by_body=generated_mesh_paths_by_body,
+            generated_mesh_summaries_by_body=generated_mesh_summaries_by_body,
         ),
         "observation_field_guide": build_observation_field_guide_payload(),
         "schema": build_schema_payload()["schema"],
@@ -153,6 +159,7 @@ def _build_constraints(
     generated_xml_paths_by_body: dict[str, str] | None,
     mesh_generation_enabled: bool,
     generated_mesh_paths_by_body: dict[str, str] | None,
+    generated_mesh_summaries_by_body: dict[str, dict[str, Any]] | None,
 ) -> dict[str, Any]:
     constraints: dict[str, Any] = {
         "ir_version": IR_VERSION,
@@ -169,7 +176,13 @@ def _build_constraints(
         "mesh_body_policy": MESH_BODY_POLICY,
         "mesh_decision_policy": MESH_DECISION_POLICY,
         "mesh_reuse_policy": MESH_REUSE_POLICY,
+        "mesh_reuse_preference": (
+            "If repeating one mesh will not cause a clearly noticeable visual loss, prefer reusing that mesh across "
+            "multiple bodies instead of generating near-duplicate mesh assets."
+        ),
         "mesh_local_frame_policy": MESH_LOCAL_FRAME_POLICY,
+        "mesh_scale_policy": MESH_SCALE_POLICY,
+        "mesh_bbox_policy": MESH_BBOX_POLICY,
         "articulated_body_mesh_policy": ARTICULATED_BODY_MESH_POLICY,
         "deformable_body_policy": DEFORMABLE_BODY_POLICY,
         "deformable_geometry_policy": DEFORMABLE_GEOMETRY_POLICY,
@@ -246,6 +259,8 @@ def _build_constraints(
         constraints["generated_xml_paths_by_body"] = dict(sorted(generated_xml_paths_by_body.items()))
     if generated_mesh_paths_by_body is not None:
         constraints["generated_mesh_paths_by_body"] = dict(sorted(generated_mesh_paths_by_body.items()))
+    if generated_mesh_summaries_by_body is not None:
+        constraints["generated_mesh_summaries_by_body"] = dict(sorted(generated_mesh_summaries_by_body.items()))
     return constraints
 
 
@@ -268,11 +283,19 @@ def _build_parameter_notes() -> dict[str, str]:
             "Contact friction coefficient. Higher values resist sliding more strongly, but do not guarantee perfectly non-slipping contact. Use 0.8 as a reasonable default."
         ),
         "bodies[].rho": (
-            "Material density. Higher rho makes the body heavier and increases inertia, but does not change geometric size."
+            "Material density. Higher rho makes the body heavier and increases inertia, but does not change geometric "
+            "size. Keep density in the range 300 to 3000 kg/m^3."
         ),
         "bodies[].shape.default_armature": (
             "Additional articulated-joint armature used mainly for stability and numerical conditioning, not for "
             "task-level motion design."
+        ),
+        "bodies[].shape.scale": (
+            "Uniform mesh scale factor. Use this when a mesh body's overall size is wrong for the scene: increase it "
+            "to make the whole mesh larger, decrease it to make the whole mesh smaller. For deformable mesh bodies, "
+            "this also changes the physical tetrahedralization size because the geometry itself is rescaled before "
+            "remeshing and TetGen. When mesh bounding-box metadata is available, use that `bbox_size` evidence to "
+            "estimate `shape.scale` instead of guessing."
         ),
         "bodies[].fixed": (
             "Whether a rigid body is fixed in the world. Use this for rigid primitive, rigid mesh, or URDF obstacles, "
@@ -343,23 +366,25 @@ def _build_parameter_notes() -> dict[str, str]:
             "Use **3e-6** as default for visibly compressible but not completely mushy behavior."
         )
         notes["bodies[].deformable_material.rho"] = (
-            "Density for PBD elastic bodies. Larger values make the soft body heavier without changing its geometry."
+            "Density for PBD elastic bodies. Larger values make the soft body heavier without changing its geometry. "
+            "Keep deformable density in the range 300 to 3000 kg/m^3."
         )
     else:
         notes["bodies[].deformable_material.E"] = (
             "Young's modulus for FEM elastic bodies, measured in Pascals, controls the body's resistance to stretching "
             "and compression. Higher `E` makes the body stiffer, lower `E` makes it softer. As a rough guide: very "
-            "soft jelly-like solids are often around `1e4` to `1e5`, moderately soft rubbery solids around `1e5` to "
-            "`1e6`, and firmer but still visibly deformable solids around `1e6` to `1e7`. If the body visibly collapses "
+            "soft jelly-like solids are often around `1e4` to `5e4`, moderately soft rubbery solids around `5e4` to "
+            "`5e5`, and firmer but still visibly deformable solids around `5e5` to `5e6`. If the body visibly collapses "
             "too much or cannot support load, increase `E` by about 3x to 10x; if it hardly deforms, decrease `E` by "
-            "about 3x to 10x. Use about **5e5** as a good default initial guess for a medium-elastic soft solid."
+            "about 3x to 10x. Use about **1e5** as a good default initial guess for a medium-elastic soft solid."
         )
         notes["bodies[].deformable_material.nu"] = (
             "Poisson ratio for FEM elastic bodies. Higher values make the material less compressible. "
             "Use about **0.35** as a good default initial guess for a moderately compressible soft solid."
         )
         notes["bodies[].deformable_material.rho"] = (
-            "Density for FEM elastic bodies. Larger values make the deformable body heavier without changing its geometry."
+            "Density for FEM elastic bodies. Larger values make the deformable body heavier without changing its "
+            "geometry. Keep deformable density in the range 300 to 3000 kg/m^3."
         )
         notes["bodies[].initial_pose.pos"] = (
             "For FEM+IPC scenes, initial placements must avoid penetration and interpenetration. Leave a small positive "
@@ -435,6 +460,13 @@ def _build_templates(*, effective_dt: float, effective_render: dict[str, Any]) -
             "shape": {"kind": "cylinder", "radius": 0.08, "height": 0.24},
             "deformable_material": deformable_material_example,
             "initial_pose": {"pos": [0.0, 0.0, 0.4], "quat": [1.0, 0.0, 0.0, 0.0]},
+        },
+        "deformable_mesh_body_example": {
+            "name": "soft_mesh_blob",
+            "simulation_kind": "deformable",
+            "shape": {"kind": "mesh", "file": "path/to/generated_or_existing_blob.obj", "scale": 1.0},
+            "deformable_material": deformable_material_example,
+            "initial_pose": {"pos": [0.0, 0.0, 0.5], "quat": [1.0, 0.0, 0.0, 0.0]},
         },
         "deformable_scene_example": {
             "backend": _default_scene_backend(),

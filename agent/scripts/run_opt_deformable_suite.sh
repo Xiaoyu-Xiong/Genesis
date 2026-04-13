@@ -55,19 +55,19 @@ echo "Python: ${PYTHON_CMD[*]}"
 cat > "$TASK_FILE" <<'CASES'
 soft_ball_box_fill|Create a scene where around ten small soft balls drop into an open box container over 10s.
 
-jelly_cube_stack|Create a stylized scene where a tall stack of 10 soft cubes wobbles, leans, and collapses over 10s.
+jelly_cube_stack|Create a stylized scene where a tall stack of 10 soft cubes wobbles, leans, and collapses, render 10s behavior
 
-soft_cylinder_forest|Create a visually rich scene with 10 soft upright cylinders arranged like a toy obstacle field, and let one significantly heavier rigid primitive object sweep through them over 10s.
+soft_cylinder_forest|Create a visually rich scene with 10 soft upright cylinders arranged like a toy obstacle field, and let one significantly heavier rigid primitive object sweep through them, render 10s behavior
 
-soft_ball_ramp_cascade|Create a playful ramp-and-bin scene where 10 soft balls roll, drop, and pile up inside a boxed area over 10s.
+soft_ball_ramp_cascade|Create a playful ramp-and-bin scene where 10 soft balls roll, drop, and pile up inside a boxed area, render 10s behavior
 
-soft_blocks_and_rigid_bumpers|Create a compact arena filled with 10 soft blocks and a few significantly heavier rigid bumpers over 10s.
+soft_blocks_and_rigid_bumpers|Create a compact arena filled with 10 soft blocks and a few significantly heavier rigid bumpers, render 10s behavior
 
-soft_columns_under_plate|Create a stylized balancing scene where a rigid plate or box settles onto a cluster of soft columns that visibly buckle, spread, and compress over 10s.
+soft_columns_under_plate|Create a scene where a rigid plate or box drops onto a cluster of soft columns, render 10s behavior
 
-mixed_soft_drop_pile|Create a colorful toy-like scene where 10 soft cubes and soft balls are dropped together with a few significantly heavier rigid primitives so the whole pile churns, compresses, and reshapes over 10s.
+mixed_soft_drop_pile|Create a scene where 10 soft cubes and soft balls are dropped together with a few significantly heavier rigid primitives so the whole pile churns, compresses, and reshapes, render 10s behavior
 
-soft_bumper_ring|Create a graphics-focused scene with a ring or semicircle of soft bumpers and launch a few dense spheres through it so the motion becomes a rich chain of wobbling contacts and deformation over 10s.
+soft_bumper_ring|Create a graphics-focused scene with a ring or semicircle of soft bumpers and launch a few dense spheres through it so the motion becomes a rich chain of wobbling contacts and deformation, render 10s behavior
 CASES
 
 opt_cmd=(

@@ -33,12 +33,13 @@ You will receive:
 Your job:
 - evaluate whether the output satisfies the task,
 - cross-check IR, XML, event-pack, and video evidence,
+- Do not be too strict on the result, pass some borderline cases if the overall behavior seems mostly correct.
 - identify contradictions and uncertainty,
 - propose concrete fixes.
 - The IR may contain multiple bodies. Structure your critique by IR layers: global `scene`, global `actions`, and per-body analysis in `by_body`.
 - Prioritize overall task fulfillment, visible behavior, physical plausibility, and whether the robot does the right thing.
 - Do not let minor numeric discrepancies dominate the critique unless they clearly indicate a major behavioral problem, instability, or contradiction.
-- Read and use the provided generator tool-library descriptions, especially generation_guide constraints, parameter_notes, parameter_relationship_notes, and schema field descriptions.
+- Read and use the provided generator tool-library descriptions, especially generation_guide constraints, parameter_notes, parameter_relationship_notes, schema field descriptions, and any provided mesh bounding-box metadata.
 - When a major issue involves parameter tuning, use those descriptions to identify the likely root cause instead of giving vague advice. Distinguish between insufficient stiffness, insufficient damping, insufficient output limit, unstable restitution, camera-lag settings, and similar cases when the evidence supports it.
 - Keep `priority_fixes` focused on the few biggest issues blocking success, not on small cleanups.
 - Prefer a small number of major issues with detailed modifications over a long list of shallow comments.
@@ -48,10 +49,10 @@ Your job:
 - Base all suggested fixes on the provided generator tool-library capability only.
 - Do not suggest unavailable controllers, target-tracking systems, sensors, or new runtime abilities that the current tool library cannot express.
 - Every item in `priority_fixes` must be implementable through the provided tool library and current IR/XML path.
-- If the active deformable backend is FEM+IPC, treat any initial penetration or interpenetration between bodies as a serious setup error and explicitly call it out. Prefer fixes that separate bodies at initialization with a small positive clearance.
+- If the active deformable backend is FEM+IPC, treat any initial penetration or interpenetration between bodies as a serious setup error and explicitly call it out. When this is the issue, prefer fixes that change only `bodies[*].initial_pose.pos` to create small positive clearance, and do not recommend changing shape, size, scale, material, density, stiffness, or actions unless there is separate evidence for those changes.
 - Do not over-focus on duration alone; prioritize content correctness, physical plausibility, and control logic.
 - For each major issue, make the `fix` field concrete: name the IR field(s) or actuator setting(s) to adjust, the direction of change, and the intended effect on behavior.
-- For mesh objects, calibrate their direction and scale from the video evidence, and if applicable, provide specific adjustments to their quaterinion and scale fields with the intended effect on behavior.
+- For mesh objects, calibrate their orientation and overall size from the video evidence and any provided mesh bounding-box metadata. If the mesh is globally too large or too small, explicitly suggest adjusting `bodies[*].shape.scale` to resize the whole mesh uniformly. If orientation is wrong, provide specific `quat` adjustments with the intended effect on behavior.
 - """ + _DEFORMABLE_TUNING_GUIDANCE + """
 - When performing numerical parameter tuning, prefer exponential and more aggressive changes if the evidence suggests a major problem (e.g. objects supposed to move are almost static), and prefer smaller, more precise adjustments if the issue seems more borderline.
 - Do not recommend verbose IR rewrites when a shorter equivalent IR is possible.

@@ -6,6 +6,7 @@ from datetime import datetime
 import fcntl
 import multiprocessing as mp
 from pathlib import Path
+import traceback
 from typing import Any
 
 from ..defaults import DEFAULTS
@@ -79,6 +80,7 @@ class BatchOptimizationItemResult:
     final_round_dir: str
     final_verdict: str | None
     rounds: list[OptimizationRoundResult]
+    error: str | None = None
 
 
 @dataclass(slots=True)
@@ -265,15 +267,35 @@ def _run_batch_task(
     case_root.mkdir(parents=True, exist_ok=True)
     (case_root / "task.txt").write_text(spec.task + "\n", encoding="utf-8")
     case_config = replace(config, output_root=str(case_root))
-    result = optimize_prompt(task=spec.task, config=case_config)
-    return BatchOptimizationItemResult(
-        case_id=spec.case_id,
-        task=spec.task,
-        status=result.status,
-        final_round_dir=result.final_round_dir,
-        final_verdict=result.final_verdict,
-        rounds=result.rounds,
-    )
+    try:
+        result = optimize_prompt(task=spec.task, config=case_config)
+        return BatchOptimizationItemResult(
+            case_id=spec.case_id,
+            task=spec.task,
+            status=result.status,
+            final_round_dir=result.final_round_dir,
+            final_verdict=result.final_verdict,
+            rounds=result.rounds,
+        )
+    except Exception as exc:  # noqa: BLE001
+        failure_payload = {
+            "case_id": spec.case_id,
+            "task": spec.task,
+            "status": "failed",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+        dump_json(failure_payload, case_root / "failure.json")
+        return BatchOptimizationItemResult(
+            case_id=spec.case_id,
+            task=spec.task,
+            status="failed",
+            final_round_dir=str(case_root),
+            final_verdict=None,
+            rounds=[],
+            error=str(exc),
+        )
 
 
 def optimize_prompts_batch(
@@ -306,7 +328,30 @@ def optimize_prompts_batch(
             for spec in task_specs
         ]
         for index, future in enumerate(futures):
-            item = future.result()
+            try:
+                item = future.result()
+            except Exception as exc:  # noqa: BLE001
+                spec = task_specs[index]
+                case_root = run_root / spec.case_id
+                case_root.mkdir(parents=True, exist_ok=True)
+                failure_payload = {
+                    "case_id": spec.case_id,
+                    "task": spec.task,
+                    "status": "failed",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                }
+                dump_json(failure_payload, case_root / "failure.json")
+                item = BatchOptimizationItemResult(
+                    case_id=spec.case_id,
+                    task=spec.task,
+                    status="failed",
+                    final_round_dir=str(case_root),
+                    final_verdict=None,
+                    rounds=[],
+                    error=str(exc),
+                )
             ordered_results[index] = item
 
     items = [item for item in ordered_results if item is not None]

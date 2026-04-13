@@ -4,6 +4,7 @@ from collections import Counter
 import json
 from typing import Any
 
+from ..mesh.summary import estimate_scaled_bbox_size, load_mesh_asset_summary
 from ..tool_library import (
     build_compact_generator_tool_context,
     build_generator_tool_context,
@@ -255,6 +256,7 @@ def _build_ir_digest(ir: dict[str, Any]) -> dict[str, Any]:
         "scene": scene,
         "bodies": bodies,
         "body_count": len(bodies),
+        "mesh_body_summaries": _build_mesh_body_summaries(bodies),
         "articulated_body_names": [
             body.get("name")
             for body in bodies
@@ -272,3 +274,27 @@ def _build_ir_digest(ir: dict[str, Any]) -> dict[str, Any]:
         },
         "raw_ir": ir,
     }
+
+
+def _build_mesh_body_summaries(bodies: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    summaries: dict[str, dict[str, Any]] = {}
+    for body in bodies:
+        body_name = body.get("name")
+        shape = body.get("shape")
+        if not isinstance(body_name, str) or not body_name:
+            continue
+        if not isinstance(shape, dict) or shape.get("kind") != "mesh":
+            continue
+        mesh_path = shape.get("file")
+        if not isinstance(mesh_path, str) or not mesh_path.strip():
+            continue
+        summary = load_mesh_asset_summary(mesh_path)
+        applied_scale = shape.get("scale")
+        if isinstance(applied_scale, int | float) and not isinstance(applied_scale, bool):
+            summary["applied_scale"] = float(applied_scale)
+            summary["estimated_bbox_size_after_scale"] = estimate_scaled_bbox_size(
+                summary.get("bbox_size"),
+                float(applied_scale),
+            )
+        summaries[body_name] = summary
+    return summaries

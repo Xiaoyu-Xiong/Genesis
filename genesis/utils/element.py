@@ -53,6 +53,44 @@ def mesh_to_elements(file, pos=(0, 0, 0), scale=1.0, tet_cfg=dict()):
 
     mesh.vertices = mesh.vertices * scale
 
+    resolution = _tet_resolution(tet_cfg)
+    feature_sizes = tuple(np.maximum(mesh.bounding_box.extents.astype(np.float64, copy=False), 1e-6).tolist())
+    base_target_edge = _primitive_target_edge(feature_sizes=feature_sizes, resolution=resolution)
+
+    # Retry isotropic remeshing with progressively less aggressive edge lengths until
+    # the remeshed surface stays manifold-ready and TetGen accepts it.
+    retry_factors = (1.0, 0.9, 0.8, 0.7, 0.62, 0.55, 0.48, 0.4, 0.32, 0.25)
+    remesh_error: str | None = None
+    for attempt_index, factor in enumerate(retry_factors, start=1):
+        target_edge = base_target_edge * factor
+        remeshed = mu.remesh_surface_mesh(mesh, edge_len_abs=target_edge, fix=False)
+        candidate_cfg = _primitive_tet_cfg(tet_cfg, target_edge=target_edge)
+
+        if not (remeshed.is_watertight and remeshed.is_winding_consistent):
+            remesh_error = (
+                f"attempt {attempt_index}: remeshed surface is not watertight/winding-consistent "
+                f"(edge_len_abs={target_edge})"
+            )
+            continue
+
+        try:
+            # Probe TetGen acceptance on the remeshed surface before committing to this mesh.
+            mu.tetrahedralize_mesh(remeshed, candidate_cfg)
+        except Exception as exc:  # noqa: BLE001
+            remesh_error = (
+                f"attempt {attempt_index}: remeshed surface failed tetgen check with edge_len_abs={target_edge}: {exc}"
+            )
+            continue
+
+        mesh = remeshed
+        tet_cfg = candidate_cfg
+        break
+    else:
+        gs.raise_exception(
+            f"Unable to produce a tetgen-ready remeshed surface from the mesh input after {len(retry_factors)} attempts. "
+            f"Last error: {remesh_error}"
+        )
+
     # compute file name via hashing for caching
     tet_file_path = mu.get_tet_path(mesh.vertices, mesh.faces, tet_cfg)
 
@@ -77,17 +115,8 @@ def mesh_to_elements(file, pos=(0, 0, 0), scale=1.0, tet_cfg=dict()):
 
     verts += np.array(pos)
 
-    # Build full UV array
-    uvs = None
-    if isinstance(mesh.visual, trimesh.visual.texture.TextureVisuals) and mesh.visual.uv is not None:
-        # Extract UVs from mesh before tetrahedralization.
-        # Note that 'tetgen' preserves original vertices at start of output array.
-        uvs_orig = mesh.visual.uv.astype(gs.np_float, copy=False)
-
-        # Original vertices get their UVs, interior vertices get zeros
-        uvs = np.pad(uvs_orig, ((0, len(verts) - len(mesh.vertices)), (0, 0)))
-
-    return verts, elems, uvs
+    # Surface remeshing changes topology, so original UV correspondence is no longer reliable.
+    return verts, elems, None
 
 
 def split_all_surface_tets(verts, elems):

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
+import subprocess
+import sys
 from typing import Any
 
+from ..defaults import DEFAULTS
 from ..ir_schema import (
     ApplyExternalWrenchActionIR,
     ObserveActionIR,
@@ -62,6 +66,7 @@ def validate_program_constraints(
 
     if deformable_bodies:
         errors.extend(_validate_deformable_constraints(program))
+        errors.extend(_validate_fem_ipc_uipc_sanity(program))
 
     mjcf_bodies = [body for body in articulated_bodies if body.shape.kind == "mjcf"]
     if xml_generation_enabled and mjcf_bodies:
@@ -94,14 +99,6 @@ def validate_program_constraints(
             continue
         if mesh_generation_enabled and generated_mesh_shape_files_by_body:
             expected_file = generated_mesh_shape_files_by_body.get(body.name)
-            if expected_file is not None and body.is_deformable:
-                errors.append(
-                    f"Deformable mesh body `{body.name}` must use a preexisting mesh asset, not `generate_mesh_asset` output."
-                )
-            if body.is_deformable and actual_file in set(generated_mesh_shape_files_by_body.values()):
-                errors.append(
-                    f"Deformable mesh body `{body.name}` must not reuse a `generate_mesh_asset` output; use a preexisting mesh file instead."
-                )
             if expected_file is not None and actual_file != expected_file:
                 errors.append(
                     f"Generated mesh asset for body `{body.name}` was not attached correctly. "
@@ -225,3 +222,95 @@ def _validate_deformable_constraints(program: RigidIR) -> list[str]:
                     f"Allowed fields: {sorted(deformable_observe_fields)}."
                 )
     return errors
+
+
+def _validate_fem_ipc_uipc_sanity(program: RigidIR) -> list[str]:
+    if DEFAULTS.deformable.simulation_backend != "fem_ipc":
+        return []
+    if not any(body.is_deformable for body in program.bodies):
+        return []
+    repo_root = Path(__file__).resolve().parents[2]
+    payload = program.model_dump(mode="json")
+    probe = """
+import json
+import sys
+
+from agent.ir_schema import parse_ir_payload, normalize_ir
+from agent.runtime.setup import configure_headless_if_needed, ensure_genesis_initialized, create_runtime_context
+import genesis as gs
+
+payload = json.loads(sys.stdin.read())
+program = normalize_ir(parse_ir_payload(payload))
+program = program.model_copy(deep=True)
+program.scene.show_viewer = False
+program.scene.render = None
+configure_headless_if_needed(program)
+runtime = None
+try:
+    ensure_genesis_initialized(gs, program)
+    runtime = create_runtime_context(gs, program)
+    runtime.scene.build()
+    print("UIPC_SANITY_OK")
+except Exception as exc:
+    print(f"UIPC_SANITY_BUILD_ERROR:{type(exc).__name__}:{exc}")
+    raise
+finally:
+    if runtime is not None:
+        try:
+            runtime.scene.destroy()
+        except Exception:
+            pass
+    try:
+        gs.destroy()
+    except Exception:
+        pass
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        input=_json_dumps(payload),
+        text=True,
+        capture_output=True,
+        cwd=repo_root,
+        timeout=120.0,
+    )
+    if result.returncode == 0:
+        return []
+
+    combined = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    lines = [line.strip() for line in combined.splitlines() if line.strip()]
+    exact_errors = [
+        line
+        for line in lines
+        if any(
+            token in line
+            for token in (
+                "HalfPlaneVertexDistanceCheck",
+                "World is not valid",
+                "UIPC_SANITY_BUILD_ERROR",
+                "too close (distance <= 0)",
+            )
+        )
+    ]
+    if not exact_errors:
+        exact_errors = lines[-8:]
+
+    hint = (
+        "This IR fails libuipc's own sanity/build check. Revise only `bodies[*].initial_pose.pos` to increase "
+        "clearance between bodies and from the ground. DO NOT change shapes, sizes, scales, materials, densities, "
+        "stiffness values, actions, or any other fields."
+    )
+    return [
+        "Initial FEM+IPC libuipc sanity check failed: "
+        + " | ".join(_strip_ansi(line) for line in exact_errors)
+        + f" {hint}"
+    ]
+
+
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+def _json_dumps(payload: dict[str, Any]) -> str:
+    import json
+
+    return json.dumps(payload, ensure_ascii=False)

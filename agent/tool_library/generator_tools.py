@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 from ..ir_schema import RigidIR
+from ..mesh.summary import load_mesh_asset_summary
 from ..llm_generator.constraints.general_constraints import parse_sanitize_validate
 from .overrides import apply_system_defaults
 from .program_constraints import validate_program_constraints
@@ -205,6 +206,10 @@ class GeneralIRAgentToolLibrary:
         return parsed
 
     def _get_generation_bootstrap(self, _: dict[str, Any]) -> dict[str, Any]:
+        generated_mesh_summaries_by_body = {
+            body_name: load_mesh_asset_summary(result.mesh_path)
+            for body_name, result in sorted(self._generated_mesh_results_by_body.items())
+        }
         return build_generation_bootstrap_payload(
             required_shape_kind=self.required_shape_kind,
             required_shape_file=self.required_shape_file,
@@ -217,6 +222,7 @@ class GeneralIRAgentToolLibrary:
             generated_xml_paths_by_body=self.generated_xml_shape_files_by_body,
             mesh_generation_enabled=self.mesh_generation_fn is not None,
             generated_mesh_paths_by_body=self.generated_mesh_shape_files_by_body,
+            generated_mesh_summaries_by_body=generated_mesh_summaries_by_body,
         )
 
     def _generate_articulated_xml(self, args: dict[str, Any]) -> dict[str, Any]:

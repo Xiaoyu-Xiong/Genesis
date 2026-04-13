@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
+from ...defaults import DEFAULTS
 from ...mesh import MeshRepairConfig, MeshyApiConfig, MeshyGenerationConfig, TextToMeshBundle, generate_meshy_mesh_from_text
 
 
@@ -37,25 +38,57 @@ def generate_mesh_asset_with_meshy(
     task: str,
     output_dir: str | Path,
     file_stem: str,
-    mesh_format: str = "obj",
-    timeout_sec: float = 1000.0,
-    api_key_env: str = "MESHY_API_KEY",
-    base_url_env: str = "MESHY_API_BASE_URL",
+    mesh_format: str | None = None,
+    timeout_sec: float | None = None,
+    api_key_env: str | None = None,
+    base_url_env: str | None = None,
 ) -> MeshGenerationResult:
+    request_defaults = DEFAULTS.meshy_request
+    repair_defaults = DEFAULTS.mesh_repair
     output_dir = Path(output_dir) / file_stem
     api_config = MeshyApiConfig.from_env(
-        api_key_env=api_key_env,
-        base_url_env=base_url_env,
-        timeout_sec=timeout_sec,
+        api_key_env=api_key_env or "MESHY_API_KEY",
+        base_url_env=base_url_env or "MESHY_API_BASE_URL",
+        timeout_sec=request_defaults.timeout_sec if timeout_sec is None else timeout_sec,
     )
     generation_config = MeshyGenerationConfig(
         prompt=task,
         output_dir=output_dir,
-        mesh_format=mesh_format,
-        should_remesh=True,
-        target_polycount=5000,
+        mesh_format=request_defaults.mesh_format if mesh_format is None else mesh_format,
+        ai_model=request_defaults.ai_model,
+        art_style=request_defaults.art_style,
+        should_remesh=request_defaults.should_remesh,
+        topology=request_defaults.topology,
+        target_polycount=request_defaults.target_polycount,
+        symmetry_mode=request_defaults.symmetry_mode,
+        moderation=request_defaults.moderation,
+        negative_prompt=request_defaults.negative_prompt,
+        auto_size=request_defaults.auto_size,
+        origin_at=request_defaults.origin_at,
+        poll_interval_sec=request_defaults.poll_interval_sec,
+        max_wait_sec=request_defaults.max_wait_sec,
     )
-    repair_config = MeshRepairConfig()
+    repair_config = MeshRepairConfig(
+        component_count_face_cap=repair_defaults.component_count_face_cap,
+        min_component_faces=repair_defaults.min_component_faces,
+        max_repair_attempts=repair_defaults.max_repair_attempts,
+        merge_vertices=repair_defaults.merge_vertices,
+        merge_digits_vertex=repair_defaults.merge_digits_vertex,
+        fix_normals=repair_defaults.fix_normals,
+        process_validate=repair_defaults.process_validate,
+        keep_largest_component=repair_defaults.keep_largest_component,
+        ftetwild_edge_length_fac=repair_defaults.ftetwild_edge_length_fac,
+        ftetwild_edge_length_abs=repair_defaults.ftetwild_edge_length_abs,
+        ftetwild_optimize=repair_defaults.ftetwild_optimize,
+        ftetwild_simplify=repair_defaults.ftetwild_simplify,
+        ftetwild_epsilon=repair_defaults.ftetwild_epsilon,
+        ftetwild_stop_energy=repair_defaults.ftetwild_stop_energy,
+        ftetwild_coarsen=repair_defaults.ftetwild_coarsen,
+        ftetwild_num_threads=repair_defaults.ftetwild_num_threads,
+        ftetwild_num_opt_iter=repair_defaults.ftetwild_num_opt_iter,
+        ftetwild_quiet=repair_defaults.ftetwild_quiet,
+        ftetwild_disable_filtering=repair_defaults.ftetwild_disable_filtering,
+    )
 
     bundle = generate_meshy_mesh_from_text(
         prompt=task,

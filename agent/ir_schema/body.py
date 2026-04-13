@@ -35,7 +35,15 @@ class CylinderShapeIR(StrictModel):
 class MeshShapeIR(StrictModel):
     kind: Literal["mesh"] = "mesh"
     file: str = Field(min_length=1)
-    scale: float = Field(default=1.0, gt=0.0)
+    scale: float = Field(
+        default=1.0,
+        gt=0.0,
+        description=(
+            "Uniform scale factor applied to the whole mesh geometry before simulation. Increase this if the mesh is "
+            "globally too small, decrease it if the mesh is globally too large. For deformable mesh bodies, this also "
+            "changes the tetrahedralization target size because the physical mesh dimensions change."
+        ),
+    )
 
 
 class MJCFShapeIR(StrictModel):
@@ -78,7 +86,7 @@ ShapeIR = Annotated[
 
 class PBDElasticMaterialIR(StrictModel):
     kind: Literal["elastic"] = "elastic"
-    rho: float = Field(gt=0.0)
+    rho: float = Field(ge=300.0, le=3000.0)
     stretch_compliance: float = Field(ge=0.0)
     volume_compliance: float = Field(ge=0.0)
 
@@ -86,14 +94,15 @@ class PBDElasticMaterialIR(StrictModel):
 class FEMElasticMaterialIR(StrictModel):
     kind: Literal["elastic"] = "elastic"
     rho: float = Field(
-        gt=0.0,
+        ge=300.0,
+        le=3000.0,
         description="Material density in kg/m^3. Higher rho makes the deformable body heavier without changing its size.",
     )
     E: float = Field(
         gt=0.0,
         description=(
             "Young's modulus in Pascals. Higher E makes the deformable solid stiffer; lower E makes it softer and "
-            "easier to stretch or compress. Choose E=5e5 as a good default"
+            "easier to stretch or compress. Choose E=1e5 as a good default"
         ),
     )
     nu: float = Field(
@@ -234,7 +243,8 @@ class BodyIR(StrictModel):
     visualize_contact: bool = False
     rho: float | None = Field(
         default=None,
-        gt=0.0,
+        ge=300.0,
+        le=3000.0,
         description=(
             "Material density. Higher rho makes the body heavier and increases inertia, but does not change geometric size. Adjust this parameter to make a body heavier or lighter without changing its shape, which is useful for tuning interactive behaviors between bodies"
         ),

@@ -4,6 +4,7 @@ import json
 import os
 import socket
 from dataclasses import dataclass
+import time
 from urllib import error, request
 
 from .responses_format import (
@@ -20,6 +21,7 @@ class OpenAIRequestError(RuntimeError):
 
 
 REASONING_EFFORT_VALUES = ("none", "minimal", "low", "medium", "high", "xhigh")
+RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
 
 
 @dataclass(slots=True)
@@ -27,6 +29,8 @@ class OpenAIResponsesClient:
     api_key: str
     base_url: str = "https://api.openai.com/v1"
     timeout_sec: float = 120.0
+    max_retries: int = 4
+    retry_backoff_sec: float = 2.0
 
     @classmethod
     def from_env(
@@ -129,19 +133,45 @@ class OpenAIResponsesClient:
                 "Content-Type": "application/json",
             },
         )
-        try:
-            with request.urlopen(req, timeout=self.timeout_sec) as resp:
-                raw = resp.read().decode("utf-8")
-        except error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else str(exc)
-            raise OpenAIRequestError(f"OpenAI HTTP {exc.code}: {detail}") from exc
-        except error.URLError as exc:
-            raise OpenAIRequestError(f"OpenAI request failed: {exc.reason}") from exc
-        except (TimeoutError, socket.timeout) as exc:
-            raise OpenAIRequestError(
-                f"OpenAI request timed out after {self.timeout_sec:.1f}s. "
-                "Increase `--timeout-sec` or reduce model reasoning effort."
-            ) from exc
+        total_attempts = max(1, self.max_retries + 1)
+        for attempt_index in range(total_attempts):
+            try:
+                with request.urlopen(req, timeout=self.timeout_sec) as resp:
+                    raw = resp.read().decode("utf-8")
+                break
+            except error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else str(exc)
+                if _should_retry_http_error(exc.code) and attempt_index + 1 < total_attempts:
+                    _sleep_before_retry(
+                        attempt_index=attempt_index,
+                        retry_backoff_sec=self.retry_backoff_sec,
+                    )
+                    continue
+                raise OpenAIRequestError(
+                    f"OpenAI HTTP {exc.code} after {attempt_index + 1}/{total_attempts} attempt(s): {detail}"
+                ) from exc
+            except error.URLError as exc:
+                if attempt_index + 1 < total_attempts:
+                    _sleep_before_retry(
+                        attempt_index=attempt_index,
+                        retry_backoff_sec=self.retry_backoff_sec,
+                    )
+                    continue
+                raise OpenAIRequestError(
+                    f"OpenAI request failed after {attempt_index + 1}/{total_attempts} attempt(s): {exc.reason}"
+                ) from exc
+            except (TimeoutError, socket.timeout) as exc:
+                if attempt_index + 1 < total_attempts:
+                    _sleep_before_retry(
+                        attempt_index=attempt_index,
+                        retry_backoff_sec=self.retry_backoff_sec,
+                    )
+                    continue
+                raise OpenAIRequestError(
+                    f"OpenAI request timed out after {self.timeout_sec:.1f}s "
+                    f"and {attempt_index + 1}/{total_attempts} attempt(s). "
+                    "Increase `--timeout-sec` or reduce model reasoning effort."
+                ) from exc
 
         try:
             parsed = json.loads(raw)
@@ -170,3 +200,12 @@ def _normalize_reasoning_effort(value: str) -> str:
         allowed = ", ".join(REASONING_EFFORT_VALUES)
         raise OpenAIRequestError(f"Invalid reasoning_effort `{value}`. Expected one of: {allowed}.")
     return normalized
+
+
+def _should_retry_http_error(status_code: int) -> bool:
+    return status_code in RETRYABLE_HTTP_STATUS_CODES
+
+
+def _sleep_before_retry(*, attempt_index: int, retry_backoff_sec: float) -> None:
+    delay_sec = min(retry_backoff_sec * (2**attempt_index), 30.0)
+    time.sleep(max(0.0, delay_sec))

@@ -452,16 +452,14 @@ class FEMEntity(Entity):
                     tet_cfg=self.tet_cfg,
                 )
             elif isinstance(self.morph, gs.options.morphs.Mesh):
-                # We don't need to proces UVs here because the tetrahedralization process append new vertices
-                # and faces at the end of the vertex list, thus the original UVs are preserved at the beginning.
-                # We can't generate UVs for newly created internal vertices as it doesn't make sense but they're
-                # not used for rendering so it's fine.
                 verts, elems, self._uvs = eu.mesh_to_elements(
                     file=self._morph.file,
-                    pos=self._morph.pos,
+                    pos=(0.0, 0.0, 0.0),
                     scale=self._morph.scale,
                     tet_cfg=self.tet_cfg,
                 )
+                verts = gu.transform_by_quat(verts, np.asarray(self._morph.quat, dtype=gs.np_float))
+                verts = verts + np.asarray(self._morph.pos, dtype=gs.np_float)
             else:
                 gs.raise_exception(f"Unsupported morph: {self.morph}.")
 
