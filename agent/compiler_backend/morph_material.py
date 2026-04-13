@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from ..defaults import DEFAULTS
+from ..configs import CONFIGS
 from ..ir_schema import (
     BodyIR,
     BoxShapeIR,
@@ -26,7 +26,7 @@ def body_morph_source(body: BodyIR) -> str:
     fixed_src = body.fixed
     tet_kwarg = ""
     if body.is_deformable:
-        tet_kwarg = f", tet_resolution={DEFAULTS.deformable.tet_resolution}"
+        tet_kwarg = f", tet_resolution={CONFIGS.deformable.tet_resolution}"
 
     if isinstance(shape, SphereShapeIR):
         return f"gs.morphs.Sphere(radius={shape.radius}, pos={pos_src}, quat={quat_src}, fixed={fixed_src}{tet_kwarg})"
@@ -79,19 +79,19 @@ def body_morph_source(body: BodyIR) -> str:
 def body_material_source(body: BodyIR) -> str | None:
     if body.is_deformable:
         material = body.deformable_material
-        if DEFAULTS.deformable.simulation_backend == "pbd":
+        if CONFIGS.deformable.simulation_backend == "pbd":
             if not isinstance(material, PBDElasticMaterialIR):
                 raise TypeError(f"Unsupported deformable material IR: {type(material).__name__}")
-            friction = body.collision.friction if body.collision.friction is not None else DEFAULTS.deformable.friction
+            friction = body.collision.friction if body.collision.friction is not None else CONFIGS.deformable.friction
             kwargs = [
                 f"rho={material.rho}",
                 f"static_friction={friction}",
                 f"kinetic_friction={friction}",
                 f"stretch_compliance={material.stretch_compliance}",
                 f"volume_compliance={material.volume_compliance}",
-                f"stretch_relaxation={DEFAULTS.deformable.stretch_relaxation}",
-                f"bending_relaxation={DEFAULTS.deformable.bending_relaxation}",
-                f"volume_relaxation={DEFAULTS.deformable.volume_relaxation}",
+                f"stretch_relaxation={CONFIGS.deformable.stretch_relaxation}",
+                f"bending_relaxation={CONFIGS.deformable.bending_relaxation}",
+                f"volume_relaxation={CONFIGS.deformable.volume_relaxation}",
             ]
             return f"gs.materials.PBD.Elastic({', '.join(kwargs)})"
 
@@ -101,15 +101,15 @@ def body_material_source(body: BodyIR) -> str | None:
             f"E={material.E}",
             f"nu={material.nu}",
             f"rho={material.rho}",
-            f"model={DEFAULTS.deformable.fem_model!r}",
-            f"hydroelastic_modulus={DEFAULTS.deformable.fem_hydroelastic_modulus}",
-            f"friction_mu={DEFAULTS.deformable.fem_friction_mu}",
-            f"contact_resistance={DEFAULTS.deformable.fem_contact_resistance!r}",
-            f"hessian_invariant={DEFAULTS.deformable.fem_hessian_invariant}",
+            f"model={CONFIGS.deformable.fem_model!r}",
+            f"hydroelastic_modulus={CONFIGS.deformable.fem_hydroelastic_modulus}",
+            f"friction_mu={CONFIGS.deformable.fem_friction_mu}",
+            f"contact_resistance={CONFIGS.deformable.fem_contact_resistance!r}",
+            f"hessian_invariant={CONFIGS.deformable.fem_hessian_invariant}",
         ]
         return f"gs.materials.FEM.Elastic({', '.join(kwargs)})"
     coup_type_override = None
-    if DEFAULTS.deformable.simulation_backend == "fem_ipc" and not body.is_articulated:
+    if CONFIGS.deformable.simulation_backend == "fem_ipc" and not body.is_articulated:
         if body.fixed:
             coup_type_override = "ipc_only"
         else:

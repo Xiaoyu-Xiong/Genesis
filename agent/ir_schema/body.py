@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from ..defaults import DEFAULTS
+from ..configs import CONFIGS
 from .common import ScalarOrSequence, StrictModel, Vec3, dedupe_non_empty_names, length_if_sequence, validate_non_negative_indices
 from .scene import CollisionIR, PoseIR
 
@@ -115,7 +115,7 @@ class FEMElasticMaterialIR(StrictModel):
     )
 
 
-CurrentDeformableMaterialIR = PBDElasticMaterialIR if DEFAULTS.deformable.simulation_backend == "pbd" else FEMElasticMaterialIR
+CurrentDeformableMaterialIR = PBDElasticMaterialIR if CONFIGS.deformable.simulation_backend == "pbd" else FEMElasticMaterialIR
 DeformableMaterialIR = CurrentDeformableMaterialIR
 
 
@@ -293,7 +293,7 @@ class BodyIR(StrictModel):
                 raise ValueError("`coup_friction` and `coup_restitution` are not supported on deformable bodies.")
             if self.collision.sol_params is not None:
                 raise ValueError("`collision.sol_params` is not supported on deformable bodies.")
-            if DEFAULTS.deformable.simulation_backend == "pbd":
+            if CONFIGS.deformable.simulation_backend == "pbd":
                 if not isinstance(self.deformable_material, PBDElasticMaterialIR):
                     raise ValueError("PBD backend requires PBD elastic `deformable_material`.")
             else:

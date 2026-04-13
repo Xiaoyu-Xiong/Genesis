@@ -12,11 +12,14 @@ from .models import (
     MeshyApiConfig,
     MeshyGenerationConfig,
     MeshyGenerationResult,
+    MeshyTextureConfig,
+    MeshyTextureResult,
     MeshyRequestError,
     TextToMeshBundle,
 )
 from .pipeline import default_mesh_output_dir, generate_meshy_mesh_from_text, parse_extra_payload
 from .postprocess import repair_mesh_for_simulation
+from .render_views import render_textured_mesh_views
 from .sanity import run_mesh_manifold_check
 
 __all__ = [
@@ -31,6 +34,8 @@ __all__ = [
     "MeshyApiConfig",
     "MeshyGenerationConfig",
     "MeshyGenerationResult",
+    "MeshyTextureConfig",
+    "MeshyTextureResult",
     "MeshyRequestError",
     "TextToMeshBundle",
     "default_mesh_output_dir",
@@ -38,6 +43,7 @@ __all__ = [
     "parse_extra_payload",
     "repair_mesh_with_ftetwild",
     "repair_mesh_for_simulation",
+    "render_textured_mesh_views",
     "run_mesh_manifold_check",
     "MeshyClient",
 ]

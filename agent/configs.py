@@ -5,14 +5,14 @@ from typing import Literal
 
 
 @dataclass(slots=True, frozen=True)
-class RuntimeDefaults:
+class RuntimeConfigs:
     sim_dt: float = 0.01
     render_every_n_steps: int = 3
     render_res: tuple[int, int] = (640, 480)
 
 
 @dataclass(slots=True, frozen=True)
-class DeformableDefaults:
+class DeformableConfigs:
     simulation_backend: Literal["pbd", "fem_ipc"] = "fem_ipc"
     friction: float = 0.3
     tet_resolution: int = 2
@@ -53,7 +53,7 @@ class DeformableDefaults:
 
 
 @dataclass(slots=True, frozen=True)
-class OptimizationDefaults:
+class OptimizationConfigs:
     model: str = "gpt-5.4"
     critic_model: str = ""
     reasoning_effort: str = "xhigh"
@@ -71,7 +71,7 @@ class OptimizationDefaults:
 
 
 @dataclass(slots=True, frozen=True)
-class MeshyRequestDefaults:
+class MeshyRequestConfigs:
     mesh_format: Literal["obj", "glb", "stl"] = "obj"
     ai_model: Literal["latest", "meshy-6", "meshy-5"] = "meshy-5"
     art_style: Literal["realistic", "sculpture"] = "realistic"
@@ -84,12 +84,16 @@ class MeshyRequestDefaults:
     auto_size: bool = False
     origin_at: Literal["bottom", "center"] | None = None
     poll_interval_sec: float = 2.0
-    max_wait_sec: float = 300.0
-    timeout_sec: float = 120.0
+    max_wait_sec: float = 500.0
+    timeout_sec: float = 200.0
+    texture_enabled: bool = False
+    texture_ai_model: Literal["latest", "meshy-6", "meshy-5"] | None = None
+    texture_enable_pbr: bool = False
+    texture_remove_lighting: bool = True
 
 
 @dataclass(slots=True, frozen=True)
-class MeshRepairDefaults:
+class MeshRepairConfigs:
     component_count_face_cap: int = 100000
     min_component_faces: int = 100
     max_repair_attempts: int = 4
@@ -112,18 +116,18 @@ class MeshRepairDefaults:
 
 
 @dataclass(slots=True, frozen=True)
-class Defaults:
-    runtime: RuntimeDefaults
-    deformable: DeformableDefaults
-    optimization: OptimizationDefaults
-    meshy_request: MeshyRequestDefaults
-    mesh_repair: MeshRepairDefaults
+class Configs:
+    runtime: RuntimeConfigs
+    deformable: DeformableConfigs
+    optimization: OptimizationConfigs
+    meshy_request: MeshyRequestConfigs
+    mesh_repair: MeshRepairConfigs
 
 
-DEFAULTS = Defaults(
-    runtime=RuntimeDefaults(),
-    deformable=DeformableDefaults(),
-    optimization=OptimizationDefaults(),
-    meshy_request=MeshyRequestDefaults(),
-    mesh_repair=MeshRepairDefaults(),
+CONFIGS = Configs(
+    runtime=RuntimeConfigs(),
+    deformable=DeformableConfigs(),
+    optimization=OptimizationConfigs(),
+    meshy_request=MeshyRequestConfigs(),
+    mesh_repair=MeshRepairConfigs(),
 )

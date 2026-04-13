@@ -4,11 +4,11 @@ import hashlib
 import json
 from typing import Any
 
-from ..defaults import DEFAULTS
+from ..configs import CONFIGS
 from .video_sampler import SampledFrame
 
 
-if DEFAULTS.deformable.simulation_backend == "pbd":
+if CONFIGS.deformable.simulation_backend == "pbd":
     _DEFORMABLE_TUNING_GUIDANCE = (
         "For deformable bodies, prefer fixes that adjust `deformable_material.stretch_compliance`, "
         "`deformable_material.volume_compliance`, or `deformable_material.rho` before suggesting hidden solver "

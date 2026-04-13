@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ..defaults import DEFAULTS
+from ..configs import CONFIGS
 from ..io_utils import dump_json
 from .models import (
     MESH_FORMAT_VALUES,
@@ -14,13 +14,15 @@ from .models import (
     MeshRepairConfig,
     MeshyApiConfig,
     MeshyGenerationConfig,
+    MeshyTextureConfig,
 )
 from .pipeline import default_mesh_output_dir, generate_meshy_mesh_from_text, parse_extra_payload
+from .render_views import render_textured_mesh_views
 from .sanity import run_mesh_manifold_check
 
 
 def _cmd_generate(args: argparse.Namespace) -> None:
-    repair_defaults = DEFAULTS.mesh_repair
+    repair_defaults = CONFIGS.mesh_repair
     output_dir = args.out_dir or default_mesh_output_dir(args.prompt, root=args.root_dir)
     api_config = MeshyApiConfig.from_env(
         api_key_env=args.api_key_env,
@@ -49,6 +51,13 @@ def _cmd_generate(args: argparse.Namespace) -> None:
         poll_interval_sec=args.poll_interval_sec,
         max_wait_sec=args.max_wait_sec,
         extra_payload=parse_extra_payload(args.extra_payload),
+    )
+    texture_config = MeshyTextureConfig(
+        enabled=args.generate_texture,
+        texture_prompt=args.texture_prompt,
+        ai_model=args.texture_ai_model,
+        enable_pbr=args.texture_enable_pbr,
+        remove_lighting=args.texture_remove_lighting,
     )
 
     repair_config = None
@@ -79,6 +88,7 @@ def _cmd_generate(args: argparse.Namespace) -> None:
         prompt=args.prompt,
         api_config=api_config,
         generation_config=generation_config,
+        texture_config=texture_config,
         repair_config=repair_config,
     )
     dump_json(bundle.to_dict(), args.out)
@@ -89,9 +99,26 @@ def _cmd_manifold_check(args: argparse.Namespace) -> None:
     dump_json(result.to_dict(), args.out)
 
 
+def _cmd_render_textured_views(args: argparse.Namespace) -> None:
+    outputs = render_textured_mesh_views(
+        mesh_path=args.mesh,
+        out_dir=args.out_dir,
+        res=tuple(args.res),
+        fov=args.fov,
+    )
+    payload = {
+        "mesh_path": str(args.mesh),
+        "out_dir": str(args.out_dir),
+        "res": list(args.res),
+        "fov": args.fov,
+        "views": outputs,
+    }
+    dump_json(payload, args.out)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    request_defaults = DEFAULTS.meshy_request
-    repair_defaults = DEFAULTS.mesh_repair
+    request_defaults = CONFIGS.meshy_request
+    repair_defaults = CONFIGS.mesh_repair
     parser = argparse.ArgumentParser(
         description="Standalone text-to-mesh utilities (Meshy preview generation, mesh repair, and manifold checks)."
     )
@@ -185,6 +212,37 @@ def build_parser() -> argparse.ArgumentParser:
         default=request_defaults.origin_at,
         choices=("bottom", "center"),
         help="Origin placement when auto-size is enabled.",
+    )
+    parser_generate.add_argument(
+        "--generate-texture",
+        action=argparse.BooleanOptionalAction,
+        default=request_defaults.texture_enabled,
+        help="Run Meshy refine after preview and download a raw textured OBJ asset package.",
+    )
+    parser_generate.add_argument(
+        "--texture-prompt",
+        type=str,
+        default=None,
+        help="Optional text prompt for the refine texture stage. Defaults to the geometry prompt.",
+    )
+    parser_generate.add_argument(
+        "--texture-ai-model",
+        type=str,
+        default=request_defaults.texture_ai_model,
+        choices=MESHY_AI_MODEL_VALUES,
+        help="Optional Meshy AI model override for the refine texture stage. Defaults to the preview ai-model.",
+    )
+    parser_generate.add_argument(
+        "--texture-enable-pbr",
+        action=argparse.BooleanOptionalAction,
+        default=request_defaults.texture_enable_pbr,
+        help="Request PBR maps in addition to base color during texture refine.",
+    )
+    parser_generate.add_argument(
+        "--texture-remove-lighting",
+        action=argparse.BooleanOptionalAction,
+        default=request_defaults.texture_remove_lighting,
+        help="Ask Meshy refine to remove baked lighting from the base color when supported.",
     )
     parser_generate.add_argument(
         "--root-dir",
@@ -333,6 +391,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser_check.add_argument("--mesh", type=Path, required=True, help="Existing mesh file path.")
     parser_check.add_argument("--out", type=Path, default=None, help="Optional summary JSON output path.")
     parser_check.set_defaults(func=_cmd_manifold_check)
+
+    parser_render = subparsers.add_parser(
+        "render-textured-views",
+        help="Render multi-view PNGs for a textured raw OBJ asset using Genesis.",
+    )
+    parser_render.add_argument("--mesh", type=Path, required=True, help="Path to the textured OBJ file.")
+    parser_render.add_argument("--out-dir", type=Path, required=True, help="Directory for rendered PNG views.")
+    parser_render.add_argument(
+        "--res",
+        type=int,
+        nargs=2,
+        metavar=("W", "H"),
+        default=(768, 768),
+        help="Output image resolution.",
+    )
+    parser_render.add_argument(
+        "--fov",
+        type=float,
+        default=35.0,
+        help="Camera field of view in degrees.",
+    )
+    parser_render.add_argument("--out", type=Path, default=None, help="Optional summary JSON output path.")
+    parser_render.set_defaults(func=_cmd_render_textured_views)
     return parser
 
 

@@ -6,7 +6,7 @@ import subprocess
 import sys
 from typing import Any
 
-from ..defaults import DEFAULTS
+from ..configs import CONFIGS
 from ..ir_schema import (
     ApplyExternalWrenchActionIR,
     ObserveActionIR,
@@ -225,7 +225,7 @@ def _validate_deformable_constraints(program: RigidIR) -> list[str]:
 
 
 def _validate_fem_ipc_uipc_sanity(program: RigidIR) -> list[str]:
-    if DEFAULTS.deformable.simulation_backend != "fem_ipc":
+    if CONFIGS.deformable.simulation_backend != "fem_ipc":
         return []
     if not any(body.is_deformable for body in program.bodies):
         return []

@@ -4,8 +4,15 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from ...defaults import DEFAULTS
-from ...mesh import MeshRepairConfig, MeshyApiConfig, MeshyGenerationConfig, TextToMeshBundle, generate_meshy_mesh_from_text
+from ...configs import CONFIGS
+from ...mesh import (
+    MeshRepairConfig,
+    MeshyApiConfig,
+    MeshyGenerationConfig,
+    MeshyTextureConfig,
+    TextToMeshBundle,
+    generate_meshy_mesh_from_text,
+)
 
 
 @dataclass(slots=True)
@@ -25,6 +32,11 @@ class MeshGenerationResult:
     mesh_path: str
     raw_manifold_ok: bool
     repaired_manifold_ok: bool
+    texture_requested: bool
+    texture_succeeded: bool
+    textured_mesh_path: str | None
+    textured_mtl_path: str | None
+    base_color_path: str | None
     centroid_before_translation: tuple[float, float, float] | None
     bbox_min: tuple[float, float, float] | None
     bbox_max: tuple[float, float, float] | None
@@ -43,8 +55,8 @@ def generate_mesh_asset_with_meshy(
     api_key_env: str | None = None,
     base_url_env: str | None = None,
 ) -> MeshGenerationResult:
-    request_defaults = DEFAULTS.meshy_request
-    repair_defaults = DEFAULTS.mesh_repair
+    request_defaults = CONFIGS.meshy_request
+    repair_defaults = CONFIGS.mesh_repair
     output_dir = Path(output_dir) / file_stem
     api_config = MeshyApiConfig.from_env(
         api_key_env=api_key_env or "MESHY_API_KEY",
@@ -67,6 +79,12 @@ def generate_mesh_asset_with_meshy(
         origin_at=request_defaults.origin_at,
         poll_interval_sec=request_defaults.poll_interval_sec,
         max_wait_sec=request_defaults.max_wait_sec,
+    )
+    texture_config = MeshyTextureConfig(
+        enabled=request_defaults.texture_enabled,
+        ai_model=request_defaults.texture_ai_model,
+        enable_pbr=request_defaults.texture_enable_pbr,
+        remove_lighting=request_defaults.texture_remove_lighting,
     )
     repair_config = MeshRepairConfig(
         component_count_face_cap=repair_defaults.component_count_face_cap,
@@ -94,6 +112,7 @@ def generate_mesh_asset_with_meshy(
         prompt=task,
         api_config=api_config,
         generation_config=generation_config,
+        texture_config=texture_config,
         repair_config=repair_config,
     )
     return _bundle_to_result(bundle)
@@ -110,6 +129,7 @@ def load_existing_mesh_generation_result(mesh_path: str | Path) -> MeshGeneratio
     raw_payload = _load_json_dict(asset_root / "raw_manifold_check.json") or {}
     manifold_payload = _load_json_dict(asset_root / "manifold_check.json") or {}
     repair_payload = metadata.get("repair") if isinstance(metadata.get("repair"), dict) else {}
+    texture_payload = metadata.get("texture") if isinstance(metadata.get("texture"), dict) else {}
 
     provider = metadata.get("provider")
     if not isinstance(provider, str):
@@ -123,6 +143,13 @@ def load_existing_mesh_generation_result(mesh_path: str | Path) -> MeshGeneratio
         mesh_path=str(mesh_path),
         raw_manifold_ok=raw_ok,
         repaired_manifold_ok=repaired_ok,
+        texture_requested=bool(texture_payload.get("requested", False)),
+        texture_succeeded=bool(texture_payload.get("ok", False)),
+        textured_mesh_path=_str_or_none(texture_payload.get("textured_mesh_path")),
+        textured_mtl_path=_str_or_none(texture_payload.get("textured_mtl_path")),
+        base_color_path=_str_or_none((texture_payload.get("texture_paths") or {}).get("base_color"))
+        if isinstance(texture_payload.get("texture_paths"), dict)
+        else None,
         centroid_before_translation=_tuple3(repair_payload.get("centroid_before_translation")),
         bbox_min=_tuple3(repair_payload.get("bbox_min")),
         bbox_max=_tuple3(repair_payload.get("bbox_max")),
@@ -154,6 +181,23 @@ def _bundle_to_result(bundle: TextToMeshBundle) -> MeshGenerationResult:
         mesh_path=mesh_path,
         raw_manifold_ok=raw_ok,
         repaired_manifold_ok=repaired_ok,
+        texture_requested=bundle.texture is not None and bundle.texture.requested,
+        texture_succeeded=bool(bundle.texture and bundle.texture.ok),
+        textured_mesh_path=(
+            None
+            if bundle.texture is None or bundle.texture.textured_mesh_path is None
+            else str(bundle.texture.textured_mesh_path)
+        ),
+        textured_mtl_path=(
+            None
+            if bundle.texture is None or bundle.texture.textured_mtl_path is None
+            else str(bundle.texture.textured_mtl_path)
+        ),
+        base_color_path=(
+            None
+            if bundle.texture is None or "base_color" not in bundle.texture.texture_paths
+            else str(bundle.texture.texture_paths["base_color"])
+        ),
         centroid_before_translation=None if bundle.repair is None else bundle.repair.centroid_before_translation,
         bbox_min=None if bundle.repair is None else bundle.repair.bbox_min,
         bbox_max=None if bundle.repair is None else bundle.repair.bbox_max,
@@ -164,7 +208,7 @@ def _bundle_to_result(bundle: TextToMeshBundle) -> MeshGenerationResult:
 
 
 def _asset_root_from_mesh_path(mesh_path: Path) -> Path:
-    if mesh_path.parent.name in {"downloads", "processed"}:
+    if mesh_path.parent.name in {"downloads", "processed", "textured"}:
         return mesh_path.parent.parent
     return mesh_path.parent
 
@@ -220,3 +264,7 @@ def _tuple3(value: object) -> tuple[float, float, float] | None:
             return None
         converted.append(float(component))
     return tuple(converted)
+
+
+def _str_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None

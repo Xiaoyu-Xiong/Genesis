@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..defaults import DEFAULTS
+from ..configs import CONFIGS
 
 ROOT_STRUCTURE_NOTE = "Use top-level `bodies` list."
 BODY_COUNT_POLICY = "Multiple bodies are allowed, including multiple articulated bodies."
@@ -67,7 +67,7 @@ DEFORMABLE_BODY_POLICY = (
 DEFORMABLE_GEOMETRY_POLICY = (
     "In deformable v1, deformable bodies may only use `sphere`, `box`, `cylinder`, or `mesh` shapes."
 )
-if DEFAULTS.deformable.simulation_backend == "pbd":
+if CONFIGS.deformable.simulation_backend == "pbd":
     DEFORMABLE_MATERIAL_POLICY = (
         "In deformable v1, the active backend is PBD elastic. When specifying a deformable material, only set "
         "`rho`, `stretch_compliance`, and `volume_compliance`; particle size and solver iteration hyperparameters are "

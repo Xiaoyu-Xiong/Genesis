@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..defaults import DEFAULTS
+from ..configs import CONFIGS
 from .tool_specs import (
     COMPACT_HARD_RULE_KEYS,
     build_generation_guide_payload,
@@ -99,7 +99,7 @@ def build_compact_generator_tool_context(
         "SetPoseActionIR.entity",
         "ApplyExternalWrenchActionIR.entity",
     ]
-    if DEFAULTS.deformable.simulation_backend == "pbd":
+    if CONFIGS.deformable.simulation_backend == "pbd":
         compact_parameter_keys.extend(
             [
                 "bodies[].deformable_material.stretch_compliance",

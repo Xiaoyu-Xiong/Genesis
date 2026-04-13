@@ -344,8 +344,15 @@ class GeneralIRAgentToolLibrary:
             "attempts": result.attempts,
             "raw_manifold_ok": result.raw_manifold_ok,
             "repaired_manifold_ok": result.repaired_manifold_ok,
+            "texture_requested": result.texture_requested,
+            "texture_succeeded": result.texture_succeeded,
+            "textured_mesh_path": result.textured_mesh_path,
+            "textured_mtl_path": result.textured_mtl_path,
+            "base_color_path": result.base_color_path,
             "centroid_at_origin": result.centroid_at_origin,
-            "centroid_before_translation": list(result.centroid_before_translation) if result.centroid_before_translation is not None else None,
+            "centroid_before_translation": (
+                list(result.centroid_before_translation) if result.centroid_before_translation is not None else None
+            ),
             "bbox_min": list(result.bbox_min) if result.bbox_min is not None else None,
             "bbox_max": list(result.bbox_max) if result.bbox_max is not None else None,
             "bbox_size": list(result.bbox_size) if result.bbox_size is not None else None,

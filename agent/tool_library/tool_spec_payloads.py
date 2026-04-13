@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..defaults import DEFAULTS
+from ..configs import CONFIGS
 from ..ir_schema import IR_VERSION, RigidIR
 from ..llm_generator.constraints.general_constraints import ALLOWED_OBSERVE_FIELDS, default_render_config
 from .tool_spec_rules import (
@@ -32,7 +32,7 @@ from .tool_spec_rules import (
 
 
 def _default_scene_backend() -> str:
-    return "cpu" if DEFAULTS.deformable.simulation_backend == "fem_ipc" else DEFAULTS.optimization.backend
+    return "cpu" if CONFIGS.deformable.simulation_backend == "fem_ipc" else CONFIGS.optimization.backend
 
 
 def build_generation_guide_payload(
@@ -50,11 +50,11 @@ def build_generation_guide_payload(
     generated_mesh_paths_by_body: dict[str, str] | None = None,
     generated_mesh_summaries_by_body: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    effective_dt = DEFAULTS.runtime.sim_dt
+    effective_dt = CONFIGS.runtime.sim_dt
     effective_render = default_render_config()
-    effective_render["render_every_n_steps"] = DEFAULTS.runtime.render_every_n_steps
-    effective_render["res"] = list(DEFAULTS.runtime.render_res)
-    effective_render["fps"] = max(1, min(240, int(round(1.0 / (effective_dt * DEFAULTS.runtime.render_every_n_steps)))))
+    effective_render["render_every_n_steps"] = CONFIGS.runtime.render_every_n_steps
+    effective_render["res"] = list(CONFIGS.runtime.render_res)
+    effective_render["fps"] = max(1, min(240, int(round(1.0 / (effective_dt * CONFIGS.runtime.render_every_n_steps)))))
 
     constraints = _build_constraints(
         required_shape_kind=required_shape_kind,
@@ -165,7 +165,7 @@ def _build_constraints(
         "ir_version": IR_VERSION,
         "allowed_shape_kinds": ["sphere", "box", "cylinder", "mesh", "mjcf", "urdf"],
         "supported_simulation_kinds": ["rigid", "deformable"],
-        "active_deformable_backend": DEFAULTS.deformable.simulation_backend,
+        "active_deformable_backend": CONFIGS.deformable.simulation_backend,
         "multi_body_supported": True,
         "multi_articulated_supported": True,
         "root_structure_note": ROOT_STRUCTURE_NOTE,
@@ -352,7 +352,7 @@ def _build_parameter_notes() -> dict[str, str]:
             "external disturbance to several bodies."
         ),
     }
-    if DEFAULTS.deformable.simulation_backend == "pbd":
+    if CONFIGS.deformable.simulation_backend == "pbd":
         notes["bodies[].deformable_material.stretch_compliance"] = (
             "PBD stretch compliance. Lower values make the soft body stiffer in edge-length preservation; higher "
             "values make it stretch and sag more easily. Very stiff elastic solids are often around 1e-8 to 1e-6, "
@@ -414,7 +414,7 @@ def _build_parameter_relationship_notes() -> dict[str, str]:
 
 
 def _build_templates(*, effective_dt: float, effective_render: dict[str, Any]) -> dict[str, Any]:
-    if DEFAULTS.deformable.simulation_backend == "pbd":
+    if CONFIGS.deformable.simulation_backend == "pbd":
         deformable_material_example = {
             "kind": "elastic",
             "rho": 1100.0,

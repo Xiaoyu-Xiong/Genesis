@@ -9,7 +9,7 @@ from pathlib import Path
 import traceback
 from typing import Any
 
-from ..defaults import DEFAULTS
+from ..configs import CONFIGS
 from ..io_utils import dump_json
 from ..llm_critic import CriticEvaluationInput, evaluate_prompt_event_video
 from ..llm_generator import OpenAIResponsesClient, generate_ir_two_agent
@@ -22,28 +22,28 @@ _SIMULATION_LOCK_PATH = Path(__file__).resolve().parents[1] / "runs" / ".simulat
 
 @dataclass(slots=True)
 class OptimizationConfig:
-    model: str = DEFAULTS.optimization.model
+    model: str = CONFIGS.optimization.model
     xml_model: str | None = None
     critic_model: str | None = None
     hosted_prompt_id: str | None = None
     hosted_prompt_version: str | None = None
     critic_hosted_prompt_id: str | None = None
     critic_hosted_prompt_version: str | None = None
-    critic_prompt_variant: str = DEFAULTS.optimization.critic_prompt_variant
+    critic_prompt_variant: str = CONFIGS.optimization.critic_prompt_variant
     temperature: float | None = None
     critic_temperature: float | None = None
     reasoning_effort: str | None = None
     critic_reasoning_effort: str | None = None
-    backend: str = DEFAULTS.optimization.backend
-    max_opt_rounds: int = DEFAULTS.optimization.max_opt_rounds
-    generator_max_rounds: int = DEFAULTS.optimization.max_attempts
-    xml_max_attempts: int = DEFAULTS.optimization.xml_max_attempts
-    timeout_sec: float = DEFAULTS.optimization.timeout_sec
+    backend: str = CONFIGS.optimization.backend
+    max_opt_rounds: int = CONFIGS.optimization.max_opt_rounds
+    generator_max_rounds: int = CONFIGS.optimization.max_attempts
+    xml_max_attempts: int = CONFIGS.optimization.xml_max_attempts
+    timeout_sec: float = CONFIGS.optimization.timeout_sec
     assets_dir: str = "agent/generated_assets"
     mesh_assets_dir: str = "agent/generated_meshes"
-    sample_every_sec: float = DEFAULTS.optimization.sample_every_sec
-    max_frames: int = DEFAULTS.optimization.max_frames
-    max_width: int = DEFAULTS.optimization.max_width
+    sample_every_sec: float = CONFIGS.optimization.sample_every_sec
+    max_frames: int = CONFIGS.optimization.max_frames
+    max_width: int = CONFIGS.optimization.max_width
     output_root: str | None = None
     api_key_env: str = "OPENAI_API_KEY"
     base_url_env: str = "OPENAI_BASE_URL"

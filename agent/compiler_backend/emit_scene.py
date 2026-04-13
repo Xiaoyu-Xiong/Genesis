@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from ..defaults import DEFAULTS
+from ..configs import CONFIGS
 from ..ir_schema import RenderIR, RigidIR
 from .formatting import fmt_tuple, safe_var_name
 from .morph_material import body_material_source, body_morph_source, emit_collision_overrides, material_kwargs_from_collision
@@ -18,7 +18,7 @@ class SceneEmitContext:
 
 def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> SceneEmitContext:
     has_deformable_bodies = any(body.is_deformable for body in program.bodies)
-    if DEFAULTS.deformable.simulation_backend == "fem_ipc" and has_deformable_bodies:
+    if CONFIGS.deformable.simulation_backend == "fem_ipc" and has_deformable_bodies:
         backend_expr = "gs.cpu"
     else:
         backend_expr = "gs.cpu" if program.scene.backend == "cpu" else "gs.gpu"
@@ -28,7 +28,7 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
         emit(1, 'os.environ.setdefault("PYGLET_HEADLESS", "1")')
         emit(1)
     if has_deformable_bodies:
-        emit(1, f"gs.init(backend={backend_expr}, precision={DEFAULTS.deformable.genesis_precision!r})")
+        emit(1, f"gs.init(backend={backend_expr}, precision={CONFIGS.deformable.genesis_precision!r})")
     else:
         emit(1, f"gs.init(backend={backend_expr})")
     emit(1, "scene = gs.Scene(")
@@ -37,40 +37,40 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
     emit(3, f"gravity={fmt_tuple(program.scene.sim.gravity)},")
     emit(2, "),")
     if has_deformable_bodies:
-        if DEFAULTS.deformable.simulation_backend == "pbd":
+        if CONFIGS.deformable.simulation_backend == "pbd":
             boundary_friction = (
                 program.scene.ground_collision.friction
                 if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
-                else DEFAULTS.deformable.friction
+                else CONFIGS.deformable.friction
             )
             emit(2, "pbd_options=gs.options.PBDOptions(")
-            emit(3, f"particle_size={DEFAULTS.deformable.particle_size},")
-            emit(3, f"max_stretch_solver_iterations={DEFAULTS.deformable.max_stretch_solver_iterations},")
-            emit(3, f"max_bending_solver_iterations={DEFAULTS.deformable.max_bending_solver_iterations},")
-            emit(3, f"max_volume_solver_iterations={DEFAULTS.deformable.max_volume_solver_iterations},")
-            emit(3, f"max_density_solver_iterations={DEFAULTS.deformable.max_density_solver_iterations},")
-            emit(3, f"max_viscosity_solver_iterations={DEFAULTS.deformable.max_viscosity_solver_iterations},")
-            emit(3, f"lower_bound={fmt_tuple(DEFAULTS.deformable.lower_bound)},")
-            emit(3, f"upper_bound={fmt_tuple(DEFAULTS.deformable.upper_bound)},")
+            emit(3, f"particle_size={CONFIGS.deformable.particle_size},")
+            emit(3, f"max_stretch_solver_iterations={CONFIGS.deformable.max_stretch_solver_iterations},")
+            emit(3, f"max_bending_solver_iterations={CONFIGS.deformable.max_bending_solver_iterations},")
+            emit(3, f"max_volume_solver_iterations={CONFIGS.deformable.max_volume_solver_iterations},")
+            emit(3, f"max_density_solver_iterations={CONFIGS.deformable.max_density_solver_iterations},")
+            emit(3, f"max_viscosity_solver_iterations={CONFIGS.deformable.max_viscosity_solver_iterations},")
+            emit(3, f"lower_bound={fmt_tuple(CONFIGS.deformable.lower_bound)},")
+            emit(3, f"upper_bound={fmt_tuple(CONFIGS.deformable.upper_bound)},")
             emit(3, f"boundary_static_friction={boundary_friction},")
             emit(3, f"boundary_kinetic_friction={boundary_friction},")
             emit(2, "),")
         else:
             emit(2, "fem_options=gs.options.FEMOptions(),")
             emit(2, "coupler_options=gs.options.IPCCouplerOptions(")
-            emit(3, f"contact_d_hat={DEFAULTS.deformable.ipc_contact_d_hat},")
-            emit(3, f"contact_friction_enable={DEFAULTS.deformable.ipc_contact_friction_enable},")
-            emit(3, f"contact_resistance={DEFAULTS.deformable.ipc_contact_resistance},")
-            emit(3, f"contact_eps_velocity={DEFAULTS.deformable.ipc_contact_eps_velocity},")
-            emit(3, f"contact_constitution={DEFAULTS.deformable.ipc_contact_constitution!r},")
-            emit(3, f"collision_detection_method={DEFAULTS.deformable.ipc_collision_detection_method!r},")
-            emit(3, f"constraint_strength_translation={DEFAULTS.deformable.ipc_constraint_strength_translation},")
-            emit(3, f"constraint_strength_rotation={DEFAULTS.deformable.ipc_constraint_strength_rotation},")
-            emit(3, f"enable_rigid_ground_contact={DEFAULTS.deformable.ipc_enable_rigid_ground_contact},")
-            emit(3, f"enable_rigid_rigid_contact={DEFAULTS.deformable.ipc_enable_rigid_rigid_contact},")
-            emit(3, f"two_way_coupling={DEFAULTS.deformable.ipc_two_way_coupling},")
-            emit(3, f"enable_rigid_dofs_sync={DEFAULTS.deformable.ipc_enable_rigid_dofs_sync},")
-            emit(3, f"free_base_driven_by_ipc={DEFAULTS.deformable.ipc_free_base_driven_by_ipc},")
+            emit(3, f"contact_d_hat={CONFIGS.deformable.ipc_contact_d_hat},")
+            emit(3, f"contact_friction_enable={CONFIGS.deformable.ipc_contact_friction_enable},")
+            emit(3, f"contact_resistance={CONFIGS.deformable.ipc_contact_resistance},")
+            emit(3, f"contact_eps_velocity={CONFIGS.deformable.ipc_contact_eps_velocity},")
+            emit(3, f"contact_constitution={CONFIGS.deformable.ipc_contact_constitution!r},")
+            emit(3, f"collision_detection_method={CONFIGS.deformable.ipc_collision_detection_method!r},")
+            emit(3, f"constraint_strength_translation={CONFIGS.deformable.ipc_constraint_strength_translation},")
+            emit(3, f"constraint_strength_rotation={CONFIGS.deformable.ipc_constraint_strength_rotation},")
+            emit(3, f"enable_rigid_ground_contact={CONFIGS.deformable.ipc_enable_rigid_ground_contact},")
+            emit(3, f"enable_rigid_rigid_contact={CONFIGS.deformable.ipc_enable_rigid_rigid_contact},")
+            emit(3, f"two_way_coupling={CONFIGS.deformable.ipc_two_way_coupling},")
+            emit(3, f"enable_rigid_dofs_sync={CONFIGS.deformable.ipc_enable_rigid_dofs_sync},")
+            emit(3, f"free_base_driven_by_ipc={CONFIGS.deformable.ipc_free_base_driven_by_ipc},")
             emit(2, "),")
     if program.scene.viewer is not None:
         viewer = program.scene.viewer
@@ -89,7 +89,7 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
         ground_var = safe_var_name("ground")
         entity_vars["ground"] = ground_var
         if has_deformable_bodies:
-            if DEFAULTS.deformable.simulation_backend == "pbd":
+            if CONFIGS.deformable.simulation_backend == "pbd":
                 friction = (
                     program.scene.ground_collision.friction
                     if program.scene.ground_collision is not None and program.scene.ground_collision.friction is not None
@@ -125,7 +125,7 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
                 ipc_ground_coup_friction = (
                     program.scene.ground_collision.coup_friction
                     if program.scene.ground_collision is not None and program.scene.ground_collision.coup_friction is not None
-                    else (friction if friction is not None else DEFAULTS.deformable.friction)
+                    else (friction if friction is not None else CONFIGS.deformable.friction)
                 )
                 ipc_ground_coup_restitution = (
                     program.scene.ground_collision.coup_restitution
@@ -135,7 +135,7 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
                 ipc_ground_contact_resistance = (
                     program.scene.ground_collision.contact_resistance
                     if program.scene.ground_collision is not None and program.scene.ground_collision.contact_resistance is not None
-                    else DEFAULTS.deformable.ipc_contact_resistance
+                    else CONFIGS.deformable.ipc_contact_resistance
                 )
                 emit(
                     1,

@@ -4,7 +4,7 @@ import argparse
 from dataclasses import asdict
 from pathlib import Path
 
-from ..defaults import DEFAULTS
+from ..configs import CONFIGS
 from ..io_utils import dump_json
 from .pipeline import (
     OptimizationConfig,
@@ -16,28 +16,28 @@ from .pipeline import (
 
 def _cmd_optimize(args: argparse.Namespace) -> None:
     config = OptimizationConfig(
-        model=DEFAULTS.optimization.model,
+        model=CONFIGS.optimization.model,
         xml_model=args.xml_model,
-        critic_model=DEFAULTS.optimization.critic_model or None,
+        critic_model=CONFIGS.optimization.critic_model or None,
         hosted_prompt_id=args.hosted_prompt_id,
         hosted_prompt_version=args.hosted_prompt_version,
         critic_hosted_prompt_id=args.critic_hosted_prompt_id,
         critic_hosted_prompt_version=args.critic_hosted_prompt_version,
-        critic_prompt_variant=DEFAULTS.optimization.critic_prompt_variant,
+        critic_prompt_variant=CONFIGS.optimization.critic_prompt_variant,
         temperature=args.temperature,
         critic_temperature=args.critic_temperature,
-        reasoning_effort=DEFAULTS.optimization.reasoning_effort,
-        critic_reasoning_effort=(DEFAULTS.optimization.critic_reasoning_effort or None),
-        backend=DEFAULTS.optimization.backend,
-        max_opt_rounds=DEFAULTS.optimization.max_opt_rounds,
-        generator_max_rounds=DEFAULTS.optimization.max_attempts,
-        xml_max_attempts=DEFAULTS.optimization.xml_max_attempts,
-        timeout_sec=DEFAULTS.optimization.timeout_sec,
+        reasoning_effort=CONFIGS.optimization.reasoning_effort,
+        critic_reasoning_effort=(CONFIGS.optimization.critic_reasoning_effort or None),
+        backend=CONFIGS.optimization.backend,
+        max_opt_rounds=CONFIGS.optimization.max_opt_rounds,
+        generator_max_rounds=CONFIGS.optimization.max_attempts,
+        xml_max_attempts=CONFIGS.optimization.xml_max_attempts,
+        timeout_sec=CONFIGS.optimization.timeout_sec,
         assets_dir=str(args.assets_dir),
         mesh_assets_dir=str(args.mesh_assets_dir),
-        sample_every_sec=DEFAULTS.optimization.sample_every_sec,
-        max_frames=DEFAULTS.optimization.max_frames,
-        max_width=DEFAULTS.optimization.max_width,
+        sample_every_sec=CONFIGS.optimization.sample_every_sec,
+        max_frames=CONFIGS.optimization.max_frames,
+        max_width=CONFIGS.optimization.max_width,
         output_root=str(args.out_dir) if args.out_dir is not None else None,
         api_key_env=args.api_key_env,
         base_url_env=args.base_url_env,
@@ -96,28 +96,28 @@ def _parse_task_specs(task_specs: list[str] | None, tasks_file: Path | None) -> 
 
 def _build_config(args: argparse.Namespace) -> OptimizationConfig:
     return OptimizationConfig(
-        model=DEFAULTS.optimization.model,
+        model=CONFIGS.optimization.model,
         xml_model=args.xml_model,
-        critic_model=DEFAULTS.optimization.critic_model or None,
+        critic_model=CONFIGS.optimization.critic_model or None,
         hosted_prompt_id=args.hosted_prompt_id,
         hosted_prompt_version=args.hosted_prompt_version,
         critic_hosted_prompt_id=args.critic_hosted_prompt_id,
         critic_hosted_prompt_version=args.critic_hosted_prompt_version,
-        critic_prompt_variant=DEFAULTS.optimization.critic_prompt_variant,
+        critic_prompt_variant=CONFIGS.optimization.critic_prompt_variant,
         temperature=args.temperature,
         critic_temperature=args.critic_temperature,
-        reasoning_effort=DEFAULTS.optimization.reasoning_effort,
-        critic_reasoning_effort=(DEFAULTS.optimization.critic_reasoning_effort or None),
-        backend=DEFAULTS.optimization.backend,
-        max_opt_rounds=DEFAULTS.optimization.max_opt_rounds,
-        generator_max_rounds=DEFAULTS.optimization.max_attempts,
-        xml_max_attempts=DEFAULTS.optimization.xml_max_attempts,
-        timeout_sec=DEFAULTS.optimization.timeout_sec,
+        reasoning_effort=CONFIGS.optimization.reasoning_effort,
+        critic_reasoning_effort=(CONFIGS.optimization.critic_reasoning_effort or None),
+        backend=CONFIGS.optimization.backend,
+        max_opt_rounds=CONFIGS.optimization.max_opt_rounds,
+        generator_max_rounds=CONFIGS.optimization.max_attempts,
+        xml_max_attempts=CONFIGS.optimization.xml_max_attempts,
+        timeout_sec=CONFIGS.optimization.timeout_sec,
         assets_dir=str(args.assets_dir),
         mesh_assets_dir=str(args.mesh_assets_dir),
-        sample_every_sec=DEFAULTS.optimization.sample_every_sec,
-        max_frames=DEFAULTS.optimization.max_frames,
-        max_width=DEFAULTS.optimization.max_width,
+        sample_every_sec=CONFIGS.optimization.sample_every_sec,
+        max_frames=CONFIGS.optimization.max_frames,
+        max_width=CONFIGS.optimization.max_width,
         output_root=str(args.out_dir) if args.out_dir is not None else None,
         api_key_env=args.api_key_env,
         base_url_env=args.base_url_env,
@@ -130,7 +130,7 @@ def _cmd_optimize_batch(args: argparse.Namespace) -> None:
     result = optimize_prompts_batch(
         task_specs=task_specs,
         config=config,
-        max_parallel=DEFAULTS.optimization.max_parallel,
+        max_parallel=CONFIGS.optimization.max_parallel,
     )
     if args.out is not None:
         dump_json(

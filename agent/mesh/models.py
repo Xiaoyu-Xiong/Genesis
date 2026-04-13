@@ -11,6 +11,7 @@ MESHY_AI_MODEL_VALUES = ("meshy-5", "meshy-6", "latest")
 MESHY_ART_STYLE_VALUES = ("realistic", "sculpture")
 MESHY_TOPOLOGY_VALUES = ("triangle", "quad")
 MESHY_SYMMETRY_VALUES = ("off", "auto", "on")
+MESHY_TEXTURE_MAP_KEYS = ("base_color", "metallic", "normal", "roughness")
 
 
 class MeshyRequestError(RuntimeError):
@@ -100,6 +101,23 @@ class MeshyGenerationConfig:
 
 
 @dataclass(slots=True)
+class MeshyTextureConfig:
+    enabled: bool = False
+    texture_prompt: str | None = None
+    ai_model: str | None = None
+    enable_pbr: bool = False
+    remove_lighting: bool = True
+
+    def __post_init__(self) -> None:
+        if self.ai_model is not None and self.ai_model not in MESHY_AI_MODEL_VALUES:
+            allowed = ", ".join(MESHY_AI_MODEL_VALUES)
+            raise ValueError(f"Unsupported texture ai_model `{self.ai_model}`. Expected one of: {allowed}.")
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class MeshRepairConfig:
     component_count_face_cap: int = 100000
     min_component_faces: int = 100
@@ -158,6 +176,50 @@ class MeshyGenerationResult:
 
 
 @dataclass(slots=True)
+class MeshyTextureResult:
+    requested: bool
+    ok: bool
+    prompt: str
+    output_dir: Path
+    preview_task_id: str
+    refine_task_id: str | None
+    submit_response_path: Path | None
+    final_response_path: Path | None
+    textured_mesh_path: Path | None
+    textured_mtl_path: Path | None
+    texture_paths: dict[str, Path]
+    ai_model: str | None
+    enable_pbr: bool
+    remove_lighting: bool
+    final_status: str | None
+    stage_durations_sec: dict[str, float] = field(default_factory=dict)
+    submit_response: dict[str, Any] | None = None
+    final_response: dict[str, Any] | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "requested": self.requested,
+            "ok": self.ok,
+            "prompt": self.prompt,
+            "output_dir": str(self.output_dir),
+            "preview_task_id": self.preview_task_id,
+            "refine_task_id": self.refine_task_id,
+            "submit_response_path": None if self.submit_response_path is None else str(self.submit_response_path),
+            "final_response_path": None if self.final_response_path is None else str(self.final_response_path),
+            "textured_mesh_path": None if self.textured_mesh_path is None else str(self.textured_mesh_path),
+            "textured_mtl_path": None if self.textured_mtl_path is None else str(self.textured_mtl_path),
+            "texture_paths": {key: str(path) for key, path in sorted(self.texture_paths.items())},
+            "ai_model": self.ai_model,
+            "enable_pbr": self.enable_pbr,
+            "remove_lighting": self.remove_lighting,
+            "final_status": self.final_status,
+            "stage_durations_sec": self.stage_durations_sec,
+            "error": self.error,
+        }
+
+
+@dataclass(slots=True)
 class MeshRepairResult:
     ok: bool
     input_mesh_path: Path
@@ -194,7 +256,9 @@ class MeshRepairResult:
             "vertex_count_after": self.vertex_count_after,
             "face_count_after": self.face_count_after,
             "component_count_after": self.component_count_after,
-            "centroid_before_translation": list(self.centroid_before_translation) if self.centroid_before_translation is not None else None,
+            "centroid_before_translation": (
+                list(self.centroid_before_translation) if self.centroid_before_translation is not None else None
+            ),
             "bbox_min": list(self.bbox_min) if self.bbox_min is not None else None,
             "bbox_max": list(self.bbox_max) if self.bbox_max is not None else None,
             "bbox_size": list(self.bbox_size) if self.bbox_size is not None else None,
@@ -238,6 +302,7 @@ class MeshManifoldCheckResult:
 @dataclass(slots=True)
 class TextToMeshBundle:
     generation: MeshyGenerationResult
+    texture: MeshyTextureResult | None = None
     repair: MeshRepairResult | None = None
     repair_attempts: tuple[MeshRepairResult, ...] = ()
     raw_manifold: MeshManifoldCheckResult | None = None
@@ -246,6 +311,8 @@ class TextToMeshBundle:
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {"generation": self.generation.to_dict()}
+        if self.texture is not None:
+            data["texture"] = self.texture.to_dict()
         if self.repair is not None:
             data["repair"] = self.repair.to_dict()
         if self.repair_attempts:

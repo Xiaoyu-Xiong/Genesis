@@ -79,7 +79,7 @@ def estimate_scaled_bbox_size(
 
 
 def _asset_root_from_mesh_path(mesh_path: Path) -> Path:
-    if mesh_path.parent.name in {"downloads", "processed"}:
+    if mesh_path.parent.name in {"downloads", "processed", "textured"}:
         return mesh_path.parent.parent
     return mesh_path.parent
 
