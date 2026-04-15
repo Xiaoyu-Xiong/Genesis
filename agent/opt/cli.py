@@ -15,33 +15,7 @@ from .pipeline import (
 
 
 def _cmd_optimize(args: argparse.Namespace) -> None:
-    config = OptimizationConfig(
-        model=CONFIGS.optimization.model,
-        xml_model=args.xml_model,
-        critic_model=CONFIGS.optimization.critic_model or None,
-        hosted_prompt_id=args.hosted_prompt_id,
-        hosted_prompt_version=args.hosted_prompt_version,
-        critic_hosted_prompt_id=args.critic_hosted_prompt_id,
-        critic_hosted_prompt_version=args.critic_hosted_prompt_version,
-        critic_prompt_variant=CONFIGS.optimization.critic_prompt_variant,
-        temperature=args.temperature,
-        critic_temperature=args.critic_temperature,
-        reasoning_effort=CONFIGS.optimization.reasoning_effort,
-        critic_reasoning_effort=(CONFIGS.optimization.critic_reasoning_effort or None),
-        backend=CONFIGS.optimization.backend,
-        max_opt_rounds=CONFIGS.optimization.max_opt_rounds,
-        generator_max_rounds=CONFIGS.optimization.max_attempts,
-        xml_max_attempts=CONFIGS.optimization.xml_max_attempts,
-        timeout_sec=CONFIGS.optimization.timeout_sec,
-        assets_dir=str(args.assets_dir),
-        mesh_assets_dir=str(args.mesh_assets_dir),
-        sample_every_sec=CONFIGS.optimization.sample_every_sec,
-        max_frames=CONFIGS.optimization.max_frames,
-        max_width=CONFIGS.optimization.max_width,
-        output_root=str(args.out_dir) if args.out_dir is not None else None,
-        api_key_env=args.api_key_env,
-        base_url_env=args.base_url_env,
-    )
+    config = _build_config(args)
     result = optimize_prompt(task=args.task, config=config)
     if args.out is not None:
         dump_json(
@@ -95,6 +69,9 @@ def _parse_task_specs(task_specs: list[str] | None, tasks_file: Path | None) -> 
 
 
 def _build_config(args: argparse.Namespace) -> OptimizationConfig:
+    mesh_texture_enabled = CONFIGS.meshy_request.texture_enabled
+    if args.mesh_texture_enabled is not None:
+        mesh_texture_enabled = args.mesh_texture_enabled
     return OptimizationConfig(
         model=CONFIGS.optimization.model,
         xml_model=args.xml_model,
@@ -121,6 +98,7 @@ def _build_config(args: argparse.Namespace) -> OptimizationConfig:
         output_root=str(args.out_dir) if args.out_dir is not None else None,
         api_key_env=args.api_key_env,
         base_url_env=args.base_url_env,
+        mesh_texture_enabled=mesh_texture_enabled,
     )
 
 
@@ -169,48 +147,64 @@ def build_parser() -> argparse.ArgumentParser:
     )
     for parser_variant in common_parsers:
         parser_variant.add_argument("--xml-model", type=str, default=None, help="Optional XML generator model override.")
-        parser_variant.add_argument("--hosted-prompt-id", type=str, default=None, help="Optional generator Hosted Prompt ID.")
         parser_variant.add_argument(
-        "--hosted-prompt-version",
-        type=str,
-        default=None,
-        help="Optional generator Hosted Prompt version.",
+            "--hosted-prompt-id",
+            type=str,
+            default=None,
+            help="Optional generator Hosted Prompt ID.",
         )
         parser_variant.add_argument(
-        "--critic-hosted-prompt-id",
-        type=str,
-        default=None,
-        help="Optional critic Hosted Prompt ID.",
+            "--hosted-prompt-version",
+            type=str,
+            default=None,
+            help="Optional generator Hosted Prompt version.",
         )
         parser_variant.add_argument(
-        "--critic-hosted-prompt-version",
-        type=str,
-        default=None,
-        help="Optional critic Hosted Prompt version.",
-        )
-        parser_variant.add_argument("--temperature", type=float, default=None, help="Optional generator sampling temperature.")
-        parser_variant.add_argument(
-        "--critic-temperature",
-        type=float,
-        default=None,
-        help="Optional critic sampling temperature.",
+            "--critic-hosted-prompt-id",
+            type=str,
+            default=None,
+            help="Optional critic Hosted Prompt ID.",
         )
         parser_variant.add_argument(
-        "--assets-dir",
-        type=Path,
-        default=Path("agent/generated_assets"),
-        help="Directory for generated articulated XML assets.",
+            "--critic-hosted-prompt-version",
+            type=str,
+            default=None,
+            help="Optional critic Hosted Prompt version.",
         )
         parser_variant.add_argument(
-        "--mesh-assets-dir",
-        type=Path,
-        default=Path("agent/generated_meshes"),
-        help="Directory for generated non-articulated mesh assets.",
+            "--temperature",
+            type=float,
+            default=None,
+            help="Optional generator sampling temperature.",
+        )
+        parser_variant.add_argument(
+            "--critic-temperature",
+            type=float,
+            default=None,
+            help="Optional critic sampling temperature.",
+        )
+        parser_variant.add_argument(
+            "--assets-dir",
+            type=Path,
+            default=Path("agent/generated_assets"),
+            help="Directory for generated articulated XML assets.",
+        )
+        parser_variant.add_argument(
+            "--mesh-assets-dir",
+            type=Path,
+            default=Path("agent/generated_meshes"),
+            help="Directory for generated non-articulated mesh assets.",
         )
         parser_variant.add_argument("--out-dir", type=Path, default=None, help="Optional optimization run directory.")
         parser_variant.add_argument("--out", type=Path, default=None, help="Optional summary JSON output path.")
         parser_variant.add_argument("--api-key-env", type=str, default="OPENAI_API_KEY", help="API key env var name.")
         parser_variant.add_argument("--base-url-env", type=str, default="OPENAI_BASE_URL", help="Base URL env var name.")
+        parser_variant.add_argument(
+            "--mesh-texture-enabled",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help="Enable Meshy texture generation for non-articulated mesh assets in this optimization run.",
+        )
     parser_opt.set_defaults(func=_cmd_optimize)
     parser_opt_batch.set_defaults(func=_cmd_optimize_batch)
     return parser

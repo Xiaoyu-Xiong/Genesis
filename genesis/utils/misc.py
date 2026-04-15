@@ -256,6 +256,10 @@ def get_remesh_cache_dir():
     return os.path.join(get_cache_dir(), "rm")
 
 
+def get_uv_cache_dir():
+    return os.path.join(get_cache_dir(), "uv")
+
+
 def get_exr_cache_dir():
     return os.path.join(get_cache_dir(), "exr")
 

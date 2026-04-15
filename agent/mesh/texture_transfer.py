@@ -147,7 +147,6 @@ def transfer_texture_to_repaired_mesh(
             parameterization_filter=parameterization_filter,
             transfer_filter=transfer_filter,
             debug_dir=debug_dir,
-            filter_script_path=None,
             stage_durations_sec=stage_durations_sec,
         )
     except Exception as exc:  # noqa: BLE001
@@ -179,7 +178,6 @@ def transfer_texture_to_repaired_mesh(
             parameterization_filter=parameterization_filter,
             transfer_filter=transfer_filter,
             debug_dir=debug_dir,
-            filter_script_path=None,
             stage_durations_sec=stage_durations_sec,
             error=f"{type(exc).__name__}: {exc}",
         )

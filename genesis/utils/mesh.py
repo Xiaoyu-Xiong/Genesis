@@ -28,6 +28,7 @@ from .misc import (
     get_remesh_cache_dir,
     get_src_dir,
     get_tet_cache_dir,
+    get_uv_cache_dir,
     get_usd_cache_dir,
     redirect_libc_stderr,
 )
@@ -148,6 +149,11 @@ def get_remesh_path(verts, faces, edge_len_abs, edge_len_ratio, fix):
     return os.path.join(get_remesh_cache_dir(), f"{hashkey}.rm")
 
 
+def get_uv_transfer_path(stage, *args):
+    hashkey = get_hashkey(stage, *args)
+    return os.path.join(get_uv_cache_dir(), f"{hashkey}.uv")
+
+
 def get_exr_path(file_path):
     hashkey = get_hashkey(Path(file_path))
     return os.path.join(get_exr_cache_dir(), f"{hashkey}.exr")
@@ -189,6 +195,10 @@ def load_mesh(file):
             # try loading without texture data
             return trimesh.load_mesh(file, force="mesh", skip_texture=True)
     return file
+
+
+def mesh_has_texture(mesh) -> bool:
+    return isinstance(mesh.visual, trimesh.visual.texture.TextureVisuals) and mesh.visual.uv is not None
 
 
 def remesh_surface_mesh(mesh, edge_len_abs=None, edge_len_ratio=0.01, fix=True):
@@ -600,6 +610,31 @@ def create_texture(image, factor, encoding):
     if factor is not None:
         return gs.textures.ColorTexture(color=factor)
     return None
+
+
+def extract_diffuse_texture(mesh):
+    visual = mesh.visual
+    if not isinstance(visual, trimesh.visual.texture.TextureVisuals) or not visual.defined:
+        return None
+
+    material = visual.material
+    color_image = None
+    color_factor = None
+
+    if isinstance(material, trimesh.visual.material.PBRMaterial):
+        if material.baseColorTexture is not None:
+            color_image = PIL_to_array(material.baseColorTexture)
+        if material.baseColorFactor is not None:
+            color_factor = tuple(np.array(material.baseColorFactor, dtype=np.float32) / 255.0)
+    elif isinstance(material, trimesh.visual.material.SimpleMaterial):
+        if material.image is not None:
+            color_image = PIL_to_array(material.image)
+        elif material.diffuse is not None:
+            color_factor = tuple(np.array(material.diffuse, dtype=np.float32) / 255.0)
+    else:
+        return None
+
+    return create_texture(color_image, color_factor, "srgb")
 
 
 def apply_transform(transform, positions, normals=None):
@@ -1108,6 +1143,22 @@ def tetrahedralize_mesh(mesh, tet_cfg):
     verts, elems, *_ = tet.tetrahedralize(switches=make_tetgen_switches(tet_cfg))
 
     return verts, elems
+
+
+def tetrahedralize_mesh_with_boundary(mesh, tet_cfg):
+    tet = tetgen.TetGen(mesh.vertices.astype(np.float64, copy=False), mesh.faces.astype(np.int32, copy=False))
+
+    switches = make_tetgen_switches(tet_cfg)
+    if "f" not in switches:
+        switches += "f"
+
+    verts, elems, *_ = tet.tetrahedralize(switches=switches)
+    boundary_faces = np.asarray(tet.trifaces, dtype=np.int32)
+    boundary_markers = np.asarray(tet.triface_markers, dtype=np.int32)
+    if boundary_faces.ndim != 2 or boundary_faces.shape[1] != 3:
+        gs.raise_exception(f"Unexpected TetGen boundary face shape: {boundary_faces.shape}")
+    boundary_faces = boundary_faces[boundary_markers == -1]
+    return verts, elems, boundary_faces
 
 
 def visualize_tet(tet, mesh, show_surface=True, plot_cell_qual=False):

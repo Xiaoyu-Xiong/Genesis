@@ -51,6 +51,7 @@ def generate_mesh_asset_with_meshy(
     output_dir: str | Path,
     file_stem: str,
     mesh_format: str | None = None,
+    texture_enabled: bool | None = None,
     timeout_sec: float | None = None,
     api_key_env: str | None = None,
     base_url_env: str | None = None,
@@ -81,7 +82,7 @@ def generate_mesh_asset_with_meshy(
         max_wait_sec=request_defaults.max_wait_sec,
     )
     texture_config = MeshyTextureConfig(
-        enabled=request_defaults.texture_enabled,
+        enabled=request_defaults.texture_enabled if texture_enabled is None else texture_enabled,
         ai_model=request_defaults.texture_ai_model,
         enable_pbr=request_defaults.texture_enable_pbr,
         remove_lighting=request_defaults.texture_remove_lighting,

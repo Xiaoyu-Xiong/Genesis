@@ -1,3 +1,4 @@
+import os
 from functools import wraps
 from pathlib import Path
 
@@ -115,16 +116,34 @@ class FEMEntity(Entity):
             unique_el = tri2el.flat[unique_idcs]
             self._surface_el_np = unique_el[cnt == 1]
 
-        if self._n_surfaces > 0:
-            surf_idx, inv = np.unique(self._surface_tri_np.reshape(-1), return_inverse=True)
-            self._surface_vis_idx_np = surf_idx.astype(gs.np_int, copy=False)
-            self._surface_tri_reindexed_np = inv.reshape(self._surface_tri_np.shape).astype(gs.np_int, copy=False)
+        render_artifact = None
+        if isinstance(self.morph, gs.options.morphs.Mesh):
+            render_artifact = eu.get_mesh_to_elements_render_artifact(
+                self._morph.file,
+                self._morph.scale,
+                self.tet_cfg,
+            )
+        if (
+            isinstance(render_artifact, dict)
+            and render_artifact.get("render_vertex_src_indices") is not None
+            and render_artifact.get("render_faces") is not None
+            and render_artifact.get("render_uvs") is not None
+        ):
+            self._surface_vis_idx_np = np.asarray(render_artifact["render_vertex_src_indices"], dtype=gs.np_int)
+            self._surface_tri_reindexed_np = np.asarray(render_artifact["render_faces"], dtype=gs.np_int)
+            self._surface_visual_uvs_np = np.asarray(render_artifact["render_uvs"], dtype=gs.np_float)
+            self._n_surface_vertices = len(self._surface_vis_idx_np)
         else:
-            self._surface_vis_idx_np = np.empty((0,), dtype=gs.np_int)
-            self._surface_tri_reindexed_np = np.empty((0, 3), dtype=gs.np_int)
-        self._surface_visual_uvs_np = None
-        if self._uvs is not None and len(self._surface_vis_idx_np) > 0:
-            self._surface_visual_uvs_np = self._uvs[self._surface_vis_idx_np]
+            if self._n_surfaces > 0:
+                surf_idx, inv = np.unique(self._surface_tri_np.reshape(-1), return_inverse=True)
+                self._surface_vis_idx_np = surf_idx.astype(gs.np_int, copy=False)
+                self._surface_tri_reindexed_np = inv.reshape(self._surface_tri_np.shape).astype(gs.np_int, copy=False)
+            else:
+                self._surface_vis_idx_np = np.empty((0,), dtype=gs.np_int)
+                self._surface_tri_reindexed_np = np.empty((0, 3), dtype=gs.np_int)
+            self._surface_visual_uvs_np = None
+            if self._uvs is not None and len(self._surface_vis_idx_np) > 0:
+                self._surface_visual_uvs_np = self._uvs[self._surface_vis_idx_np]
 
         if isinstance(self.sim.coupler, SAPCoupler):
             self.compute_pressure_field()
@@ -458,12 +477,40 @@ class FEMEntity(Entity):
                     scale=self._morph.scale,
                     tet_cfg=self.tet_cfg,
                 )
+                if self._uvs is not None and not self._surface.requires_uv:
+                    try:
+                        render_artifact = eu.get_mesh_to_elements_render_artifact(
+                            self._morph.file,
+                            self._morph.scale,
+                            self.tet_cfg,
+                        )
+                        baked_texture_path = (
+                            render_artifact.get("texture_path") if isinstance(render_artifact, dict) else None
+                        )
+                        if baked_texture_path is not None and os.path.exists(baked_texture_path):
+                            self._surface.update_texture(
+                                diffuse_texture=gs.textures.ImageTexture(
+                                    image_path=baked_texture_path,
+                                    encoding="srgb",
+                                )
+                            )
+                        else:
+                            source_mesh = mu.load_mesh(self._morph.file)
+                            diffuse_texture = mu.extract_diffuse_texture(source_mesh)
+                            if diffuse_texture is not None:
+                                self._surface.update_texture(diffuse_texture=diffuse_texture)
+                    except Exception as exc:  # noqa: BLE001
+                        gs.logger.warning(f"Failed to attach diffuse texture from mesh asset: {exc}")
+                if self._uvs is None:
+                    verts, elems = eu.split_all_surface_tets(verts, elems)
+                else:
+                    verts, elems, self._uvs = eu.split_all_surface_tets(verts, elems, self._uvs)
                 verts = gu.transform_by_quat(verts, np.asarray(self._morph.quat, dtype=gs.np_float))
                 verts = verts + np.asarray(self._morph.pos, dtype=gs.np_float)
             else:
                 gs.raise_exception(f"Unsupported morph: {self.morph}.")
 
-            self.instantiate(*eu.split_all_surface_tets(verts, elems))
+            self.instantiate(verts, elems)
 
     def _add_to_solver(self, in_backward=False):
         from genesis.engine.materials.FEM.cloth import Cloth as ClothMaterial

@@ -283,7 +283,6 @@ class MeshTextureTransferResult:
     parameterization_filter: str | None = None
     transfer_filter: str | None = None
     debug_dir: Path | None = None
-    filter_script_path: Path | None = None
     stage_durations_sec: dict[str, float] = field(default_factory=dict)
     error: str | None = None
 
@@ -301,7 +300,6 @@ class MeshTextureTransferResult:
             "parameterization_filter": self.parameterization_filter,
             "transfer_filter": self.transfer_filter,
             "debug_dir": None if self.debug_dir is None else str(self.debug_dir),
-            "filter_script_path": None if self.filter_script_path is None else str(self.filter_script_path),
             "stage_durations_sec": self.stage_durations_sec,
             "error": self.error,
         }

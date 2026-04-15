@@ -94,6 +94,7 @@ class RigidToolLibrary:
         assets_dir: str = "agent/generated_assets",
         mesh_assets_dir: str = "agent/generated_meshes",
         force_primitive_mode: bool = False,
+        mesh_texture_enabled: bool | None = None,
     ) -> RigidIR:
         from ..llm_generator import OpenAIResponsesClient, generate_ir_two_agent
 
@@ -117,6 +118,7 @@ class RigidToolLibrary:
             force_primitive_mode=force_primitive_mode,
             hosted_prompt_id=hosted_prompt_id,
             hosted_prompt_version=hosted_prompt_version,
+            mesh_texture_enabled=mesh_texture_enabled,
         )
         return result.ir_result.program
 

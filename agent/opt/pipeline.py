@@ -47,6 +47,7 @@ class OptimizationConfig:
     output_root: str | None = None
     api_key_env: str = "OPENAI_API_KEY"
     base_url_env: str = "OPENAI_BASE_URL"
+    mesh_texture_enabled: bool = CONFIGS.meshy_request.texture_enabled
 
 
 @dataclass(slots=True)
@@ -144,6 +145,7 @@ def optimize_prompt(
             previous_xml_texts_by_body=previous_xml_texts_by_body,
             hosted_prompt_id=config.hosted_prompt_id,
             hosted_prompt_version=config.hosted_prompt_version,
+            mesh_texture_enabled=config.mesh_texture_enabled,
         )
 
         ir_generated = round_dir / "ir.generated.json"
@@ -447,6 +449,10 @@ def _generation_log_payload(result, config: OptimizationConfig) -> dict[str, Any
                 "mesh_path": mesh_result.mesh_path,
                 "raw_manifold_ok": mesh_result.raw_manifold_ok,
                 "repaired_manifold_ok": mesh_result.repaired_manifold_ok,
+                "texture_requested": mesh_result.texture_requested,
+                "texture_succeeded": mesh_result.texture_succeeded,
+                "textured_mesh_path": mesh_result.textured_mesh_path,
+                "base_color_path": mesh_result.base_color_path,
             }
             for body_name, mesh_result in sorted(mesh_results_by_body.items())
         },

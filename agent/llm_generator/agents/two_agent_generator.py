@@ -231,6 +231,7 @@ def _build_mesh_generation_fn(
     task: str,
     output_dir: Path,
     previous_mesh_paths_by_body: dict[str, str],
+    mesh_texture_enabled: bool | None,
 ):
     def _mesh_generation_fn(body_name: str, mesh_task: str | None, file_stem: str | None) -> MeshGenerationResult:
         previous_mesh_path = previous_mesh_paths_by_body.get(body_name)
@@ -244,6 +245,7 @@ def _build_mesh_generation_fn(
             task=effective_mesh_task,
             output_dir=output_dir,
             file_stem=file_stem or body_name,
+            texture_enabled=mesh_texture_enabled,
         )
 
     return _mesh_generation_fn
@@ -282,6 +284,7 @@ def generate_ir_two_agent(
     previous_xml_texts_by_body: dict[str, str] | None = None,
     hosted_prompt_id: str | None = None,
     hosted_prompt_version: str | None = None,
+    mesh_texture_enabled: bool | None = None,
 ) -> TwoAgentGenerationResult:
     xml_out_dir = _prepare_asset_dir(assets_dir)
     mesh_out_dir = _prepare_asset_dir(mesh_assets_dir)
@@ -305,6 +308,7 @@ def generate_ir_two_agent(
         task=task,
         output_dir=mesh_out_dir,
         previous_mesh_paths_by_body=previous_mesh_paths_by_body,
+        mesh_texture_enabled=mesh_texture_enabled,
     )
 
     tool_library = GeneralIRAgentToolLibrary(

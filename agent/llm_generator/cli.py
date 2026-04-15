@@ -31,6 +31,7 @@ def _cmd_generate(args: argparse.Namespace) -> None:
         force_primitive_mode=args.primitive_only,
         hosted_prompt_id=args.hosted_prompt_id,
         hosted_prompt_version=args.hosted_prompt_version,
+        mesh_texture_enabled=args.mesh_texture_enabled,
     )
     dump_json(result.ir_json, args.out)
 
@@ -55,6 +56,10 @@ def _cmd_generate(args: argparse.Namespace) -> None:
                         "mesh_path": mesh_result.mesh_path,
                         "raw_manifold_ok": mesh_result.raw_manifold_ok,
                         "repaired_manifold_ok": mesh_result.repaired_manifold_ok,
+                        "texture_requested": mesh_result.texture_requested,
+                        "texture_succeeded": mesh_result.texture_succeeded,
+                        "textured_mesh_path": mesh_result.textured_mesh_path,
+                        "base_color_path": mesh_result.base_color_path,
                     }
                     for body_name, mesh_result in sorted(result.mesh_results_by_body.items())
                 },
@@ -145,6 +150,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--primitive-only",
         action="store_true",
         help="Force primitive-only mode in unified generator (no articulated XML route).",
+    )
+    parser_generate.add_argument(
+        "--mesh-texture-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable Meshy texture generation for non-articulated mesh assets in this generation run.",
     )
     parser_generate.add_argument(
         "--log-out",

@@ -7,13 +7,17 @@ Guide for AI coding assistants working with the Genesis physics simulation codeb
 These rules are mandatory for this repository.
 
 - **Never run Python outside Apptainer.** Any `python`, `python -m ...`, `uv run ...`, `uv sync`, `uv pip ...`, `pytest`, or other Python environment command must run **inside** Apptainer only.
+- **Use the repository's standard Apptainer image unless the user explicitly says otherwise.** The current default image is `/ocean/projects/cis250078p/xxiong1/containers/genesis.sif`.
 - **Never modify the host `.venv`.** Do not create, delete, recreate, sync, or repair `/jet/home/xxiong1/Genesis/.venv` from the host shell.
 - **Git commands run outside Apptainer.** Use the host shell for `git status`, `git diff`, `git checkout`, `git commit`, `git restore`, and similar repository operations.
-- **Host-shell work is read-only unless it is git.** Outside Apptainer, restrict actions to file inspection (`ls`, `cat`, `sed`, `rg`, `find`, `stat`) and git. Do not run Python tooling there.
+- **Host-shell work is read-only unless it is git.** Outside Apptainer, restrict actions to file inspection (`ls`, `cat`, `sed`, `rg`, `find`, `stat`) and git. Do not run Python tooling there, and do not run shell scripts that indirectly invoke repository Python from the host.
 - **If execution context is unclear, stop and clarify the shell context before running commands that mutate environments or execute Python.**
-- **Do not assume GPU access.** If a task depends on GPU rendering/profiling/simulation, prefer giving the user an Apptainer command to run rather than executing it from the host.
-- **When the user says they are already inside Apptainer, give commands without an Apptainer prefix.**
+- **For CPU-only or lightweight non-simulation tasks, run directly inside Apptainer.** Use the shortest correct command.
+- **For GPU-dependent Genesis simulation, rendering, profiling, or long optimization tasks, default to `sbatch` on the `GPU-shared` partition with one `h100-80` GPU unless the user explicitly asks for a lighter local Apptainer smoke test.** Queueing can take time, so do not assume immediate execution.
+- **When the user says they are already inside Apptainer, give commands without an Apptainer prefix.** In that case, do not re-wrap commands with `apptainer exec`.
 - **When the user asks for a command, prefer the shortest correct command.** Do not wrap a simple rerun in an unnecessarily complex script.
+- **`agent/configs.py` is a static config module.** Do not reintroduce environment-variable-driven config loading there. For run-specific behavior, prefer explicit CLI flags.
+- **When changing the `agent/` pipeline, suite scripts, or mesh / texture / deformable workflows, update the relevant documentation under `agent/` in the same turn.**
 
 ## Quick Start
 
@@ -106,3 +110,8 @@ Do NOT ask when:
 | [CODING_CONVENTIONS.md](.github/contributing/CODING_CONVENTIONS.md) | Code style and patterns |
 | [EXAMPLES.md](.github/contributing/EXAMPLES.md) | Examples reference |
 | [PULL_REQUESTS.md](.github/contributing/PULL_REQUESTS.md) | PR guidelines |
+| [agent/README.md](agent/README.md) | Agent pipeline index and entry points |
+| [agent/docs/ir_runtime.md](agent/docs/ir_runtime.md) | IR model, body semantics, runtime, and event pack |
+| [agent/docs/generation_and_optimization.md](agent/docs/generation_and_optimization.md) | Generator, critic, optimization loop, and config overview |
+| [agent/docs/mesh_texture.md](agent/docs/mesh_texture.md) | Mesh generation, repair, texture transfer, and texture debug flow |
+| [agent/docs/suites_and_artifacts.md](agent/docs/suites_and_artifacts.md) | Suite scripts, artifact roots, and common workflows |
