@@ -55,21 +55,7 @@ echo "Python: ${PYTHON_CMD[*]}"
 cat > "$TASK_FILE" <<'CASES'
 textured_duck_plate_press|Create a scene where around 10 identical medium-sized soft rubber ducks with bright toy-like texture are compressed by a descending rigid plate, showing visible squashing, render 10s behavior
 
-striped_gel_block_squeeze|Create a scene where several identical medium-sized soft striped gel blocks are squeezed between moving rigid paddles, render 10s behavior
-
-gift_box_crush_stack|Create a scene where a stack of identical soft wrapped gift boxes with ribbon texture is compressed and partially toppled by a heavy rigid box over 10s
-
-plush_drag_train|Create a scene where several identical soft plush animal toys with clear fabric-like texture are dragged across the ground by a moving rigid bar, causing sliding, stretching, and pileup over 10s
-
-beach_ball_gate_sweep|Create a scene where identical soft striped beach balls are pushed through a narrowing rigid gate with clear deformation, render 10s behavior
-
-cap_pull_and_release|Create a scene where a soft textured baseball cap is pulled outward by moving rigid blockers and then released, making the brim and crown visibly deform over 10s
-
-teapot_press_corridor|Create a corridor scene packed with identical soft textured Stanford teapots while a rigid pusher drives through them, causing dense contact and visible deformation over 10s
-
-monster_ring_compression|Create a ring of identical soft monster toys with colorful textured surfaces and let a rigid plate descend into the ring so they compress and buckle over 10s
-
-duck_ramp_cascade_texture|Create a playful ramp-and-bin scene where identical soft textured rubber ducks slide, tumble, deform, and pile into a boxed area, render 10s behavior
+cap_pull_and_release|Create a scene where a soft textured baseball cap is visibly compressed and deformed by a rigid plate over 10s
 CASES
 
 SUMMARY_JSON="$RUN_ROOT/summary.json"
@@ -79,6 +65,7 @@ opt_cmd=(
   --tasks-file "$TASK_FILE"
   --out-dir "$RUN_ROOT"
   --out "$SUMMARY_JSON"
+  --max-parallel 2
   --mesh-texture-enabled
 )
 

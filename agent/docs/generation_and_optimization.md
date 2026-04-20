@@ -69,6 +69,7 @@ Output includes:
 
 - `optimize`
 - `optimize-batch`
+- `--max-parallel` override for memory-heavy batch runs
 
 Optimization loop:
 
@@ -84,6 +85,8 @@ The optimization CLI also supports:
 - `--mesh-texture-enabled`
 
 so the full loop can request textured mesh assets when needed.
+
+For memory-heavy texture suites, prefer lowering `optimize-batch --max-parallel` instead of letting all cases launch at the default worker count. Process-pool failures with empty round lists usually indicate a worker was killed externally (for example by OOM) before the normal per-case error handling could run.
 
 ### Typical Optimize Command
 

@@ -61,6 +61,14 @@ Current textured-mesh flow is:
 5. repaired textured mesh is used for standalone validation renders
 6. the main deformable pipeline reuses repaired textured data for render-side UV handling
 
+Current repaired-mesh rebake is no longer vertex-color-only. The active transfer path prefers `xatlas` for target UV atlas generation, falls back to older parameterization paths only if needed, then rasterizes target-atlas texels, lifts each covered texel center back to a 3D point on the target surface, projects that point to the source textured mesh with `igl.point_mesh_squared_distance`, and samples the raw source texture there. This preserves raw texture detail much better than the older "sample color once per target vertex, then linearly interpolate inside each target triangle" path.
+
+The current recommended validation loop for deformable-texture changes is to render the no-IPC first frame with the exact IR camera specification, using:
+
+- [agent/scripts/_temp_render_firstframe_noipc.py](../scripts/_temp_render_firstframe_noipc.py)
+
+This keeps the runtime render path honest without requiring the full IPC stack just to inspect the initial textured frame.
+
 The deformable render path is no longer a separate experiment; it is wired into the active FEM mesh path.
 
 ## Main-Pipeline Texture Debugging

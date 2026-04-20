@@ -105,10 +105,11 @@ def _build_config(args: argparse.Namespace) -> OptimizationConfig:
 def _cmd_optimize_batch(args: argparse.Namespace) -> None:
     config = _build_config(args)
     task_specs = _parse_task_specs(args.task_spec, args.tasks_file)
+    max_parallel = CONFIGS.optimization.max_parallel if args.max_parallel is None else args.max_parallel
     result = optimize_prompts_batch(
         task_specs=task_specs,
         config=config,
-        max_parallel=CONFIGS.optimization.max_parallel,
+        max_parallel=max_parallel,
     )
     if args.out is not None:
         dump_json(
@@ -205,6 +206,12 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Enable Meshy texture generation for non-articulated mesh assets in this optimization run.",
         )
+    parser_opt_batch.add_argument(
+        "--max-parallel",
+        type=int,
+        default=None,
+        help="Override batch worker parallelism. Useful for memory-heavy mesh/texture suites.",
+    )
     parser_opt.set_defaults(func=_cmd_optimize)
     parser_opt_batch.set_defaults(func=_cmd_optimize_batch)
     return parser

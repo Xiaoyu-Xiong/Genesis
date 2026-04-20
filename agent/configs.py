@@ -54,7 +54,7 @@ class DeformableConfigs:
 
 @dataclass(slots=True, frozen=True)
 class OptimizationConfigs:
-    model: str = "gpt-5.4"
+    model: str = "gpt-5.2"
     critic_model: str = ""
     reasoning_effort: str = "xhigh"
     critic_reasoning_effort: str = ""
@@ -113,6 +113,9 @@ class MeshRepairConfigs:
     ftetwild_num_opt_iter: int = 80
     ftetwild_quiet: bool = True
     ftetwild_disable_filtering: bool = False
+    texture_transfer_max_resolution: int = 1024
+    texture_transfer_chunk_size: int = 200000
+    texture_transfer_parameterization: Literal["xatlas", "lscm", "harmonic", "voronoi", "trivial"] = "xatlas"
 
 
 @dataclass(slots=True, frozen=True)

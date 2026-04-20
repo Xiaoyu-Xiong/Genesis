@@ -6,10 +6,13 @@ import time
 from pathlib import Path
 from typing import Any
 
+import igl
 import numpy as np
 from PIL import Image
 import trimesh
+import xatlas
 
+from ..configs import CONFIGS
 from ..io_utils import dump_json
 from .models import MeshTextureTransferResult
 
@@ -58,7 +61,7 @@ def transfer_texture_to_repaired_mesh(
             if stale_path.exists():
                 stale_path.unlink()
 
-        texture_size = _read_texture_size(source_base_color_path)
+        texture_size = _read_bake_texture_size(source_base_color_path)
         # The repaired mesh is centered before export; shift it back temporarily so the
         # textured raw mesh and repaired geometry live in the same frame for baking.
         _copy_with_vertex_translation(
@@ -67,38 +70,32 @@ def transfer_texture_to_repaired_mesh(
             delta=alignment_translation,
         )
 
-        pymeshlab = _import_pymeshlab()
-        ms = pymeshlab.MeshSet()
-
         stage_start = time.monotonic()
-        ms.load_new_mesh(str(source_mesh_path))
-        source_mesh_id = 0
-        ms.load_new_mesh(str(aligned_target_path))
-        target_mesh_id = 1
+        source_mesh = trimesh.load_mesh(str(source_mesh_path), force="mesh", process=False, skip_texture=False)
+        if not isinstance(source_mesh, trimesh.Trimesh):
+            raise TypeError(f"Expected source mesh to load as Trimesh, got {type(source_mesh).__name__}")
+        target_mesh = trimesh.load_mesh(str(aligned_target_path), force="mesh", process=False, skip_texture=True)
+        if not isinstance(target_mesh, trimesh.Trimesh):
+            raise TypeError(f"Expected target mesh to load as Trimesh, got {type(target_mesh).__name__}")
         stage_durations_sec["load_meshes"] = time.monotonic() - stage_start
 
         stage_start = time.monotonic()
         parameterization_filter = _parameterize_target_mesh(
-            ms=ms,
-            target_mesh_id=target_mesh_id,
+            target_mesh=target_mesh,
+            output_mesh_path=exported_target_path,
             texture_size=texture_size,
         )
         stage_durations_sec["parameterize_target_mesh"] = time.monotonic() - stage_start
 
         stage_start = time.monotonic()
-        ms.set_current_mesh(target_mesh_id)
-        ms.save_current_mesh(str(exported_target_path))
-        stage_durations_sec["export_target_mesh"] = time.monotonic() - stage_start
-
-        stage_start = time.monotonic()
         bake_debug = _bake_texture_from_source_mesh(
-            source_mesh_path=source_mesh_path,
             source_base_color_path=source_base_color_path,
             target_parameterized_mesh_path=exported_target_path,
             output_texture_path=exported_texture_path,
             texture_size=texture_size,
+            source_mesh=source_mesh,
         )
-        transfer_filter = "custom_closest_point_bake"
+        transfer_filter = "custom_per_texel_source_uv_bake"
         stage_durations_sec["bake_texture"] = time.monotonic() - stage_start
 
         stage_start = time.monotonic()
@@ -183,45 +180,106 @@ def transfer_texture_to_repaired_mesh(
         )
 
 
-def _parameterize_target_mesh(*, ms, target_mesh_id: int, texture_size: tuple[int, int]) -> str:
-    textdim = max(int(texture_size[0]), int(texture_size[1]), 256)
+def _parameterize_target_mesh(*, target_mesh: trimesh.Trimesh, output_mesh_path: Path, texture_size: tuple[int, int]) -> str:
+    preferred = CONFIGS.mesh_repair.texture_transfer_parameterization
+    if preferred == "xatlas":
+        _parameterize_target_mesh_xatlas(target_mesh=target_mesh, output_mesh_path=output_mesh_path, texture_size=texture_size)
+        return "xatlas.parametrize"
+    if preferred == "lscm":
+        pymeshlab = _import_pymeshlab()
+        ms = pymeshlab.MeshSet()
+        ms.add_mesh(pymeshlab.Mesh(vertex_matrix=np.asarray(target_mesh.vertices), face_matrix=np.asarray(target_mesh.faces)))
+        attempts = [
+            ("compute_texcoord_parametrization_least_squares_conformal_maps", [dict()]),
+            ("generate_voronoi_atlas_parametrization", [dict()]),
+            ("compute_texcoord_parametrization_triangle_trivial_per_wedge", [_trivial_kwargs(texture_size)]),
+            ("parametrization_trivial_per_triangle", [dict()]),
+        ]
+    elif preferred == "harmonic":
+        pymeshlab = _import_pymeshlab()
+        ms = pymeshlab.MeshSet()
+        ms.add_mesh(pymeshlab.Mesh(vertex_matrix=np.asarray(target_mesh.vertices), face_matrix=np.asarray(target_mesh.faces)))
+        attempts = [
+            ("compute_texcoord_parametrization_harmonic", [dict()]),
+            ("generate_voronoi_atlas_parametrization", [dict()]),
+            ("compute_texcoord_parametrization_triangle_trivial_per_wedge", [_trivial_kwargs(texture_size)]),
+            ("parametrization_trivial_per_triangle", [dict()]),
+        ]
+    elif preferred == "voronoi":
+        pymeshlab = _import_pymeshlab()
+        ms = pymeshlab.MeshSet()
+        ms.add_mesh(pymeshlab.Mesh(vertex_matrix=np.asarray(target_mesh.vertices), face_matrix=np.asarray(target_mesh.faces)))
+        attempts = [
+            ("generate_voronoi_atlas_parametrization", [dict()]),
+            ("compute_texcoord_parametrization_triangle_trivial_per_wedge", [_trivial_kwargs(texture_size)]),
+            ("parametrization_trivial_per_triangle", [dict()]),
+        ]
+    else:
+        pymeshlab = _import_pymeshlab()
+        ms = pymeshlab.MeshSet()
+        ms.add_mesh(pymeshlab.Mesh(vertex_matrix=np.asarray(target_mesh.vertices), face_matrix=np.asarray(target_mesh.faces)))
+        attempts = [
+            ("compute_texcoord_parametrization_triangle_trivial_per_wedge", [_trivial_kwargs(texture_size)]),
+            ("parametrization_trivial_per_triangle", [dict()]),
+        ]
 
-    variants = [
-        {
-            "textdim": textdim,
-            "border": 2,
-            "method": 1,
-        },
-        {
-            "sidedim": textdim,
-            "border": 2,
-            "method": 1,
-        },
-        {},
-    ]
-    return _apply_first_supported_filter(
-        ms=ms,
-        mesh_id=target_mesh_id,
-        filter_names=(
-            "compute_texcoord_parametrization_triangle_trivial_per_wedge",
-            "parametrization_trivial_per_triangle",
-        ),
-        kwargs_variants=variants,
+    last_exc: Exception | None = None
+    for filter_name, kwargs_variants in attempts:
+        try:
+            used = _apply_first_supported_filter(
+                ms=ms,
+                mesh_id=0,
+                filter_names=(filter_name,),
+                kwargs_variants=kwargs_variants,
+            )
+            ms.save_current_mesh(str(output_mesh_path))
+            return used
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            continue
+    raise RuntimeError(f"Failed to parameterize target mesh with configured attempts. Last error: {last_exc}")
+
+
+def _parameterize_target_mesh_xatlas(*, target_mesh: trimesh.Trimesh, output_mesh_path: Path, texture_size: tuple[int, int]) -> None:
+    vertices = np.asarray(target_mesh.vertices, dtype=np.float32)
+    faces = np.asarray(target_mesh.faces, dtype=np.uint32)
+    atlas = xatlas.Atlas()
+    atlas.add_mesh(vertices, faces)
+    chart_options = xatlas.ChartOptions()
+    pack_options = xatlas.PackOptions()
+    pack_options.resolution = max(int(texture_size[0]), int(texture_size[1]), 256)
+    pack_options.padding = 2
+    pack_options.bilinear = True
+    atlas.generate(chart_options, pack_options)
+    vmapping, indices, uvs = atlas.get_mesh(0)
+    out_vertices = vertices[np.asarray(vmapping, dtype=np.int64)]
+    out_faces = np.asarray(indices, dtype=np.int64)
+    out_uvs = np.asarray(uvs, dtype=np.float64)
+    _write_parameterized_obj(
+        obj_path=output_mesh_path,
+        vertices=out_vertices,
+        faces=out_faces,
+        uvs=out_uvs,
     )
+
+
+def _trivial_kwargs(texture_size: tuple[int, int]) -> dict[str, Any]:
+    textdim = max(int(texture_size[0]), int(texture_size[1]), 256)
+    return {
+        "textdim": textdim,
+        "border": 2,
+        "method": 1,
+    }
 
 
 def _bake_texture_from_source_mesh(
     *,
-    source_mesh_path: Path,
     source_base_color_path: Path,
     target_parameterized_mesh_path: Path,
     output_texture_path: Path,
     texture_size: tuple[int, int],
+    source_mesh: trimesh.Trimesh,
 ) -> dict[str, Any]:
-    source_mesh = trimesh.load_mesh(str(source_mesh_path), force="mesh", process=False, skip_texture=False)
-    if not isinstance(source_mesh, trimesh.Trimesh):
-        raise TypeError(f"Expected source mesh to load as Trimesh, got {type(source_mesh).__name__}")
-
     source_uv = getattr(source_mesh.visual, "uv", None)
     if source_uv is None:
         raise RuntimeError("Source textured mesh does not expose UV coordinates through trimesh.")
@@ -232,34 +290,27 @@ def _bake_texture_from_source_mesh(
     target_obj = _parse_obj_with_uv(target_parameterized_mesh_path)
     source_image = _load_texture_image(source_base_color_path)
 
-    closest_points, distances, face_indices = trimesh.proximity.closest_point(source_mesh, target_obj.vertices)
-    face_indices = np.asarray(face_indices, dtype=np.int64)
-    if np.any(face_indices < 0):
-        raise RuntimeError("Closest-point query returned invalid source face indices.")
-
-    source_triangles = np.asarray(source_mesh.vertices[source_mesh.faces[face_indices]], dtype=np.float64)
-    barycentric = trimesh.triangles.points_to_barycentric(source_triangles, np.asarray(closest_points, dtype=np.float64))
-    source_face_uv = source_uv[np.asarray(source_mesh.faces[face_indices], dtype=np.int64)]
-    sampled_uv = np.einsum("ni,nij->nj", barycentric, source_face_uv)
-    vertex_colors = _sample_image_bilinear(source_image, sampled_uv)
-
-    baked = _rasterize_vertex_colors_to_texture(
+    baked = _rasterize_source_uv_to_texture(
         obj_mesh=target_obj,
-        vertex_colors=vertex_colors,
+        source_mesh=source_mesh,
+        source_uv=source_uv,
+        source_image=source_image,
         texture_size=texture_size,
     )
     output_texture_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(baked, mode="RGBA").save(output_texture_path)
+    Image.fromarray(baked["image"], mode="RGBA").save(output_texture_path)
 
-    distances = np.asarray(distances, dtype=np.float64)
+    distances = np.asarray(baked["distances"], dtype=np.float64)
     return {
         "target_vertex_count": int(len(target_obj.vertices)),
         "target_face_count": int(len(target_obj.face_vertex_indices)),
-        "source_face_hit_count": int(len(np.unique(face_indices))),
+        "source_face_hit_count": int(len(np.unique(np.asarray(baked["face_indices"], dtype=np.int64)))),
         "distance_min": float(np.min(distances)) if len(distances) else 0.0,
         "distance_mean": float(np.mean(distances)) if len(distances) else 0.0,
         "distance_max": float(np.max(distances)) if len(distances) else 0.0,
         "texture_size": [int(texture_size[0]), int(texture_size[1])],
+        "bake_mode": "per_texel_source_uv",
+        "target_texel_count": int(baked["texel_count"]),
     }
 
 
@@ -338,6 +389,19 @@ def _obj_index_to_zero_based(token: str, item_count: int) -> int:
     raise RuntimeError("OBJ indices are 1-based; found invalid 0 index.")
 
 
+def _write_parameterized_obj(*, obj_path: Path, vertices: np.ndarray, faces: np.ndarray, uvs: np.ndarray) -> None:
+    obj_path.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    for vertex in np.asarray(vertices, dtype=np.float64):
+        lines.append(f"v {float(vertex[0]):.9f} {float(vertex[1]):.9f} {float(vertex[2]):.9f}")
+    for uv in np.asarray(uvs, dtype=np.float64):
+        lines.append(f"vt {float(uv[0]):.9f} {float(uv[1]):.9f}")
+    for face in np.asarray(faces, dtype=np.int64):
+        a, b, c = int(face[0]) + 1, int(face[1]) + 1, int(face[2]) + 1
+        lines.append(f"f {a}/{a} {b}/{b} {c}/{c}")
+    obj_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _load_texture_image(texture_path: Path) -> np.ndarray:
     with Image.open(texture_path) as image:
         rgba = image.convert("RGBA")
@@ -374,23 +438,27 @@ def _sample_image_bilinear(image: np.ndarray, uv: np.ndarray) -> np.ndarray:
     return top * (1.0 - wy[:, None]) + bottom * wy[:, None]
 
 
-def _rasterize_vertex_colors_to_texture(
+def _rasterize_source_uv_to_texture(
     *,
     obj_mesh: ObjUvMesh,
-    vertex_colors: np.ndarray,
+    source_mesh: trimesh.Trimesh,
+    source_uv: np.ndarray,
+    source_image: np.ndarray,
     texture_size: tuple[int, int],
-) -> np.ndarray:
+) -> dict[str, Any]:
     width = max(int(texture_size[0]), 1)
     height = max(int(texture_size[1]), 1)
     texture = np.zeros((height, width, 4), dtype=np.float32)
     weight = np.zeros((height, width, 1), dtype=np.float32)
+    sample_points: list[np.ndarray] = []
+    sample_pixels: list[np.ndarray] = []
 
     for face_vertices, face_texcoords in zip(obj_mesh.face_vertex_indices, obj_mesh.face_texcoord_indices, strict=False):
-        uv = obj_mesh.texcoords[face_texcoords]
-        colors = vertex_colors[face_vertices]
+        target_uv = obj_mesh.texcoords[face_texcoords]
+        target_vertices = obj_mesh.vertices[face_vertices]
 
-        px = uv[:, 0] * (width - 1)
-        py = (1.0 - uv[:, 1]) * (height - 1)
+        px = target_uv[:, 0] * (width - 1)
+        py = (1.0 - target_uv[:, 1]) * (height - 1)
         tri = np.stack([px, py], axis=1)
 
         min_x = max(int(np.floor(np.min(px))), 0)
@@ -411,18 +479,62 @@ def _rasterize_vertex_colors_to_texture(
         if not np.any(mask):
             continue
 
-        face_color = np.einsum("...i,ij->...j", bary, colors)
-        yy = ys.astype(np.int64)
-        xx = xs.astype(np.int64)
-        texture[yy[mask], xx[mask]] += face_color[mask]
-        weight[yy[mask], xx[mask], 0] += 1.0
+        masked_bary = bary[mask]
+        target_points = np.einsum("ni,ij->nj", masked_bary, target_vertices)
+        yy = ys.astype(np.int64)[mask]
+        xx = xs.astype(np.int64)[mask]
+        sample_points.append(target_points.astype(np.float64, copy=False))
+        sample_pixels.append(np.stack([yy, xx], axis=1))
+
+    if not sample_points:
+        raise RuntimeError("Target UV parameterization produced no covered texels for baking.")
+
+    all_points = np.concatenate(sample_points, axis=0)
+    all_pixels = np.concatenate(sample_pixels, axis=0)
+    all_distances: list[np.ndarray] = []
+    all_face_indices: list[np.ndarray] = []
+
+    chunk_size = max(int(CONFIGS.mesh_repair.texture_transfer_chunk_size), 1)
+    for start in range(0, len(all_points), chunk_size):
+        end = min(start + chunk_size, len(all_points))
+        chunk_points = all_points[start:end]
+        sqr_distances, face_indices, closest_points = igl.point_mesh_squared_distance(
+            np.asarray(chunk_points, dtype=np.float64),
+            np.asarray(source_mesh.vertices, dtype=np.float64),
+            np.asarray(source_mesh.faces, dtype=np.int64),
+        )
+        face_indices = np.asarray(face_indices, dtype=np.int64)
+        if np.any(face_indices < 0):
+            raise RuntimeError("Closest-point query returned invalid source face indices.")
+
+        source_triangles = np.asarray(source_mesh.vertices[source_mesh.faces[face_indices]], dtype=np.float64)
+        barycentric = trimesh.triangles.points_to_barycentric(
+            source_triangles,
+            np.asarray(closest_points, dtype=np.float64),
+        )
+        source_face_uv = source_uv[np.asarray(source_mesh.faces[face_indices], dtype=np.int64)]
+        sampled_source_uv = np.einsum("ni,nij->nj", barycentric, source_face_uv)
+        colors = _sample_image_bilinear(source_image, sampled_source_uv)
+
+        chunk_pixels = all_pixels[start:end]
+        yy = chunk_pixels[:, 0]
+        xx = chunk_pixels[:, 1]
+        texture[yy, xx] += colors
+        weight[yy, xx, 0] += 1.0
+        all_distances.append(np.sqrt(np.asarray(sqr_distances, dtype=np.float64)))
+        all_face_indices.append(face_indices)
 
     valid = weight[..., 0] > 0.0
     texture[valid] /= weight[valid]
     if np.any(valid):
         texture[~valid] = np.mean(texture[valid], axis=0, keepdims=False)
     texture[..., 3] = 1.0
-    return np.clip(np.round(texture * 255.0), 0, 255).astype(np.uint8)
+    return {
+        "image": np.clip(np.round(texture * 255.0), 0, 255).astype(np.uint8),
+        "distances": np.concatenate(all_distances, axis=0),
+        "face_indices": np.concatenate(all_face_indices, axis=0),
+        "texel_count": int(len(all_points)),
+    }
 
 
 def _barycentric_2d(points: np.ndarray, triangle: np.ndarray) -> np.ndarray:
@@ -446,6 +558,16 @@ def _read_texture_size(texture_path: Path) -> tuple[int, int]:
     with Image.open(texture_path) as image:
         width, height = image.size
     return max(int(width), 1), max(int(height), 1)
+
+
+def _read_bake_texture_size(texture_path: Path) -> tuple[int, int]:
+    width, height = _read_texture_size(texture_path)
+    limit = max(int(CONFIGS.mesh_repair.texture_transfer_max_resolution), 1)
+    max_dim = max(width, height)
+    if max_dim <= limit:
+        return width, height
+    scale = float(limit) / float(max_dim)
+    return max(1, int(round(width * scale))), max(1, int(round(height * scale)))
 
 
 def _copy_with_vertex_affine(
