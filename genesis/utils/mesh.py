@@ -273,7 +273,6 @@ def surface_uvs_to_trimesh_visual(surface, uvs=None, n_verts=None):
     if isinstance(texture, gs.textures.ImageTexture):
         if uvs is not None:
             uvs = uvs.copy()
-            uvs[:, 1] = 1.0 - uvs[:, 1]
             assert texture.image_array.dtype == np.uint8
             visual = trimesh.visual.TextureVisuals(
                 uv=uvs,

@@ -786,7 +786,7 @@ class RasterizerContext:
     def on_fem(self):
         if self.sim.fem_solver.is_active:
             vertices_qd, _triangles_qd, _uvs_qd = self.sim.fem_solver.get_state_render(self.sim.cur_substep_local)
-            vertices_all = qd_to_numpy(vertices_qd)
+            vertices_all = vertices_qd.to_numpy(dtype=gs.np_float)
 
             for fem_entity in self.sim.fem_solver.entities:
                 if fem_entity.surface.vis_mode == "visual":

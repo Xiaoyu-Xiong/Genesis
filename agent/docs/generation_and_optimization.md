@@ -42,6 +42,7 @@ This layer is responsible for:
 - routing articulated XML generation
 - routing mesh generation
 - enforcing constraints such as density bounds and initial-scene validation
+- sanitizing generator payloads before schema parse, including stripping deformable-body collision fields that are unsupported in the current FEM+IPC pipeline
 
 ## Critic
 

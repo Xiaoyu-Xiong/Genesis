@@ -30,6 +30,28 @@ The practical summary for `agent/` work is:
 - [Generation and Optimization](docs/generation_and_optimization.md)
 - [Mesh and Texture Pipeline](docs/mesh_texture.md)
 - [Suite Scripts and Artifacts](docs/suites_and_artifacts.md)
+- [Ownership and Collaboration](docs/ownership.md)
+
+## Ownership Summary
+
+The current `agent/` pipeline is organized around four ownership areas:
+
+- `Physics Runtime Agent`: owns IR semantics, runtime construction, execution behavior, and event-pack meaning.
+- `Mesh Agent`: owns Meshy generation, repair, manifold readiness, texture transfer, and mesh/texture integration into deformable rendering.
+- `Prompt Policy Agent`: owns generator / critic policy, tool-library rules, program constraints, and optimization feedback strategy.
+- `Suite Ops Agent`: owns benchmark scripts, run orchestration, artifact summaries, and `agent/`-side documentation.
+
+Important shared-boundary files are not "free edit" zones. In particular:
+
+- `genesis/utils/mesh.py`
+- `genesis/utils/element.py`
+- `genesis/engine/entities/fem_entity.py`
+- `agent/llm_generator/agents/two_agent_generator.py`
+- `agent/tool_library/program_constraints.py`
+- `agent/opt/pipeline.py`
+
+For the detailed ownership matrix, shared-file review expectations, and collaboration contract, see
+[Ownership and Collaboration](docs/ownership.md).
 
 ## Main Entry Points
 

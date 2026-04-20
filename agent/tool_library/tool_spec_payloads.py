@@ -280,7 +280,9 @@ def _build_parameter_notes() -> dict[str, str]:
             "Contact friction coefficient. Higher values resist sliding more strongly, but do not guarantee perfectly non-slipping contact. Use 0.8 as a reasonable default."
         ),
         "bodies[].collision.friction": (
-            "Contact friction coefficient. Higher values resist sliding more strongly, but do not guarantee perfectly non-slipping contact. Use 0.8 as a reasonable default."
+            "Contact friction coefficient for rigid bodies. Higher values resist sliding more strongly, but do not "
+            "guarantee perfectly non-slipping contact. Use 0.8 as a reasonable default. Do not set this on FEM+IPC "
+            "deformable bodies, where deformable contact friction is fixed by system defaults."
         ),
         "bodies[].rho": (
             "Material density. Higher rho makes the body heavier and increases inertia, but does not change geometric "

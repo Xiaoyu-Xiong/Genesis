@@ -61,9 +61,9 @@ class OptimizationConfigs:
     critic_prompt_variant: str = "full"
     max_parallel: int = 10
     backend: str = "gpu"
-    max_opt_rounds: int = 8
-    max_attempts: int = 12
-    xml_max_attempts: int = 4
+    max_opt_rounds: int = 12
+    max_attempts: int = 20
+    xml_max_attempts: int = 6
     sample_every_sec: float = 0.5
     max_frames: int = 24
     max_width: int = 640
@@ -86,7 +86,7 @@ class MeshyRequestConfigs:
     poll_interval_sec: float = 2.0
     max_wait_sec: float = 500.0
     timeout_sec: float = 200.0
-    texture_enabled: bool = False
+    texture_enabled: bool = True
     texture_ai_model: Literal["latest", "meshy-6", "meshy-5"] | None = None
     texture_enable_pbr: bool = False
     texture_remove_lighting: bool = True

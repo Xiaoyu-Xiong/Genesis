@@ -489,23 +489,23 @@ class FEMEntity(Entity):
                         )
                         if baked_texture_path is not None and os.path.exists(baked_texture_path):
                             self._surface.update_texture(
-                                diffuse_texture=gs.textures.ImageTexture(
+                                color_texture=gs.textures.ImageTexture(
                                     image_path=baked_texture_path,
                                     encoding="srgb",
-                                )
+                                ),
+                                force=True,
                             )
                         else:
                             source_mesh = mu.load_mesh(self._morph.file)
                             diffuse_texture = mu.extract_diffuse_texture(source_mesh)
                             if diffuse_texture is not None:
-                                self._surface.update_texture(diffuse_texture=diffuse_texture)
+                                self._surface.update_texture(color_texture=diffuse_texture, force=True)
                     except Exception as exc:  # noqa: BLE001
                         gs.logger.warning(f"Failed to attach diffuse texture from mesh asset: {exc}")
                 if self._uvs is None:
                     verts, elems = eu.split_all_surface_tets(verts, elems)
                 else:
                     verts, elems, self._uvs = eu.split_all_surface_tets(verts, elems, self._uvs)
-                verts = gu.transform_by_quat(verts, np.asarray(self._morph.quat, dtype=gs.np_float))
                 verts = verts + np.asarray(self._morph.pos, dtype=gs.np_float)
             else:
                 gs.raise_exception(f"Unsupported morph: {self.morph}.")

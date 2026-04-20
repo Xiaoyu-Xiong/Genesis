@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ...configs import CONFIGS
+
 
 class GeneralIRValidationError(RuntimeError):
     pass
@@ -30,6 +32,26 @@ def extract_first_json_object(text: str) -> dict[str, Any]:
 
 def sanitize_payload(payload: dict[str, object]) -> dict[str, object]:
     normalized = dict(payload)
+    bodies = normalized.get("bodies")
+    if isinstance(bodies, list):
+        sanitized_bodies: list[object] = []
+        for body_any in bodies:
+            if not isinstance(body_any, dict):
+                sanitized_bodies.append(body_any)
+                continue
+            body = dict(body_any)
+            if body.get("simulation_kind") == "deformable":
+                collision = body.get("collision")
+                if isinstance(collision, dict):
+                    collision = dict(collision)
+                    collision.pop("coup_friction", None)
+                    collision.pop("coup_restitution", None)
+                    if CONFIGS.deformable.simulation_backend == "fem_ipc":
+                        collision.pop("friction", None)
+                    body["collision"] = collision
+            sanitized_bodies.append(body)
+        normalized["bodies"] = sanitized_bodies
+
     actions = normalized.get("actions")
     if not isinstance(actions, list):
         return normalized

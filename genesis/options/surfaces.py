@@ -225,38 +225,97 @@ class Surface(Options):
             opacity_texture = opacity_textures[i % num_opacities]
 
             if isinstance(color_texture, ColorTexture):
+                color_values = tuple(float(c) for c in color_texture.color)
+                rgb_values = color_values[:3]
+                base_alpha_value = color_values[3] if len(color_values) >= 4 else 1.0
                 if isinstance(opacity_texture, ColorTexture):
-                    rgba_texture = ColorTexture(color=(*color_texture.color, *opacity_texture.color))
+                    opacity_value = float(opacity_texture.color[0]) if len(opacity_texture.color) > 0 else 1.0
+                    rgba_texture = ColorTexture(color=(*rgb_values, base_alpha_value * opacity_value))
                 elif isinstance(opacity_texture, ImageTexture) and opacity_texture.image_array is not None:
-                    rgb_color = mu.color_f32_to_u8(color_texture.color)
+                    rgb_color = mu.color_f32_to_u8(rgb_values)
                     rgb_array = np.full((*opacity_texture.image_array.shape[:2], 3), rgb_color, dtype=np.uint8)
-                    rgba_array = np.dstack((rgb_array, opacity_texture.image_array))
-                    rgba_scale = (1.0, 1.0, 1.0, *opacity_texture.image_color)
+                    opacity_array = (
+                        opacity_texture.image_array[:, :, 0]
+                        if opacity_texture.image_array.ndim == 3
+                        else opacity_texture.image_array
+                    )
+                    opacity_array = np.clip(opacity_array.astype(np.float32) * base_alpha_value, 0.0, 255.0).astype(
+                        np.uint8
+                    )
+                    rgba_array = np.dstack((rgb_array, opacity_array))
+                    opacity_scale = (
+                        float(opacity_texture.image_color[0])
+                        if len(opacity_texture.image_color) > 0
+                        else 1.0
+                    )
+                    rgba_scale = (1.0, 1.0, 1.0, opacity_scale)
                     rgba_texture = ImageTexture(image_array=rgba_array, image_color=rgba_scale)
                 else:
-                    rgba_texture = ColorTexture(color=(*color_texture.color, 1.0))
+                    rgba_texture = ColorTexture(color=(*rgb_values, base_alpha_value))
 
             elif isinstance(color_texture, ImageTexture) and color_texture.image_array is not None:
+                color_array = color_texture.image_array
+                color_scale = tuple(color_texture.image_color)
+                if color_array.ndim == 3 and color_array.shape[2] >= 4:
+                    rgb_array = color_array[:, :, :3]
+                    base_alpha_array = color_array[:, :, 3]
+                    rgb_scale = color_scale[:3]
+                    base_alpha_scale = color_scale[3] if len(color_scale) >= 4 else 1.0
+                else:
+                    rgb_array = color_array
+                    base_alpha_array = None
+                    rgb_scale = color_scale[:3]
+                    base_alpha_scale = 1.0
+
                 if isinstance(opacity_texture, ColorTexture):
-                    a_color = mu.color_f32_to_u8(opacity_texture.color)
-                    a_array = np.full((*color_texture.image_array.shape[:2],), a_color, dtype=np.uint8)
-                    rgba_array = np.dstack((color_texture.image_array, a_array))
-                    rgba_scale = (*color_texture.image_color, 1.0)
+                    opacity_value = float(opacity_texture.color[0]) if len(opacity_texture.color) > 0 else 1.0
+                    if base_alpha_array is None:
+                        a_array = np.full((*rgb_array.shape[:2],), int(round(255.0 * opacity_value)), dtype=np.uint8)
+                        rgba_scale = (*rgb_scale, 1.0)
+                    else:
+                        a_array = np.clip(base_alpha_array.astype(np.float32) * opacity_value, 0.0, 255.0).astype(
+                            np.uint8
+                        )
+                        rgba_scale = (*rgb_scale, base_alpha_scale)
+                    rgba_array = np.dstack((rgb_array, a_array))
                 elif (
                     isinstance(opacity_texture, ImageTexture)
                     and opacity_texture.image_array is not None
-                    and opacity_texture.image_array.shape[:2] == color_texture.image_array.shape[:2]
+                    and opacity_texture.image_array.shape[:2] == rgb_array.shape[:2]
                 ):
-                    rgba_array = np.dstack((color_texture.image_array, opacity_texture.image_array))
-                    rgba_scale = (*color_texture.image_color, *opacity_texture.image_color)
+                    opacity_array = (
+                        opacity_texture.image_array[:, :, 0]
+                        if opacity_texture.image_array.ndim == 3
+                        else opacity_texture.image_array
+                    )
+                    opacity_scale = (
+                        float(opacity_texture.image_color[0])
+                        if len(opacity_texture.image_color) > 0
+                        else 1.0
+                    )
+                    if base_alpha_array is None:
+                        a_array = opacity_array
+                        rgba_scale = (*rgb_scale, opacity_scale)
+                    else:
+                        a_array = np.clip(
+                            base_alpha_array.astype(np.float32) * (opacity_array.astype(np.float32) / 255.0),
+                            0.0,
+                            255.0,
+                        ).astype(np.uint8)
+                        rgba_scale = (*rgb_scale, base_alpha_scale * opacity_scale)
+                    rgba_array = np.dstack((rgb_array, a_array))
                 else:
                     if isinstance(opacity_texture, ImageTexture) and opacity_texture.image_array is not None:
                         gs.logger.warning(
                             "Color and opacity image shapes do not match. Fall back to fully opaque texture."
                         )
-                    a_array = np.full(color_texture.image_array.shape[:2], 255, dtype=np.uint8)
-                    rgba_array = np.dstack((color_texture.image_array, a_array))
-                    rgba_scale = (*color_texture.image_color, 1.0)
+                    if base_alpha_array is None:
+                        a_array = np.full(rgb_array.shape[:2], 255, dtype=np.uint8)
+                        rgba_scale = (*rgb_scale, 1.0)
+                    else:
+                        a_array = base_alpha_array
+                        rgba_scale = (*rgb_scale, base_alpha_scale)
+                    rgba_array = np.dstack((rgb_array, a_array))
                 rgba_texture = ImageTexture(image_array=rgba_array, image_color=rgba_scale)
 
             else:

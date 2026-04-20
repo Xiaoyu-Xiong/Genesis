@@ -18,6 +18,7 @@ These rules are mandatory for this repository.
 - **When the user asks for a command, prefer the shortest correct command.** Do not wrap a simple rerun in an unnecessarily complex script.
 - **`agent/configs.py` is a static config module.** Do not reintroduce environment-variable-driven config loading there. For run-specific behavior, prefer explicit CLI flags.
 - **When changing the `agent/` pipeline, suite scripts, or mesh / texture / deformable workflows, update the relevant documentation under `agent/` in the same turn.**
+- **For `agent/` work, if the user does not explicitly prescribe a task split, decide yourself whether to decompose the work across the ownership areas documented in `agent/docs/ownership.md`, and choose the split that minimizes ambiguity and coordination cost.** Explicit user instructions about scope, ownership, or task splitting always override this default.
 
 ## Quick Start
 
@@ -115,3 +116,4 @@ Do NOT ask when:
 | [agent/docs/generation_and_optimization.md](agent/docs/generation_and_optimization.md) | Generator, critic, optimization loop, and config overview |
 | [agent/docs/mesh_texture.md](agent/docs/mesh_texture.md) | Mesh generation, repair, texture transfer, and texture debug flow |
 | [agent/docs/suites_and_artifacts.md](agent/docs/suites_and_artifacts.md) | Suite scripts, artifact roots, and common workflows |
+| [agent/docs/ownership.md](agent/docs/ownership.md) | Subagent ownership boundaries, shared files, and collaboration contract |

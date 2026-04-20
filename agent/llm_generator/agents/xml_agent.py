@@ -40,6 +40,8 @@ XML_SYSTEM_PROMPT = (
     "Do not add ground planes, tables, lights, cameras, or any other background/environment elements. "
     "Under `<worldbody>`, include only the robot root `<body>` tree. "
     "Use only simple primitive geoms inside the articulated body tree; do not define mesh assets or geom type='mesh'. "
+    "Every body/link in the articulated tree should have at least one collision-enabled primitive geom; avoid empty "
+    "grouping bodies or non-colliding support-only links. "
     "Do not include `<actuator>` blocks or actuator tags under `<default>`; actuator definitions belong to IR. "
     "Do not include `<contact><exclude .../></contact>` blocks. "
     "Do not wrap XML in markdown fences."
@@ -236,6 +238,7 @@ def _build_user_prompt(task: str, *, previous_error: str | None = None, file_ste
         "- The XML must include only the robot itself. No ground, no background, no environment objects.",
         "- Under `<worldbody>`, include only the robot root `<body>` tree.",
         "- Use only simple primitive geoms inside the articulated body. Do not define mesh assets or `geom type=\"mesh\"`.",
+        "- Every body/link in the articulated tree should have at least one collision-enabled primitive geom. Avoid empty grouping bodies and avoid links whose geoms are all non-colliding.",
         "- Include at least one movable joint.",
         "- Do not include `<actuator>` blocks or actuator-default tags under `<default>`.",
         "- Do not include `<contact><exclude .../></contact>` blocks.",

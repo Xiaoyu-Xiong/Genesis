@@ -1,3 +1,4 @@
+import json
 import os
 import pickle as pkl
 import math
@@ -43,6 +44,7 @@ def _build_remeshed_textured_source(*, file, remeshed):
     if textured_mesh_path is None or base_color_path is None:
         return None, None
 
+    aligned_scale, aligned_delta = _locate_textured_source_transform(file=file, target_vertices=remeshed.vertices)
     cache_stem = Path(
         mu.get_uv_transfer_path(
             "remesh_textured_surface",
@@ -50,20 +52,33 @@ def _build_remeshed_textured_source(*, file, remeshed):
             base_color_path,
             remeshed.vertices,
             remeshed.faces,
+            np.asarray(1.0 if aligned_scale is None else aligned_scale, dtype=np.float64),
+            np.asarray((0.0, 0.0, 0.0) if aligned_delta is None else aligned_delta, dtype=np.float64),
         )
     ).with_suffix("")
     cache_dir = cache_stem
     processed_dir = cache_dir / "processed"
     remeshed_obj = processed_dir / "remeshed_source.obj"
     remeshed_png = processed_dir / "base_color.png"
+    aligned_source_obj = cache_dir / "source" / "raw_textured_aligned.obj"
 
     if not remeshed_obj.exists() or not remeshed_png.exists():
-        from agent.mesh.texture_transfer import transfer_texture_to_repaired_mesh
+        from agent.mesh.texture_transfer import _copy_with_vertex_affine, transfer_texture_to_repaired_mesh
 
         processed_dir.mkdir(parents=True, exist_ok=True)
         remeshed.export(remeshed_obj)
+        source_mesh_path = textured_mesh_path
+        if aligned_scale is not None or aligned_delta is not None:
+            aligned_source_obj.parent.mkdir(parents=True, exist_ok=True)
+            _copy_with_vertex_affine(
+                src_path=textured_mesh_path,
+                dst_path=aligned_source_obj,
+                scale=aligned_scale,
+                delta=aligned_delta,
+            )
+            source_mesh_path = aligned_source_obj
         transfer_texture_to_repaired_mesh(
-            source_mesh_path=textured_mesh_path,
+            source_mesh_path=source_mesh_path,
             source_base_color_path=base_color_path,
             target_mesh_path=remeshed_obj,
             output_dir=cache_dir,
@@ -77,6 +92,43 @@ def _build_remeshed_textured_source(*, file, remeshed):
         process=False,
     )
     return remeshed_textured_mesh, remeshed_png
+
+
+def _locate_textured_source_transform(*, file, target_vertices):
+    if not isinstance(file, (str, os.PathLike)):
+        return None, None
+    mesh_path = Path(file)
+    if mesh_path.parent.name != "processed":
+        return None, None
+
+    repair_json = mesh_path.parent.parent / "repair.json"
+    if not repair_json.exists():
+        return None, None
+
+    try:
+        repair_payload = json.loads(repair_json.read_text(encoding="utf-8"))
+        centroid = repair_payload.get("centroid_before_translation")
+        if centroid is None:
+            return None, None
+        centroid = np.asarray(centroid, dtype=np.float64)
+        if centroid.shape != (3,):
+            return None, None
+    except Exception:  # noqa: BLE001
+        return None, None
+
+    target_vertices = np.asarray(target_vertices, dtype=np.float64)
+    processed_mesh = mu.load_mesh(file)
+    processed_vertices = np.asarray(processed_mesh.vertices, dtype=np.float64)
+    src_extent = np.ptp(processed_vertices, axis=0)
+    tgt_extent = np.ptp(target_vertices, axis=0)
+    valid = src_extent > 1e-9
+    if np.any(valid):
+        ratios = tgt_extent[valid] / src_extent[valid]
+        scale = float(np.median(ratios))
+    else:
+        scale = 1.0
+    delta = tuple((-centroid * scale).tolist())
+    return scale, delta
 
 
 def box_to_elements(pos=(0, 0, 0), size=(1, 1, 1), tet_cfg=dict()):
@@ -239,39 +291,18 @@ def _transfer_remeshed_uvs_to_tet_boundary(*, remeshed_textured_mesh, tet_verts,
     if tet_boundary_faces.size == 0:
         return np.zeros((len(tet_verts), 2), dtype=gs.np_float)
 
-    source_vertices = np.asarray(remeshed_textured_mesh.vertices, dtype=np.float64)
-    source_uvs = np.asarray(remeshed_textured_mesh.visual.uv, dtype=gs.np_float)
     boundary_vertex_ids = np.unique(tet_boundary_faces.reshape(-1))
     boundary_positions = np.asarray(tet_verts[boundary_vertex_ids], dtype=np.float64)
-
-    source_index_by_key: dict[tuple[int, int, int], int] = {}
-    scale = 1e8
-    for idx, vertex in enumerate(source_vertices):
-        key = tuple(np.round(vertex * scale).astype(np.int64).tolist())
-        source_index_by_key[key] = idx
-
     mapped_uvs = np.zeros((len(tet_verts), 2), dtype=gs.np_float)
-    unmatched = []
-    for tet_idx, vertex_id in enumerate(boundary_vertex_ids):
-        pos = boundary_positions[tet_idx]
-        key = tuple(np.round(pos * scale).astype(np.int64).tolist())
-        source_idx = source_index_by_key.get(key)
-        if source_idx is None:
-            unmatched.append((tet_idx, pos))
-            continue
-        mapped_uvs[vertex_id] = source_uvs[source_idx]
-
-    if unmatched:
-        source_pos = source_vertices
-        for tet_idx, pos in unmatched:
-            delta = source_pos - pos[None, :]
-            dist2 = np.einsum("ij,ij->i", delta, delta)
-            source_idx = int(np.argmin(dist2))
-            if float(dist2[source_idx]) > 1e-10:
-                gs.raise_exception(
-                    f"Unable to build stable TetGen boundary correspondence for texture transfer; max mismatch {dist2[source_idx]}"
-                )
-            mapped_uvs[boundary_vertex_ids[tet_idx]] = source_uvs[source_idx]
+    boundary_uvs, distances = _project_surface_uvs_to_points(remeshed_textured_mesh, boundary_positions)
+    tolerance = _surface_projection_tolerance(remeshed_textured_mesh)
+    max_distance = float(np.max(distances)) if len(distances) else 0.0
+    if max_distance > tolerance:
+        gs.raise_exception(
+            "Unable to build stable TetGen boundary correspondence for texture transfer; "
+            f"max surface projection distance {max_distance} exceeds tolerance {tolerance}"
+        )
+    mapped_uvs[boundary_vertex_ids] = boundary_uvs
 
     return mapped_uvs
 
@@ -313,13 +344,16 @@ def _build_render_artifact(*, remeshed_textured_mesh, tet_verts, tet_boundary_fa
 
     if unmatched:
         boundary_positions_full = np.asarray(tet_verts[boundary_vertex_ids], dtype=np.float64)
+        tolerance = _vertex_correspondence_tolerance(remeshed_textured_mesh)
         for idx, pos in unmatched:
             delta = boundary_positions_full - pos[None, :]
             dist2 = np.einsum("ij,ij->i", delta, delta)
             match_local = int(np.argmin(dist2))
-            if float(dist2[match_local]) > 1e-10:
+            match_distance = float(np.sqrt(dist2[match_local]))
+            if match_distance > tolerance:
                 gs.raise_exception(
-                    f"Unable to build seam-aware FEM render correspondence; max mismatch {dist2[match_local]}"
+                    "Unable to build seam-aware FEM render correspondence; "
+                    f"max vertex distance {match_distance} exceeds tolerance {tolerance}"
                 )
             render_src_indices[idx] = int(boundary_vertex_ids[match_local])
 
@@ -329,6 +363,71 @@ def _build_render_artifact(*, remeshed_textured_mesh, tet_verts, tet_boundary_fa
         "render_uvs": render_uvs.astype(gs.np_float, copy=False),
         "texture_path": texture_path,
     }
+
+
+def _project_surface_uvs_to_points(source_mesh, target_points):
+    source_uvs = np.asarray(_mesh_visual_uvs(source_mesh), dtype=np.float64)
+    closest_points, distances, face_indices = trimesh.proximity.closest_point(source_mesh, target_points)
+    face_indices = np.asarray(face_indices, dtype=np.int64)
+    if np.any(face_indices < 0):
+        gs.raise_exception("Closest-point query returned invalid source face indices during Tet boundary UV transfer.")
+
+    source_triangles = np.asarray(source_mesh.vertices[source_mesh.faces[face_indices]], dtype=np.float64)
+    barycentric = trimesh.triangles.points_to_barycentric(
+        source_triangles,
+        np.asarray(closest_points, dtype=np.float64),
+    )
+    source_face_uv = source_uvs[np.asarray(source_mesh.faces[face_indices], dtype=np.int64)]
+    projected_uvs = np.einsum("ni,nij->nj", barycentric, source_face_uv)
+    return projected_uvs.astype(gs.np_float, copy=False), np.asarray(distances, dtype=np.float64)
+
+
+def _mesh_visual_uvs(mesh):
+    visual_uvs = getattr(mesh.visual, "uv", None)
+    if visual_uvs is None:
+        gs.raise_exception("Textured remeshed source mesh does not expose UV coordinates.")
+    visual_uvs = np.asarray(visual_uvs, dtype=np.float64)
+    if visual_uvs.ndim != 2 or visual_uvs.shape[1] != 2:
+        gs.raise_exception(f"Unexpected UV shape for textured remeshed source mesh: {visual_uvs.shape}.")
+    return visual_uvs
+
+
+def _surface_projection_tolerance(mesh) -> float:
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    edge_scale = _median_surface_edge_length(vertices, faces)
+    diagonal = float(np.linalg.norm(np.ptp(vertices, axis=0)))
+    return max(1e-5, 0.05 * edge_scale, 5e-4 * diagonal)
+
+
+def _vertex_correspondence_tolerance(mesh) -> float:
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    edge_scale = _median_surface_edge_length(vertices, faces)
+    diagonal = float(np.linalg.norm(np.ptp(vertices, axis=0)))
+    return max(1e-5, 0.35 * edge_scale, 1e-3 * diagonal)
+
+
+def _median_surface_edge_length(vertices: np.ndarray, faces: np.ndarray) -> float:
+    if len(faces) == 0:
+        diagonal = float(np.linalg.norm(np.ptp(vertices, axis=0)))
+        return max(diagonal, 1e-6)
+    edges = np.concatenate(
+        [
+            faces[:, [0, 1]],
+            faces[:, [1, 2]],
+            faces[:, [2, 0]],
+        ],
+        axis=0,
+    )
+    edges = np.sort(edges, axis=1)
+    edges = np.unique(edges, axis=0)
+    lengths = np.linalg.norm(vertices[edges[:, 0]] - vertices[edges[:, 1]], axis=1)
+    positive = lengths[lengths > 1e-12]
+    if len(positive) == 0:
+        diagonal = float(np.linalg.norm(np.ptp(vertices, axis=0)))
+        return max(diagonal, 1e-6)
+    return float(np.median(positive))
 
 
 def split_all_surface_tets(verts, elems, uvs=None):

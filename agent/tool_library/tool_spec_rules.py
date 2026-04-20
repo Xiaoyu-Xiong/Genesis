@@ -107,11 +107,27 @@ DEFORMABLE_OBSERVE_POLICY = (
     "deformable and rigid bodies in the same multi-entity `observe` action, and do not use `include_contacts=true` "
     "on deformable bodies in v1."
 )
+DEFORMABLE_COLLISION_FIELD_POLICY = (
+    "For deformable bodies, do not try to tune contact by filling `bodies[].collision.friction`, "
+    "`bodies[].collision.coup_friction`, or `bodies[].collision.coup_restitution`. In FEM+IPC these are fixed or "
+    "unsupported on deformables, so leave those deformable collision fields omitted/null and tune the scene using "
+    "geometry, spacing, rigid-body friction, density, and stiffness instead."
+)
 DEFORMABLE_MESH_ASSET_POLICY = (
     "Deformable mesh bodies may use `generate_mesh_asset` outputs. When generating "
     "deformable mesh geometry, the mesh must be manifold-ready and suitable for FEM/PBD preprocessing; keep the shape "
     "simple, watertight, and thick enough for stable tetrahedralization, and leave positive clearance from the ground "
     "and nearby bodies at initialization."
+)
+DEFORMABLE_MOVING_BOUNDARY_POLICY = (
+    "In deformable scenes, prefer non-articulated rigid primitives or rigid mesh bodies with scripted motion for "
+    "moving boundaries such as presses, blockers, gates, paddles, pushers, or drag bars. Do not introduce an "
+    "articulated helper rig unless the task explicitly requires a robot or articulated mechanism."
+)
+DEFORMABLE_ARTICULATED_COLLISION_POLICY = (
+    "If an articulated body is truly required in a deformable FEM+IPC scene, every MJCF link/body must include at "
+    "least one collision-enabled primitive geom. Avoid decorative or support links whose geoms use `contype=0` and "
+    "`conaffinity=0` exclusively."
 )
 
 COMPACT_HARD_RULE_KEYS = (
@@ -131,7 +147,10 @@ COMPACT_HARD_RULE_KEYS = (
     "deformable_material_policy",
     "deformable_action_policy",
     "deformable_observe_policy",
+    "deformable_collision_field_policy",
     "deformable_mesh_asset_policy",
+    "deformable_moving_boundary_policy",
+    "deformable_articulated_collision_policy",
     "deformable_scene_policy",
     "fixed_body_note",
     "pre_sim_only_actions",
@@ -155,7 +174,10 @@ def build_ir_agent_process_requirements(*, mesh_generation_available: bool) -> l
         f"- {DEFORMABLE_MATERIAL_POLICY}",
         f"- {DEFORMABLE_ACTION_POLICY}",
         f"- {DEFORMABLE_OBSERVE_POLICY}",
+        f"- {DEFORMABLE_COLLISION_FIELD_POLICY}",
         f"- {DEFORMABLE_MESH_ASSET_POLICY}",
+        f"- {DEFORMABLE_MOVING_BOUNDARY_POLICY}",
+        f"- {DEFORMABLE_ARTICULATED_COLLISION_POLICY}",
         f"- {DEFORMABLE_SCENE_POLICY}",
         f"- {DYNAMIC_SCENE_POLICY}",
         "- `observe`, `set_pose`, and `apply_external_wrench` may target a single body or a list of body names via the `entity` field.",

@@ -448,31 +448,47 @@ def _read_texture_size(texture_path: Path) -> tuple[int, int]:
     return max(int(width), 1), max(int(height), 1)
 
 
+def _copy_with_vertex_affine(
+    *,
+    src_path: Path,
+    dst_path: Path,
+    scale: float | tuple[float, float, float] | None = None,
+    delta: tuple[float, float, float] | None,
+) -> None:
+    dst_path.parent.mkdir(parents=True, exist_ok=True)
+    scale_arr = np.asarray((1.0, 1.0, 1.0) if scale is None else scale, dtype=np.float64)
+    if scale_arr.ndim == 0:
+        scale_arr = np.repeat(scale_arr, 3)
+    if scale_arr.shape != (3,):
+        raise ValueError(f"Expected scalar or 3-vector scale, got shape {scale_arr.shape}")
+
+    if delta is None and np.allclose(scale_arr, 1.0):
+        shutil.copyfile(src_path, dst_path)
+        return
+
+    dx, dy, dz = (0.0, 0.0, 0.0) if delta is None else (float(delta[0]), float(delta[1]), float(delta[2]))
+    rewritten_lines: list[str] = []
+    for raw_line in src_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if raw_line.startswith("v "):
+            parts = raw_line.split()
+            if len(parts) >= 4:
+                x = float(parts[1]) * float(scale_arr[0]) + dx
+                y = float(parts[2]) * float(scale_arr[1]) + dy
+                z = float(parts[3]) * float(scale_arr[2]) + dz
+                tail = f" {' '.join(parts[4:])}" if len(parts) > 4 else ""
+                rewritten_lines.append(f"v {x:.9f} {y:.9f} {z:.9f}{tail}")
+                continue
+        rewritten_lines.append(raw_line)
+    dst_path.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
+
+
 def _copy_with_vertex_translation(
     *,
     src_path: Path,
     dst_path: Path,
     delta: tuple[float, float, float] | None,
 ) -> None:
-    dst_path.parent.mkdir(parents=True, exist_ok=True)
-    if delta is None:
-        shutil.copyfile(src_path, dst_path)
-        return
-
-    dx, dy, dz = (float(delta[0]), float(delta[1]), float(delta[2]))
-    rewritten_lines: list[str] = []
-    for raw_line in src_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if raw_line.startswith("v "):
-            parts = raw_line.split()
-            if len(parts) >= 4:
-                x = float(parts[1]) + dx
-                y = float(parts[2]) + dy
-                z = float(parts[3]) + dz
-                tail = f" {' '.join(parts[4:])}" if len(parts) > 4 else ""
-                rewritten_lines.append(f"v {x:.9f} {y:.9f} {z:.9f}{tail}")
-                continue
-        rewritten_lines.append(raw_line)
-    dst_path.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
+    _copy_with_vertex_affine(src_path=src_path, dst_path=dst_path, scale=None, delta=delta)
 
 
 def _rewrite_obj_mtllib(obj_path: Path, *, mtl_name: str) -> None:

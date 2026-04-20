@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 from pathlib import Path
 from shutil import copyfile
@@ -196,13 +197,20 @@ def run_case(case_dir: Path, tet_resolution: int, render_res: tuple[int, int], r
 
     remesh_source_mesh = raw_textured_mesh_path if raw_textured_mesh_path.exists() else source_mesh_path
     remesh_source_tex = raw_textured_tex_path if raw_textured_tex_path.exists() else source_tex_path
+    alignment_translation = None
+    repair_json_path = case_dir / "repair.json"
+    if remesh_source_mesh == raw_textured_mesh_path and repair_json_path.exists():
+        repair_payload = json.loads(repair_json_path.read_text(encoding="utf-8"))
+        centroid = repair_payload.get("centroid_before_translation")
+        if centroid is not None:
+            alignment_translation = tuple(float(value) for value in centroid)
 
     remesh_transfer = transfer_texture_to_repaired_mesh(
         source_mesh_path=remesh_source_mesh,
         source_base_color_path=remesh_source_tex,
         target_mesh_path=remesh_raw_obj,
         output_dir=remesh_stage_dir,
-        alignment_translation=None,
+        alignment_translation=alignment_translation,
     )
 
     remesh_views = render_views(
