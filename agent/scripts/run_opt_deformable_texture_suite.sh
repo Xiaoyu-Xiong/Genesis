@@ -53,9 +53,9 @@ echo "Run root: $RUN_ROOT"
 echo "Python: ${PYTHON_CMD[*]}"
 
 cat > "$TASK_FILE" <<'CASES'
-textured_duck_plate_press|Create a scene where around 10 identical medium-sized soft rubber ducks with bright toy-like texture are compressed by a descending rigid plate, showing visible squashing, render 10s behavior
+soft monster|Create a ring of identical soft monster toys with colorful textured surfaces and let a rigid plate descend into the ring so they compress, buckle, and recover over 10s
 
-cap_pull_and_release|Create a scene where a soft textured baseball cap is visibly compressed and deformed by a rigid plate over 10s
+soft balls|Create a scene where identical soft striped beach balls are pushed through a narrowing rigid gate with visible deformation, render 10s behavior
 CASES
 
 SUMMARY_JSON="$RUN_ROOT/summary.json"

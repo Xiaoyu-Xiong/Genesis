@@ -115,7 +115,6 @@ class MeshRepairConfigs:
     ftetwild_disable_filtering: bool = False
     texture_transfer_max_resolution: int = 1024
     texture_transfer_chunk_size: int = 200000
-    texture_transfer_parameterization: Literal["xatlas", "lscm", "harmonic", "voronoi", "trivial"] = "xatlas"
 
 
 @dataclass(slots=True, frozen=True)

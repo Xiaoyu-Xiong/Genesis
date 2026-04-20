@@ -80,7 +80,7 @@ def transfer_texture_to_repaired_mesh(
         stage_durations_sec["load_meshes"] = time.monotonic() - stage_start
 
         stage_start = time.monotonic()
-        parameterization_filter = _parameterize_target_mesh(
+        parameterization_filter = _parameterize_target_mesh_xatlas(
             target_mesh=target_mesh,
             output_mesh_path=exported_target_path,
             texture_size=texture_size,
@@ -180,67 +180,7 @@ def transfer_texture_to_repaired_mesh(
         )
 
 
-def _parameterize_target_mesh(*, target_mesh: trimesh.Trimesh, output_mesh_path: Path, texture_size: tuple[int, int]) -> str:
-    preferred = CONFIGS.mesh_repair.texture_transfer_parameterization
-    if preferred == "xatlas":
-        _parameterize_target_mesh_xatlas(target_mesh=target_mesh, output_mesh_path=output_mesh_path, texture_size=texture_size)
-        return "xatlas.parametrize"
-    if preferred == "lscm":
-        pymeshlab = _import_pymeshlab()
-        ms = pymeshlab.MeshSet()
-        ms.add_mesh(pymeshlab.Mesh(vertex_matrix=np.asarray(target_mesh.vertices), face_matrix=np.asarray(target_mesh.faces)))
-        attempts = [
-            ("compute_texcoord_parametrization_least_squares_conformal_maps", [dict()]),
-            ("generate_voronoi_atlas_parametrization", [dict()]),
-            ("compute_texcoord_parametrization_triangle_trivial_per_wedge", [_trivial_kwargs(texture_size)]),
-            ("parametrization_trivial_per_triangle", [dict()]),
-        ]
-    elif preferred == "harmonic":
-        pymeshlab = _import_pymeshlab()
-        ms = pymeshlab.MeshSet()
-        ms.add_mesh(pymeshlab.Mesh(vertex_matrix=np.asarray(target_mesh.vertices), face_matrix=np.asarray(target_mesh.faces)))
-        attempts = [
-            ("compute_texcoord_parametrization_harmonic", [dict()]),
-            ("generate_voronoi_atlas_parametrization", [dict()]),
-            ("compute_texcoord_parametrization_triangle_trivial_per_wedge", [_trivial_kwargs(texture_size)]),
-            ("parametrization_trivial_per_triangle", [dict()]),
-        ]
-    elif preferred == "voronoi":
-        pymeshlab = _import_pymeshlab()
-        ms = pymeshlab.MeshSet()
-        ms.add_mesh(pymeshlab.Mesh(vertex_matrix=np.asarray(target_mesh.vertices), face_matrix=np.asarray(target_mesh.faces)))
-        attempts = [
-            ("generate_voronoi_atlas_parametrization", [dict()]),
-            ("compute_texcoord_parametrization_triangle_trivial_per_wedge", [_trivial_kwargs(texture_size)]),
-            ("parametrization_trivial_per_triangle", [dict()]),
-        ]
-    else:
-        pymeshlab = _import_pymeshlab()
-        ms = pymeshlab.MeshSet()
-        ms.add_mesh(pymeshlab.Mesh(vertex_matrix=np.asarray(target_mesh.vertices), face_matrix=np.asarray(target_mesh.faces)))
-        attempts = [
-            ("compute_texcoord_parametrization_triangle_trivial_per_wedge", [_trivial_kwargs(texture_size)]),
-            ("parametrization_trivial_per_triangle", [dict()]),
-        ]
-
-    last_exc: Exception | None = None
-    for filter_name, kwargs_variants in attempts:
-        try:
-            used = _apply_first_supported_filter(
-                ms=ms,
-                mesh_id=0,
-                filter_names=(filter_name,),
-                kwargs_variants=kwargs_variants,
-            )
-            ms.save_current_mesh(str(output_mesh_path))
-            return used
-        except Exception as exc:  # noqa: BLE001
-            last_exc = exc
-            continue
-    raise RuntimeError(f"Failed to parameterize target mesh with configured attempts. Last error: {last_exc}")
-
-
-def _parameterize_target_mesh_xatlas(*, target_mesh: trimesh.Trimesh, output_mesh_path: Path, texture_size: tuple[int, int]) -> None:
+def _parameterize_target_mesh_xatlas(*, target_mesh: trimesh.Trimesh, output_mesh_path: Path, texture_size: tuple[int, int]) -> str:
     vertices = np.asarray(target_mesh.vertices, dtype=np.float32)
     faces = np.asarray(target_mesh.faces, dtype=np.uint32)
     atlas = xatlas.Atlas()
@@ -261,15 +201,7 @@ def _parameterize_target_mesh_xatlas(*, target_mesh: trimesh.Trimesh, output_mes
         faces=out_faces,
         uvs=out_uvs,
     )
-
-
-def _trivial_kwargs(texture_size: tuple[int, int]) -> dict[str, Any]:
-    textdim = max(int(texture_size[0]), int(texture_size[1]), 256)
-    return {
-        "textdim": textdim,
-        "border": 2,
-        "method": 1,
-    }
+    return "xatlas.parametrize"
 
 
 def _bake_texture_from_source_mesh(
@@ -312,24 +244,6 @@ def _bake_texture_from_source_mesh(
         "bake_mode": "per_texel_source_uv",
         "target_texel_count": int(baked["texel_count"]),
     }
-
-
-def _apply_first_supported_filter(*, ms, mesh_id: int, filter_names: tuple[str, ...], kwargs_variants: list[dict[str, Any]]) -> str:
-    last_exc: Exception | None = None
-    for filter_name in filter_names:
-        for kwargs in kwargs_variants:
-            try:
-                ms.set_current_mesh(mesh_id)
-                ms.apply_filter(filter_name, **kwargs)
-                return filter_name
-            except Exception as exc:  # noqa: BLE001
-                last_exc = exc
-    filter_list = ", ".join(filter_names)
-    if last_exc is None:
-        raise RuntimeError(f"Could not apply any supported pymeshlab filter from: {filter_list}")
-    raise RuntimeError(
-        f"PyMeshLab filter invocation failed for [{filter_list}]: {last_exc}"
-    ) from last_exc
 
 
 def _parse_obj_with_uv(obj_path: Path) -> ObjUvMesh:
@@ -645,14 +559,3 @@ def _write_base_color_mtl(mtl_path: Path, *, texture_name: str) -> None:
         ),
         encoding="utf-8",
     )
-
-
-def _import_pymeshlab():
-    try:
-        import pymeshlab  # type: ignore
-
-        return pymeshlab
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(
-            "pymeshlab is not installed in the current environment. Install it inside Apptainer before running the mesh texture pipeline."
-        ) from exc
