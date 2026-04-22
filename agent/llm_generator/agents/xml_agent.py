@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..client import OpenAIResponsesClient
+from ..client import OpenAIResponsesClient, coerce_content_to_text
 from .prompt_utils import truncate_prompt_text
 
 
@@ -21,6 +21,7 @@ class XMLGenerationAttemptLog:
     attempt: int
     model_response: str
     validation_error: str | None
+    usage: dict[str, Any] | None
 
 
 @dataclass(slots=True)
@@ -306,19 +307,28 @@ def generate_articulated_xml_with_openai(
     prompt_cache_key = _build_prompt_cache_key()
 
     for attempt in range(1, max_attempts + 1):
-        text = client.responses_json(
+        message = client.responses_completion(
             model=model,
-            system_prompt=XML_SYSTEM_PROMPT,
-            user_prompt=_build_revision_prompt(
-                task=task,
-                previous_error=previous_error,
-                file_stem=safe_stem,
-                previous_xml_text=previous_xml_text,
-            ),
+            messages=[
+                {"role": "system", "content": XML_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": _build_revision_prompt(
+                        task=task,
+                        previous_error=previous_error,
+                        file_stem=safe_stem,
+                        previous_xml_text=previous_xml_text,
+                    ),
+                },
+            ],
             temperature=temperature,
             reasoning_effort=reasoning_effort,
             prompt_cache_key=prompt_cache_key,
+            prompt_cache_retention="24h",
+            response_format={"type": "json_object"},
         )
+        text = coerce_content_to_text(message.get("content"))
+        usage = message.get("_usage") if isinstance(message.get("_usage"), dict) else None
 
         try:
             payload = _extract_json(text)
@@ -338,6 +348,7 @@ def generate_articulated_xml_with_openai(
                     attempt=attempt,
                     model_response=text,
                     validation_error=None,
+                    usage=usage,
                 )
             )
             return XMLGenerationResult(
@@ -354,6 +365,7 @@ def generate_articulated_xml_with_openai(
                     attempt=attempt,
                     model_response=text,
                     validation_error=previous_error,
+                    usage=usage,
                 )
             )
 

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import time
 from urllib import error, request
 
+from ...configs import CONFIGS
 from .responses_format import (
     assistant_message_from_responses,
     coerce_content_to_text,
@@ -22,6 +23,10 @@ class OpenAIRequestError(RuntimeError):
 
 REASONING_EFFORT_VALUES = ("none", "minimal", "low", "medium", "high", "xhigh")
 RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504})
+MODEL_NAME_ALIASES = {
+    "gpt-5.4 mini": "gpt-5.4-mini",
+    "gpt-5 mini": "gpt-5-mini",
+}
 
 
 @dataclass(slots=True)
@@ -94,7 +99,7 @@ class OpenAIResponsesClient:
         tool_choice: str | dict[str, object] | None = None,
         response_format: dict[str, object] | None = None,
     ) -> dict[str, object]:
-        payload: dict[str, object] = {"model": model}
+        payload: dict[str, object] = {"model": _normalize_model_name(model)}
         payload["store"] = True
         if previous_response_id is not None:
             payload["previous_response_id"] = previous_response_id
@@ -109,8 +114,11 @@ class OpenAIResponsesClient:
             payload["reasoning"] = {"effort": _normalize_reasoning_effort(reasoning_effort)}
         if prompt_cache_key is not None:
             payload["prompt_cache_key"] = prompt_cache_key
-        if prompt_cache_retention is not None:
-            payload["prompt_cache_retention"] = prompt_cache_retention
+        effective_prompt_cache_retention = (
+            CONFIGS.optimization.prompt_cache_retention if prompt_cache_retention is None else prompt_cache_retention
+        )
+        if effective_prompt_cache_retention is not None:
+            payload["prompt_cache_retention"] = effective_prompt_cache_retention
         if tools is not None:
             payload["tools"] = convert_tools(tools)
         if tool_choice is not None:
@@ -200,6 +208,12 @@ def _normalize_reasoning_effort(value: str) -> str:
         allowed = ", ".join(REASONING_EFFORT_VALUES)
         raise OpenAIRequestError(f"Invalid reasoning_effort `{value}`. Expected one of: {allowed}.")
     return normalized
+
+
+def _normalize_model_name(model: str) -> str:
+    normalized = model.strip()
+    alias = MODEL_NAME_ALIASES.get(normalized.lower())
+    return alias if alias is not None else normalized
 
 
 def _should_retry_http_error(status_code: int) -> bool:

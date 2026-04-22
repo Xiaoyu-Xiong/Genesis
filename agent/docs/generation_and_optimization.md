@@ -11,6 +11,13 @@ Current generator flow can trigger:
 - articulated XML generation
 - non-articulated mesh generation
 
+Current OpenAI-facing pipeline details:
+
+- generator requests use Responses API state with `previous_response_id`
+- generator and critic requests now default to `prompt_cache_retention="24h"`
+- batch runs emit per-round OpenAI usage artifacts via `llm_usage.json`
+- `optimize-batch` supports `--max-parallel` for memory-heavy suites
+
 Texture generation for mesh assets can be enabled explicitly with:
 
 - `--mesh-texture-enabled`
@@ -77,7 +84,7 @@ Optimization loop:
 2. validate and normalize
 3. execute simulation
 4. build event pack and render video
-5. critique with multimodal critic
+5. critique with staged multimodal critic
 6. feed structured feedback into the next round
 
 The optimization CLI also supports:
@@ -85,6 +92,27 @@ The optimization CLI also supports:
 - `--mesh-texture-enabled`
 
 so the full loop can request textured mesh assets when needed.
+
+The current critic path is two-stage when enabled in [agent/configs.py](../configs.py):
+
+1. stage 1 compact screening
+2. stage 2 retrieval-based critic only when stage 1 escalates
+
+Usage accounting is preserved per component:
+
+- generator IR
+- generator XML
+- critic stage 1
+- critic stage 2
+
+Suite runs can be summarized with:
+
+- [agent/scripts/summarize_openai_usage.py](../scripts/summarize_openai_usage.py)
+
+This produces run-root summaries such as:
+
+- `openai_usage_summary.json`
+- `openai_usage_summary.tsv`
 
 For memory-heavy texture suites, prefer lowering `optimize-batch --max-parallel` instead of letting all cases launch at the default worker count. Process-pool failures with empty round lists usually indicate a worker was killed externally (for example by OOM) before the normal per-case error handling could run.
 

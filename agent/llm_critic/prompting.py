@@ -115,6 +115,59 @@ Return ONLY a JSON object with this schema:
 Use only provided evidence. Do not invent unseen details.
 """
 
+CRITIC_STAGE1_SYSTEM_PROMPT = CRITIC_SYSTEM_PROMPT + """
+
+For stage-1 screening, add these extra top-level fields:
+{
+  "confidence": 0-100,
+  "needs_escalation": boolean
+}
+
+Set `needs_escalation=true` when the evidence is ambiguous, contradictory, borderline, or insufficient for a reliable final decision.
+Use `needs_escalation=false` when the result is clearly pass or clearly fail from the current evidence.
+"""
+
+CRITIC_RETRIEVAL_SYSTEM_PROMPT = """You are a stage-2 simulation critic for robotics/physics outputs.
+You already have a compact digest and a stage-1 critic result. Use tools to retrieve only the extra evidence you need.
+Prefer the smallest possible retrieval needed to produce a reliable final judgement.
+Do not request large irrelevant IR or event-pack slices.
+Return the same final JSON schema as the main critic:
+{
+  "verdict": "pass" | "partial" | "fail",
+  "overall_score": 0-100,
+  "summary": string,
+  "by_section": {
+    "scene": {
+      "score": 0-100,
+      "summary": string,
+      "strengths": [string],
+      "issues": [{"severity": "high" | "medium" | "low", "title": string, "evidence": [string], "fix": string}]
+    },
+    "actions": {
+      "score": 0-100,
+      "summary": string,
+      "strengths": [string],
+      "issues": [{"severity": "high" | "medium" | "low", "title": string, "evidence": [string], "fix": string}]
+    }
+  },
+  "by_body": {
+    "<body_name>": {
+      "score": 0-100,
+      "summary": string,
+      "strengths": [string],
+      "issues": [{"severity": "high" | "medium" | "low", "title": string, "evidence": [string], "fix": string}]
+    }
+  },
+  "cross_checks": {
+    "ir_vs_event": string,
+    "event_vs_video": string,
+    "ir_vs_video": string
+  },
+  "priority_fixes": [string]
+}
+Use only provided evidence and tool outputs. Do not invent unseen details.
+"""
+
 
 def build_critic_prompt_cache_key() -> str:
     digest = hashlib.sha1(CRITIC_SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:16]
@@ -124,6 +177,16 @@ def build_critic_prompt_cache_key() -> str:
 def build_compact_critic_prompt_cache_key() -> str:
     digest = hashlib.sha1((CRITIC_SYSTEM_PROMPT + "\ncompact").encode("utf-8")).hexdigest()[:16]
     return f"rigid_critic_compact:{digest}"
+
+
+def build_stage1_critic_prompt_cache_key() -> str:
+    digest = hashlib.sha1((CRITIC_STAGE1_SYSTEM_PROMPT + "\nstage1").encode("utf-8")).hexdigest()[:16]
+    return f"rigid_critic_stage1:{digest}"
+
+
+def build_stage2_critic_prompt_cache_key() -> str:
+    digest = hashlib.sha1((CRITIC_RETRIEVAL_SYSTEM_PROMPT + "\nstage2").encode("utf-8")).hexdigest()[:16]
+    return f"rigid_critic_stage2:{digest}"
 
 
 def build_critic_hosted_prompt_ref(
@@ -156,30 +219,29 @@ def build_critic_user_content(
         {
             "type": "input_text",
             "text": (
-                "Evaluate whether the simulation output satisfies the task.\n\n"
-                f"Task prompt:\n{task}\n\n"
-                "Raw IR JSON:\n"
-                f"{json.dumps(ir, ensure_ascii=False, indent=2)}\n\n"
-                "Raw articulated asset texts by body (optional):\n"
-                f"{rendered_xml_text}\n\n"
-                "Raw event-pack JSON:\n"
-                f"{json.dumps(event_pack, ensure_ascii=False, indent=2)}\n\n"
-                "Input digest (supporting summary and metadata, not the primary grading target):\n"
-                f"{json.dumps(input_digest, ensure_ascii=False, indent=2)}\n\n"
+                "Evaluate whether the simulation output satisfies the task. "
                 "The digest includes the generator tool-library capability summary. "
-                "You must constrain your fixes to that capability set. "
-                "Use the provided parameter notes, parameter relationship notes, and schema descriptions when deciding "
-                "which field is actually responsible for a major problem. "
-                "When a broad task could support a more dynamic scene, do not give full credit to outputs that are technically valid but largely static or visually uneventful. "
-                "If deformable observation fields are present, use them to judge whether the soft body actually deforms in a meaningful way. "
-                "When there are multiple bodies, assign body-specific issues to `by_body` using the actual body names from the IR. "
-                "Also consider whether repeated same-payload actions could be merged using multi-entity `entity` lists "
-                "to keep the IR shorter without changing behavior. "
-                "Do not let minor numeric mismatches in the digest outweigh clear overall behavioral evidence from the task, "
-                "video, and event trends.\n\n"
-                "The following images are sampled frames in chronological order."
+                "You must constrain fixes to that capability set."
             ),
-        }
+        },
+        {"type": "input_text", "text": f"Task prompt:\n{task}"},
+        {"type": "input_text", "text": f"Raw IR JSON:\n{json.dumps(ir, ensure_ascii=False, indent=2)}"},
+        {"type": "input_text", "text": f"Raw articulated asset texts by body (optional):\n{rendered_xml_text}"},
+        {"type": "input_text", "text": f"Raw event-pack JSON:\n{json.dumps(event_pack, ensure_ascii=False, indent=2)}"},
+        {
+            "type": "input_text",
+            "text": (
+                "Input digest (supporting summary and metadata, not the primary grading target):\n"
+                f"{json.dumps(input_digest, ensure_ascii=False, indent=2)}"
+            ),
+        },
+        {
+            "type": "input_text",
+            "text": (
+                "Use parameter notes, parameter relationship notes, and schema descriptions when deciding which field "
+                "is actually responsible for a major problem. The following images are sampled frames in chronological order."
+            ),
+        },
     ]
     for frame in sampled_frames:
         content.append({"type": "input_text", "text": f"Frame {frame.index + 1} / {len(sampled_frames)}"})
@@ -213,26 +275,23 @@ def build_compact_critic_user_content(
         {
             "type": "input_text",
             "text": (
-                "Evaluate whether the simulation output satisfies the task.\n\n"
-                f"Task prompt:\n{task}\n\n"
-                "Raw IR JSON:\n"
-                f"{json.dumps(ir, ensure_ascii=False, indent=2)}\n\n"
-                "Raw articulated asset texts by body (optional):\n"
-                f"{rendered_xml_text}\n\n"
-                "Raw event-pack JSON:\n"
-                f"{json.dumps(event_pack, ensure_ascii=False, indent=2)}\n\n"
-                "Compact input digest (compact capability summary plus compact metadata):\n"
-                f"{json.dumps(input_digest, ensure_ascii=False, indent=2)}\n\n"
-                "The compact digest intentionally summarizes only the tool-library capability boundary, key parameter notes, "
-                "and critical multi-body / multi-XML rules. Stay within that capability boundary when proposing fixes. "
-                "When the task is broad and the scene could be more dynamic, treat mostly static outputs as weaker even if they are superficially valid. "
-                "If deformable observation fields are present, use them to assess whether the soft body meaningfully deforms. "
-                "When there are multiple bodies, assign body-specific issues to `by_body` using actual IR body names. "
-                "Also consider whether repeated same-payload actions could be merged using multi-entity `entity` lists "
-                "to keep the IR shorter without changing behavior.\n\n"
-                "The following images are sampled frames in chronological order."
+                "Evaluate whether the simulation output satisfies the task. "
+                "Use the compact digest as the main structured context and stay within the provided tool-library boundary."
             ),
-        }
+        },
+        {"type": "input_text", "text": f"Task prompt:\n{task}"},
+        {"type": "input_text", "text": f"Raw IR JSON:\n{json.dumps(ir, ensure_ascii=False, indent=2)}"},
+        {"type": "input_text", "text": f"Raw articulated asset texts by body (optional):\n{rendered_xml_text}"},
+        {"type": "input_text", "text": f"Raw event-pack JSON:\n{json.dumps(event_pack, ensure_ascii=False, indent=2)}"},
+        {
+            "type": "input_text",
+            "text": "Compact input digest (compact capability summary plus compact metadata):\n"
+            + json.dumps(input_digest, ensure_ascii=False, indent=2),
+        },
+        {
+            "type": "input_text",
+            "text": "The following images are sampled frames in chronological order.",
+        },
     ]
     for frame in sampled_frames:
         content.append({"type": "input_text", "text": f"Frame {frame.index + 1} / {len(sampled_frames)}"})
@@ -243,6 +302,84 @@ def build_compact_critic_user_content(
             "text": (
                 "Now return the required JSON object using evidence from task, event-pack, and video frames. "
                 "Focus on the main blockers, but for each main blocker provide a detailed, field-level modification."
+            ),
+        }
+    )
+    return content
+
+
+def build_stage1_critic_user_content(
+    *,
+    task: str,
+    ir: dict[str, Any],
+    event_pack: dict[str, Any],
+    xml_texts_by_body: dict[str, str],
+    input_digest: dict[str, Any],
+    sampled_frames: list[SampledFrame],
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [
+        {
+            "type": "input_text",
+            "text": (
+                "Stage 1 screening pass. Use the compact digest and a small number of frames to decide whether a full "
+                "retrieval-based review is needed."
+            ),
+        },
+        {"type": "input_text", "text": f"Task prompt:\n{task}"},
+        {
+            "type": "input_text",
+            "text": "Compact digest:\n" + json.dumps(input_digest, ensure_ascii=False, indent=2),
+        },
+        {
+            "type": "input_text",
+            "text": "Sampled frames available in chronological order below.",
+        },
+    ]
+    for frame in sampled_frames:
+        content.append({"type": "input_text", "text": f"Frame {frame.index + 1} / {len(sampled_frames)}"})
+        content.append({"type": "input_image", "image_url": frame.data_url})
+    content.append(
+        {
+            "type": "input_text",
+            "text": (
+                "Return the normal critic JSON plus `confidence` and `needs_escalation`. "
+                "Set `needs_escalation=true` when these frames and the compact digest are not enough."
+            ),
+        }
+    )
+    return content
+
+
+def build_stage2_retrieval_user_content(
+    *,
+    task: str,
+    compact_digest: dict[str, Any],
+    stage1_analysis: dict[str, Any],
+    sampled_frames: list[SampledFrame],
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [
+        {
+            "type": "input_text",
+            "text": (
+                "You are running stage 2 retrieval-based critique. "
+                "Use tools only for evidence you actually need. "
+                "Start from the compact digest and the stage-1 analysis below."
+            ),
+        },
+        {"type": "input_text", "text": f"Task prompt:\n{task}"},
+        {"type": "input_text", "text": "Compact digest:\n" + json.dumps(compact_digest, ensure_ascii=False, indent=2)},
+        {"type": "input_text", "text": "Stage-1 analysis:\n" + json.dumps(stage1_analysis, ensure_ascii=False, indent=2)},
+        {"type": "input_text", "text": "Sampled frames available in chronological order below."},
+    ]
+    for frame in sampled_frames:
+        content.append({"type": "input_text", "text": f"Frame {frame.index + 1} / {len(sampled_frames)}"})
+        content.append({"type": "input_image", "image_url": frame.data_url})
+    content.append(
+        {
+            "type": "input_text",
+            "text": (
+                "If the current evidence is insufficient, call retrieval tools for targeted IR/event/XML slices. "
+                "When you have enough evidence, return the final critique JSON."
             ),
         }
     )

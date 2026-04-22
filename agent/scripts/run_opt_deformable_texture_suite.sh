@@ -53,9 +53,9 @@ echo "Run root: $RUN_ROOT"
 echo "Python: ${PYTHON_CMD[*]}"
 
 cat > "$TASK_FILE" <<'CASES'
-soft monster|Create a ring of identical soft monster toys with colorful textured surfaces and let a rigid plate descend into the ring so they compress, buckle, and recover over 10s
+textured_duck_plate_press|Create a scene where around 10 identical medium-sized soft rubber ducks with bright toy-like texture are compressed by a descending rigid plate, showing visible squashing, render 10s behavior
 
-soft balls|Create a scene where identical soft striped beach balls are pushed through a narrowing rigid gate with visible deformation, render 10s behavior
+cap_pull_and_release|Create a scene where a soft textured baseball cap is pulled outward by moving rigid blockers and then released, making the brim and crown visibly deform over 10s
 CASES
 
 SUMMARY_JSON="$RUN_ROOT/summary.json"
@@ -71,6 +71,12 @@ opt_cmd=(
 
 echo "==> optimize-batch"
 run_cmd "${opt_cmd[@]}"
+
+echo "==> summarize OpenAI usage"
+run_cmd "${PYTHON_CMD[@]}" agent/scripts/summarize_openai_usage.py \
+  --run-root "$RUN_ROOT" \
+  --out-json "$RUN_ROOT/openai_usage_summary.json" \
+  --out-tsv "$RUN_ROOT/openai_usage_summary.tsv"
 
 while IFS= read -r round_dir; do
   [[ -z "$round_dir" ]] && continue

@@ -54,11 +54,18 @@ class DeformableConfigs:
 
 @dataclass(slots=True, frozen=True)
 class OptimizationConfigs:
-    model: str = "gpt-5.2"
+    model: str = "gpt-5.4 mini"
     critic_model: str = ""
     reasoning_effort: str = "xhigh"
     critic_reasoning_effort: str = ""
     critic_prompt_variant: str = "full"
+    prompt_cache_retention: Literal["in_memory", "24h"] = "24h"
+    critic_two_stage: bool = True
+    critic_stage1_prompt_variant: Literal["compact", "full"] = "compact"
+    critic_stage1_max_frames: int = 6
+    critic_stage1_max_width: int = 384
+    critic_stage1_reasoning_effort: str = "medium"
+    critic_stage2_tool_max_rounds: int = 6
     max_parallel: int = 10
     backend: str = "gpu"
     max_opt_rounds: int = 12

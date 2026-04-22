@@ -15,6 +15,7 @@ from ..llm_critic import CriticEvaluationInput, evaluate_prompt_event_video
 from ..llm_generator import OpenAIResponsesClient, generate_ir_two_agent
 from ..llm_generator.constraints import parse_sanitize_validate
 from ..runtime import build_llm_event_pack, run_rigid_ir
+from ..usage import aggregate_usage_metrics
 from .feedback import build_generator_feedback_package
 
 _SIMULATION_LOCK_PATH = Path(__file__).resolve().parents[1] / "runs" / ".simulation.lock"
@@ -156,6 +157,7 @@ def optimize_prompt(
         event_pack_path = round_dir / "event_pack.json"
         critic_json = round_dir / "critic.json"
         critic_log = round_dir / "critic.log.json"
+        usage_json = round_dir / "llm_usage.json"
         task_path = round_dir / "task.txt"
         refinement_path = round_dir / "generator_feedback.txt"
         refinement_json_path = round_dir / "generator_feedback.json"
@@ -216,6 +218,8 @@ def optimize_prompt(
                 "frames_used": critic_result.frames_used,
                 "raw_response_text": critic_result.raw_response_text,
                 "analysis_json": analysis_json,
+                "usage_summary": critic_result.usage_summary,
+                "stage_logs": critic_result.stage_logs,
             }
         except Exception as exc:  # noqa: BLE001
             analysis_json = _build_synthetic_critic_analysis(raw_result=raw_result, event_pack=event_pack, error_text=str(exc))
@@ -223,10 +227,13 @@ def optimize_prompt(
                 "mode": "synthetic_critic_failure",
                 "error": str(exc),
                 "analysis_json": analysis_json,
+                "usage_summary": {},
+                "stage_logs": [],
             }
 
         dump_json(analysis_json, critic_json)
         dump_json(critic_log_payload, critic_log)
+        dump_json(_round_usage_payload(generator_result, critic_log_payload), usage_json)
 
         verdict = analysis_json.get("verdict")
         passed = verdict == "pass"
@@ -465,6 +472,43 @@ def _generation_log_payload(result, config: OptimizationConfig) -> dict[str, Any
             body_name: [asdict(log) for log in mesh_result.logs]
             for body_name, mesh_result in sorted(mesh_results_by_body.items())
         },
+        "usage_summary": _generator_usage_summary(result),
+    }
+
+
+def _generator_usage_summary(result) -> dict[str, Any]:
+    ir_entries = [getattr(log, "usage", None) for log in result.ir_result.logs]
+    xml_entries = [
+        getattr(log, "usage", None)
+        for xml_result in result.xml_results_by_body.values()
+        for log in xml_result.logs
+    ]
+    return {
+        "generator_ir": aggregate_usage_metrics(ir_entries),
+        "generator_xml": aggregate_usage_metrics(xml_entries),
+        "generator_total": aggregate_usage_metrics([*ir_entries, *xml_entries]),
+    }
+
+
+def _round_usage_payload(generator_result, critic_log_payload: dict[str, Any]) -> dict[str, Any]:
+    generator_usage = _generator_usage_summary(generator_result)
+    critic_stage_logs = critic_log_payload.get("stage_logs")
+    critic_entries = []
+    if isinstance(critic_stage_logs, list):
+        critic_entries = [log.get("usage") for log in critic_stage_logs if isinstance(log, dict)]
+    return {
+        "generator": generator_usage,
+        "critic": {
+            "stages": critic_stage_logs if isinstance(critic_stage_logs, list) else [],
+            "critic_total": aggregate_usage_metrics(critic_entries),
+        },
+        "overall_total": aggregate_usage_metrics(
+            [
+                generator_usage.get("generator_ir"),
+                generator_usage.get("generator_xml"),
+                *critic_entries,
+            ]
+        ),
     }
 
 

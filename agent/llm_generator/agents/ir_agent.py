@@ -24,6 +24,7 @@ class IRGenerationRoundLog:
     tool_calls: list[dict[str, Any]]
     tool_results: list[dict[str, Any]]
     validation_error: str | None
+    usage: dict[str, Any] | None
 
 
 @dataclass(slots=True)
@@ -61,22 +62,16 @@ def _tool_result_message(tool_call_id: str, name: str, result: dict[str, Any]) -
     }
 
 
-def _build_user_prompt(
+def _build_process_requirements_prompt(
     task: str,
     *,
     mesh_generation_available: bool,
-    additional_requirements: str | None = None,
 ) -> str:
     lines = [
         "Process requirements:",
         "- Call get_generation_bootstrap first.",
         *build_ir_agent_process_requirements(mesh_generation_available=mesh_generation_available),
-        "",
-        "Task:",
-        task.strip(),
     ]
-    if additional_requirements:
-        lines.extend(["", "Additional hard requirements:", additional_requirements.strip()])
     return "\n".join(lines)
 
 
@@ -127,6 +122,47 @@ def _build_revision_prompt_sections(
                 ]
             )
     return lines
+
+
+def _build_initial_messages(
+    *,
+    task: str,
+    mesh_generation_available: bool,
+    additional_requirements: str | None,
+    previous_ir_json: dict[str, Any] | None,
+    previous_xml_texts_by_body: dict[str, str] | None,
+    previous_xml_summaries_by_body: dict[str, dict[str, Any]] | None,
+    previous_mesh_summaries_by_body: dict[str, dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "user",
+            "content": _build_process_requirements_prompt(
+                task,
+                mesh_generation_available=mesh_generation_available,
+            ),
+        },
+        {
+            "role": "user",
+            "content": "\n".join(["Task:", task.strip()]),
+        },
+    ]
+    if additional_requirements and additional_requirements.strip():
+        messages.append(
+            {
+                "role": "user",
+                "content": "\n".join(["Additional hard requirements:", additional_requirements.strip()]),
+            }
+        )
+    revision_sections = _build_revision_prompt_sections(
+        previous_ir_json=previous_ir_json,
+        previous_xml_texts_by_body=previous_xml_texts_by_body,
+        previous_xml_summaries_by_body=previous_xml_summaries_by_body,
+        previous_mesh_summaries_by_body=previous_mesh_summaries_by_body,
+    )
+    if revision_sections:
+        messages.append({"role": "user", "content": "\n".join(revision_sections)})
+    return messages
 
 
 def _build_prompt_cache_key(tool_specs: list[dict[str, Any]]) -> str:
@@ -205,21 +241,15 @@ def generate_ir_with_tool_agent(
         raise ValueError("`max_rounds` must be >= 1.")
 
     system_message = {"role": "system", "content": IR_SYSTEM_PROMPT}
-    user_prompt = _build_user_prompt(
-        task,
+    pending_messages = _build_initial_messages(
+        task=task,
         mesh_generation_available=tool_library.mesh_generation_fn is not None,
         additional_requirements=additional_requirements,
-    )
-    revision_sections = _build_revision_prompt_sections(
         previous_ir_json=previous_ir_json,
         previous_xml_texts_by_body=previous_xml_texts_by_body,
         previous_xml_summaries_by_body=previous_xml_summaries_by_body,
         previous_mesh_summaries_by_body=previous_mesh_summaries_by_body,
     )
-    if revision_sections:
-        user_prompt = "\n".join([user_prompt, *revision_sections])
-
-    pending_messages: list[dict[str, Any]] = [{"role": "user", "content": user_prompt}]
     previous_response_id: str | None = None
     tool_specs = tool_library.tool_specs()
     prompt_cache_key = _build_prompt_cache_key(tool_specs)
@@ -293,6 +323,7 @@ def generate_ir_with_tool_agent(
                 tool_calls=tool_calls,
                 tool_results=tool_results,
                 validation_error=None,
+                usage=assistant_message.get("_usage") if isinstance(assistant_message.get("_usage"), dict) else None,
             )
             logs.append(round_log)
 
@@ -349,6 +380,7 @@ def generate_ir_with_tool_agent(
                     tool_calls=[],
                     tool_results=[],
                     validation_error=None,
+                    usage=assistant_message.get("_usage") if isinstance(assistant_message.get("_usage"), dict) else None,
                 )
             )
             return IRGenerationResult(
@@ -368,6 +400,7 @@ def generate_ir_with_tool_agent(
                 tool_calls=[],
                 tool_results=[],
                 validation_error=validation_error,
+                usage=assistant_message.get("_usage") if isinstance(assistant_message.get("_usage"), dict) else None,
             )
         )
 

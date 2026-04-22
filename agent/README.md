@@ -29,6 +29,7 @@ The practical summary for `agent/` work is:
 - [IR and Runtime](docs/ir_runtime.md)
 - [Generation and Optimization](docs/generation_and_optimization.md)
 - [Mesh and Texture Pipeline](docs/mesh_texture.md)
+- [Agentive-Native Upgrade Plan](docs/agentive_native_pipeline.md)
 - [Suite Scripts and Artifacts](docs/suites_and_artifacts.md)
 - [Ownership and Collaboration](docs/ownership.md)
 

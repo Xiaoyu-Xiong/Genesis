@@ -94,6 +94,9 @@ def assistant_message_from_responses(response: dict[str, Any]) -> dict[str, Any]
     response_id = response.get("id")
     if isinstance(response_id, str) and response_id:
         message["_response_id"] = response_id
+    usage = response.get("usage")
+    if isinstance(usage, dict):
+        message["_usage"] = usage
     if tool_calls:
         message["tool_calls"] = tool_calls
     return message

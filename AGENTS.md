@@ -14,6 +14,7 @@ These rules are mandatory for this repository.
 - **If execution context is unclear, stop and clarify the shell context before running commands that mutate environments or execute Python.**
 - **For CPU-only or lightweight non-simulation tasks, run directly inside Apptainer.** Use the shortest correct command.
 - **For GPU-dependent Genesis simulation, rendering, profiling, or long optimization tasks, default to `sbatch` on the `GPU-shared` partition with one `h100-80` GPU unless the user explicitly asks for a lighter local Apptainer smoke test.** Queueing can take time, so do not assume immediate execution.
+- **For commands which require OpenAI API request**, the API response will take time based on OpenAI server loads, so do not assume immediate execution.
 - **When the user says they are already inside Apptainer, give commands without an Apptainer prefix.** In that case, do not re-wrap commands with `apptainer exec`.
 - **When the user asks for a command, prefer the shortest correct command.** Do not wrap a simple rerun in an unnecessarily complex script.
 - **`agent/configs.py` is a static config module.** Do not reintroduce environment-variable-driven config loading there. For run-specific behavior, prefer explicit CLI flags.
