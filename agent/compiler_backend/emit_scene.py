@@ -34,6 +34,7 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
     emit(1, "scene = gs.Scene(")
     emit(2, "sim_options=gs.options.SimOptions(")
     emit(3, f"dt={program.scene.sim.dt},")
+    emit(3, f"substeps={CONFIGS.runtime.sim_substeps},")
     emit(3, f"gravity={fmt_tuple(program.scene.sim.gravity)},")
     emit(2, "),")
     if has_deformable_bodies:
@@ -58,12 +59,31 @@ def emit_scene_setup(emit: Callable[[int, str], None], program: RigidIR) -> Scen
         else:
             emit(2, "fem_options=gs.options.FEMOptions(),")
             emit(2, "coupler_options=gs.options.IPCCouplerOptions(")
+            emit(3, f"newton_max_iterations={CONFIGS.deformable.ipc_newton_max_iterations},")
+            emit(3, f"newton_min_iterations={CONFIGS.deformable.ipc_newton_min_iterations},")
+            emit(3, f"newton_tolerance={CONFIGS.deformable.ipc_newton_tolerance},")
+            emit(3, f"newton_ccd_tolerance={CONFIGS.deformable.ipc_newton_ccd_tolerance},")
+            emit(3, f"newton_use_adaptive_tolerance={CONFIGS.deformable.ipc_newton_use_adaptive_tolerance},")
+            emit(3, f"newton_translation_tolerance={CONFIGS.deformable.ipc_newton_translation_tolerance},")
+            emit(3, f"newton_semi_implicit_enable={CONFIGS.deformable.ipc_newton_semi_implicit_enable},")
+            emit(
+                3,
+                "newton_semi_implicit_beta_tolerance="
+                f"{CONFIGS.deformable.ipc_newton_semi_implicit_beta_tolerance},",
+            )
+            emit(3, f"n_linesearch_iterations={CONFIGS.deformable.ipc_n_linesearch_iterations},")
+            emit(3, f"linesearch_report_energy={CONFIGS.deformable.ipc_linesearch_report_energy},")
+            emit(3, f"linear_system_solver={CONFIGS.deformable.ipc_linear_system_solver!r},")
+            emit(3, f"linear_system_tolerance={CONFIGS.deformable.ipc_linear_system_tolerance},")
+            emit(3, f"contact_enable={CONFIGS.deformable.ipc_contact_enable},")
             emit(3, f"contact_d_hat={CONFIGS.deformable.ipc_contact_d_hat},")
             emit(3, f"contact_friction_enable={CONFIGS.deformable.ipc_contact_friction_enable},")
             emit(3, f"contact_resistance={CONFIGS.deformable.ipc_contact_resistance},")
             emit(3, f"contact_eps_velocity={CONFIGS.deformable.ipc_contact_eps_velocity},")
             emit(3, f"contact_constitution={CONFIGS.deformable.ipc_contact_constitution!r},")
             emit(3, f"collision_detection_method={CONFIGS.deformable.ipc_collision_detection_method!r},")
+            emit(3, f"cfl_enable={CONFIGS.deformable.ipc_cfl_enable},")
+            emit(3, f"sanity_check_enable={CONFIGS.deformable.ipc_sanity_check_enable},")
             emit(3, f"constraint_strength_translation={CONFIGS.deformable.ipc_constraint_strength_translation},")
             emit(3, f"constraint_strength_rotation={CONFIGS.deformable.ipc_constraint_strength_rotation},")
             emit(3, f"enable_rigid_ground_contact={CONFIGS.deformable.ipc_enable_rigid_ground_contact},")

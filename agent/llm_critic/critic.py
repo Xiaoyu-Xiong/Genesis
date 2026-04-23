@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Callable
 
 from ..configs import CONFIGS
-from ..io_utils import load_json_object
+from ..io_utils import dump_json, load_json_object
 from ..llm_generator.client import OpenAIRequestError, OpenAIResponsesClient, coerce_content_to_text
 from ..usage import aggregate_usage_metrics, usage_to_metrics
 from .digest import (
@@ -60,6 +61,46 @@ class CriticEvaluationResult:
     stage_logs: list[dict[str, object]] = field(default_factory=list)
 
 
+def _message_usage(message: dict[str, object]) -> dict[str, int]:
+    return usage_to_metrics(message.get("_usage") if isinstance(message.get("_usage"), dict) else None)
+
+
+def _build_critic_log_payload(
+    *,
+    model: str,
+    input_digest: dict[str, object],
+    frames_used: int,
+    raw_response_text: str,
+    analysis_json: dict[str, object],
+    stage_logs: list[dict[str, object]],
+) -> dict[str, Any]:
+    return {
+        "mode": "critic_evaluation",
+        "model": model,
+        "input_digest": input_digest,
+        "frames_used": frames_used,
+        "raw_response_text": raw_response_text,
+        "analysis_json": analysis_json,
+        "usage_summary": aggregate_usage_metrics([log.get("usage") for log in stage_logs]),
+        "stage_logs": stage_logs,
+    }
+
+
+def _emit_critic_progress(*, log_path: Path | None, payload: dict[str, Any]) -> None:
+    if log_path is not None:
+        dump_json(payload, log_path)
+
+
+def _emit_retrieval_progress(
+    progress_callback: Callable[[list[dict[str, Any]], str | None, dict[str, Any] | None], None] | None,
+    stage_logs: list[dict[str, Any]],
+    raw_response_text: str | None,
+    analysis_json: dict[str, Any] | None,
+) -> None:
+    if progress_callback is not None:
+        progress_callback(stage_logs, raw_response_text, analysis_json)
+
+
 def evaluate_prompt_event_video(
     *,
     client: OpenAIResponsesClient,
@@ -70,6 +111,7 @@ def evaluate_prompt_event_video(
     hosted_prompt_id: str | None = None,
     hosted_prompt_version: str | None = None,
     prompt_variant: str = "full",
+    log_path: Path | None = None,
 ) -> CriticEvaluationResult:
     if prompt_variant not in {"full", "compact"}:
         raise CriticEvaluationError(f"Unsupported critic prompt_variant `{prompt_variant}`.")
@@ -119,47 +161,21 @@ def evaluate_prompt_event_video(
             stage_logs=[stage_result],
         )
 
-    stage1_frames = _sample_video_frames_with_overrides(
+    stage1_frames = _sample_video_frames(
         eval_input,
         max_frames=CONFIGS.optimization.critic_stage1_max_frames,
         max_width=CONFIGS.optimization.critic_stage1_max_width,
     )
-    if CONFIGS.optimization.critic_stage1_prompt_variant == "full":
-        stage1_digest = build_input_digest(
-            task=eval_input.task,
-            ir=ir,
-            event_pack=event_pack,
-            xml_infos_by_body=xml_infos_by_body,
-            video_duration_sec=video_duration_sec,
-            sample_every_sec=eval_input.sample_every_sec,
-            max_frames=CONFIGS.optimization.critic_stage1_max_frames,
-        )
-        stage1_content = build_critic_user_content(
-            task=eval_input.task,
-            ir=ir,
-            event_pack=event_pack,
-            xml_texts_by_body=xml_texts_by_body,
-            input_digest=stage1_digest,
-            sampled_frames=stage1_frames,
-        )
-    else:
-        stage1_digest = build_compact_input_digest(
-            task=eval_input.task,
-            ir=ir,
-            event_pack=event_pack,
-            xml_infos_by_body=xml_infos_by_body,
-            video_duration_sec=video_duration_sec,
-            sample_every_sec=eval_input.sample_every_sec,
-            max_frames=CONFIGS.optimization.critic_stage1_max_frames,
-        )
-        stage1_content = build_stage1_critic_user_content(
-            task=eval_input.task,
-            ir=ir,
-            event_pack=event_pack,
-            xml_texts_by_body=xml_texts_by_body,
-            input_digest=stage1_digest,
-            sampled_frames=stage1_frames,
-        )
+    stage1_digest, stage1_content = _build_stage1_inputs(
+        task=eval_input.task,
+        ir=ir,
+        event_pack=event_pack,
+        xml_infos_by_body=xml_infos_by_body,
+        xml_texts_by_body=xml_texts_by_body,
+        video_duration_sec=video_duration_sec,
+        sample_every_sec=eval_input.sample_every_sec,
+        sampled_frames=stage1_frames,
+    )
     stage1_result = _run_critic_response(
         client=client,
         model=model,
@@ -172,6 +188,17 @@ def evaluate_prompt_event_video(
         reasoning_effort=CONFIGS.optimization.critic_stage1_reasoning_effort,
         stage="critic_stage1",
         prompt_variant=CONFIGS.optimization.critic_stage1_prompt_variant,
+    )
+    _emit_critic_progress(
+        log_path=log_path,
+        payload=_build_critic_log_payload(
+            model=model,
+            input_digest=stage1_digest,
+            frames_used=len(stage1_frames),
+            raw_response_text=stage1_result["raw_response_text"],
+            analysis_json=stage1_result["analysis_json"],
+            stage_logs=[stage1_result],
+        ),
     )
 
     if not _should_escalate(stage1_result["analysis_json"]):
@@ -198,6 +225,21 @@ def evaluate_prompt_event_video(
         xml_texts_by_body=xml_texts_by_body,
         temperature=temperature,
         reasoning_effort=reasoning_effort,
+        progress_callback=(
+            None
+            if log_path is None
+            else lambda stage_logs, raw_response_text, analysis_json: _emit_critic_progress(
+                log_path=log_path,
+                payload=_build_critic_log_payload(
+                    model=model,
+                    input_digest=stage1_digest,
+                    frames_used=len(stage2_frames),
+                    raw_response_text=stage1_result["raw_response_text"] if raw_response_text is None else raw_response_text,
+                    analysis_json=stage1_result["analysis_json"] if analysis_json is None else analysis_json,
+                    stage_logs=[stage1_result, *stage_logs],
+                ),
+            )
+        ),
     )
     return CriticEvaluationResult(
         model=model,
@@ -221,8 +263,8 @@ def _build_single_stage_inputs(
     eval_input: CriticEvaluationInput,
     prompt_variant: str,
 ) -> tuple[dict[str, Any], list[SampledFrame], list[dict[str, Any]], str, str]:
+    sampled_frames = _sample_video_frames(eval_input)
     if prompt_variant == "compact":
-        sampled_frames = _sample_video_frames(eval_input)
         input_digest = build_compact_input_digest(
             task=task,
             ir=ir,
@@ -242,7 +284,6 @@ def _build_single_stage_inputs(
         )
         return input_digest, sampled_frames, content, build_compact_critic_prompt_cache_key(), CRITIC_SYSTEM_PROMPT
 
-    sampled_frames = _sample_video_frames(eval_input)
     input_digest = build_input_digest(
         task=task,
         ir=ir,
@@ -298,7 +339,7 @@ def _run_critic_response(
         raise CriticEvaluationError(str(exc)) from exc
     raw_text = coerce_content_to_text(message.get("content"))
     try:
-        analysis_json = ensure_sectioned_analysis(extract_first_json_object(raw_text))
+        analysis_json = _parse_analysis_json(raw_text)
     except ValueError as exc:
         raise CriticEvaluationError(str(exc)) from exc
     return {
@@ -307,7 +348,7 @@ def _run_critic_response(
         "model": model,
         "raw_response_text": raw_text,
         "analysis_json": analysis_json,
-        "usage": usage_to_metrics(message.get("_usage") if isinstance(message.get("_usage"), dict) else None),
+        "usage": _message_usage(message),
     }
 
 
@@ -324,6 +365,7 @@ def _run_retrieval_critic(
     xml_texts_by_body: dict[str, str],
     temperature: float | None,
     reasoning_effort: str | None,
+    progress_callback: Callable[[list[dict[str, Any]], str | None, dict[str, Any] | None], None] | None = None,
 ) -> dict[str, Any]:
     tool_library = CriticToolLibrary(ir=ir, event_pack=event_pack, xml_texts_by_body=xml_texts_by_body)
     tool_specs = tool_library.tool_specs()
@@ -358,7 +400,7 @@ def _run_retrieval_critic(
             previous_response_id = response_id
         raw_text = coerce_content_to_text(message.get("content"))
         raw_tool_calls = message.get("tool_calls")
-        usage = usage_to_metrics(message.get("_usage") if isinstance(message.get("_usage"), dict) else None)
+        usage = _message_usage(message)
 
         stage_log: dict[str, Any] = {
             "stage": f"critic_stage2_round_{round_idx}",
@@ -371,10 +413,11 @@ def _run_retrieval_critic(
 
         if not isinstance(raw_tool_calls, list) or not raw_tool_calls:
             try:
-                analysis_json = ensure_sectioned_analysis(extract_first_json_object(raw_text))
+                analysis_json = _parse_analysis_json(raw_text)
             except ValueError as exc:
                 raise CriticEvaluationError(str(exc)) from exc
             stage_logs.append(stage_log)
+            _emit_retrieval_progress(progress_callback, stage_logs, raw_text, analysis_json)
             return {"analysis_json": analysis_json, "raw_response_text": raw_text, "stage_logs": stage_logs}
 
         batch_calls: list[dict[str, Any]] = []
@@ -391,8 +434,11 @@ def _run_retrieval_critic(
                 call_id = f"critic_tool_call_{round_idx}_{call_index}"
             batch_calls.append({"id": call_id, "name": name, "arguments_json": arguments_json})
         batch_results = tool_library.execute_tool_calls_batch(batch_calls)
-        stage_log["tool_results"] = batch_results
         stage_logs.append(stage_log)
+        _emit_retrieval_progress(progress_callback, stage_logs, raw_text, None)
+        for result in batch_results:
+            stage_log["tool_results"].append(result)
+            _emit_retrieval_progress(progress_callback, stage_logs, raw_text, None)
 
         tool_messages: list[dict[str, Any]] = []
         for batch_call, result in zip(batch_calls, batch_results, strict=True):
@@ -425,7 +471,7 @@ def _run_retrieval_critic(
             response_format={"type": "json_object"},
         )
         final_raw_text = coerce_content_to_text(final_message.get("content"))
-        final_usage = usage_to_metrics(final_message.get("_usage") if isinstance(final_message.get("_usage"), dict) else None)
+        final_usage = _message_usage(final_message)
         stage_logs.append(
             {
                 "stage": f"critic_stage2_round_{round_idx + 1}",
@@ -437,40 +483,77 @@ def _run_retrieval_critic(
             }
         )
         try:
-            analysis_json = ensure_sectioned_analysis(extract_first_json_object(final_raw_text))
+            analysis_json = _parse_analysis_json(final_raw_text)
         except ValueError as exc:
             raise CriticEvaluationError(str(exc)) from exc
+        _emit_retrieval_progress(progress_callback, stage_logs, final_raw_text, analysis_json)
         return {"analysis_json": analysis_json, "raw_response_text": final_raw_text, "stage_logs": stage_logs}
 
     raise CriticEvaluationError("Stage-2 retrieval critic exceeded configured tool rounds without returning final JSON.")
 
 
 def _should_escalate(stage1_analysis: dict[str, Any]) -> bool:
+    verdict = stage1_analysis.get("verdict")
+    if CONFIGS.optimization.critic_force_escalate_on_stage1_pass and verdict == "pass":
+        return True
+
     needs_escalation = stage1_analysis.get("needs_escalation")
     if isinstance(needs_escalation, bool):
         return needs_escalation
-    verdict = stage1_analysis.get("verdict")
     score = stage1_analysis.get("overall_score")
     if verdict == "pass" and isinstance(score, int | float) and float(score) >= 90.0:
         return False
     return True
 
 
-def _sample_video_frames_with_overrides(
-    eval_input: CriticEvaluationInput,
+def _build_stage1_inputs(
     *,
-    max_frames: int,
-    max_width: int,
-) -> list[SampledFrame]:
-    try:
-        return sample_video_frames_as_data_urls(
-            eval_input.video_path,
-            sample_every_sec=eval_input.sample_every_sec,
-            max_frames=max_frames,
-            max_width=max_width,
+    task: str,
+    ir: dict[str, Any],
+    event_pack: dict[str, Any],
+    xml_infos_by_body: dict[str, dict[str, Any]],
+    xml_texts_by_body: dict[str, str],
+    video_duration_sec: float | None,
+    sample_every_sec: float,
+    sampled_frames: list[SampledFrame],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    if CONFIGS.optimization.critic_stage1_prompt_variant == "full":
+        stage1_digest = build_input_digest(
+            task=task,
+            ir=ir,
+            event_pack=event_pack,
+            xml_infos_by_body=xml_infos_by_body,
+            video_duration_sec=video_duration_sec,
+            sample_every_sec=sample_every_sec,
+            max_frames=CONFIGS.optimization.critic_stage1_max_frames,
         )
-    except VideoSamplingError as exc:
-        raise CriticEvaluationError(str(exc)) from exc
+        return stage1_digest, build_critic_user_content(
+            task=task,
+            ir=ir,
+            event_pack=event_pack,
+            xml_texts_by_body=xml_texts_by_body,
+            input_digest=stage1_digest,
+            sampled_frames=sampled_frames,
+        )
+
+    stage1_digest = build_compact_input_digest(
+        task=task,
+        ir=ir,
+        event_pack=event_pack,
+        xml_infos_by_body=xml_infos_by_body,
+        video_duration_sec=video_duration_sec,
+        sample_every_sec=sample_every_sec,
+        max_frames=CONFIGS.optimization.critic_stage1_max_frames,
+    )
+    return stage1_digest, build_stage1_critic_user_content(
+        task=task,
+        input_digest=stage1_digest,
+        sampled_frames=sampled_frames,
+    )
+
+
+def _parse_analysis_json(raw_text: str) -> dict[str, Any]:
+    return ensure_sectioned_analysis(extract_first_json_object(raw_text))
 
 
 def _probe_video_duration(video_path: Path) -> float | None:
@@ -480,13 +563,33 @@ def _probe_video_duration(video_path: Path) -> float | None:
         return None
 
 
-def _sample_video_frames(eval_input: CriticEvaluationInput):
+def _sample_video_frames(
+    eval_input: CriticEvaluationInput,
+    *,
+    max_frames: int | None = None,
+    max_width: int | None = None,
+) -> list[SampledFrame]:
+    return _sample_video_frames_generic(
+        video_path=eval_input.video_path,
+        sample_every_sec=eval_input.sample_every_sec,
+        max_frames=eval_input.max_frames if max_frames is None else max_frames,
+        max_width=eval_input.max_width if max_width is None else max_width,
+    )
+
+
+def _sample_video_frames_generic(
+    *,
+    video_path: Path,
+    sample_every_sec: float,
+    max_frames: int,
+    max_width: int,
+) -> list[SampledFrame]:
     try:
         return sample_video_frames_as_data_urls(
-            eval_input.video_path,
-            sample_every_sec=eval_input.sample_every_sec,
-            max_frames=eval_input.max_frames,
-            max_width=eval_input.max_width,
+            video_path,
+            sample_every_sec=sample_every_sec,
+            max_frames=max_frames,
+            max_width=max_width,
         )
     except VideoSamplingError as exc:
         raise CriticEvaluationError(str(exc)) from exc

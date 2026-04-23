@@ -92,6 +92,26 @@ class BatchOptimizationResult:
     items: list[BatchOptimizationItemResult]
 
 
+@dataclass(slots=True)
+class RoundWorkspace:
+    round_dir: Path
+    assets_dir: Path
+    mesh_assets_dir: Path
+    ir_generated: Path
+    generation_log: Path
+    ir_run: Path
+    ir_validated: Path
+    run_result: Path
+    event_pack: Path
+    critic_json: Path
+    critic_log: Path
+    usage_json: Path
+    task_txt: Path
+    generator_feedback_txt: Path
+    generator_feedback_json: Path
+    video_path: Path
+
+
 def optimize_prompt(
     *,
     task: str,
@@ -113,15 +133,8 @@ def optimize_prompt(
     final_verdict: str | None = None
 
     for round_index in range(1, config.max_opt_rounds + 1):
-        round_dir = run_root / f"round_{round_index:02d}"
-        round_dir.mkdir(parents=True, exist_ok=True)
-        final_round_dir = round_dir
-        assets_root = Path(config.assets_dir) / run_root.name
-        round_assets_dir = assets_root / f"round_{round_index:02d}"
-        round_assets_dir.mkdir(parents=True, exist_ok=True)
-        mesh_assets_root = Path(config.mesh_assets_dir) / run_root.name
-        round_mesh_assets_dir = mesh_assets_root / f"round_{round_index:02d}"
-        round_mesh_assets_dir.mkdir(parents=True, exist_ok=True)
+        workspace = _prepare_round_workspace(run_root=run_root, config=config, round_index=round_index)
+        final_round_dir = workspace.round_dir
 
         generator_result = generate_ir_two_agent(
             task=task,
@@ -133,8 +146,8 @@ def optimize_prompt(
             temperature=config.temperature,
             reasoning_effort=config.reasoning_effort,
             normalize=True,
-            assets_dir=str(round_assets_dir),
-            mesh_assets_dir=str(round_mesh_assets_dir),
+            assets_dir=str(workspace.assets_dir),
+            mesh_assets_dir=str(workspace.mesh_assets_dir),
             force_primitive_mode=False,
             additional_requirements=(
                 None if feedback_package is None else feedback_package["generator_requirements"]
@@ -147,48 +160,38 @@ def optimize_prompt(
             hosted_prompt_id=config.hosted_prompt_id,
             hosted_prompt_version=config.hosted_prompt_version,
             mesh_texture_enabled=config.mesh_texture_enabled,
+            log_path=workspace.generation_log,
         )
 
-        ir_generated = round_dir / "ir.generated.json"
-        generation_log = round_dir / "generation.log.json"
-        ir_run = round_dir / "ir.run.json"
-        ir_validated = round_dir / "ir.validated.json"
-        run_result_path = round_dir / "run_result.json"
-        event_pack_path = round_dir / "event_pack.json"
-        critic_json = round_dir / "critic.json"
-        critic_log = round_dir / "critic.log.json"
-        usage_json = round_dir / "llm_usage.json"
-        task_path = round_dir / "task.txt"
-        refinement_path = round_dir / "generator_feedback.txt"
-        refinement_json_path = round_dir / "generator_feedback.json"
-        video_path = round_dir / "render.mp4"
-
-        task_path.write_text(task + "\n", encoding="utf-8")
+        workspace.task_txt.write_text(task + "\n", encoding="utf-8")
         if feedback_package is not None:
-            refinement_path.write_text(feedback_package["generator_requirements"] + "\n", encoding="utf-8")
-            dump_json(feedback_package, refinement_json_path)
+            workspace.generator_feedback_txt.write_text(
+                feedback_package["generator_requirements"] + "\n",
+                encoding="utf-8",
+            )
+            dump_json(feedback_package, workspace.generator_feedback_json)
 
-        dump_json(generator_result.ir_json, ir_generated)
-        dump_json(_generation_log_payload(generator_result, config), generation_log)
+        dump_json(generator_result.ir_json, workspace.ir_generated)
+        dump_json(_generation_log_payload(generator_result), workspace.generation_log)
 
         run_payload = _prepare_run_payload(
             generator_result.ir_json,
             backend=config.backend,
-            video_path=video_path,
+            video_path=workspace.video_path,
         )
-        dump_json(run_payload, ir_run)
+        dump_json(run_payload, workspace.ir_run)
 
         validated_program = parse_sanitize_validate(run_payload, normalize=True)
-        dump_json(validated_program.model_dump(mode="json"), ir_validated)
+        dump_json(validated_program.model_dump(mode="json"), workspace.ir_validated)
         previous_ir_json = validated_program.model_dump(mode="json")
         previous_xml_texts_by_body = _load_articulated_asset_texts_by_body(validated_program)
 
         with _simulation_file_lock():
             raw_result = run_rigid_ir(validated_program, normalize=False)
-        dump_json(raw_result, run_result_path)
+        dump_json(raw_result, workspace.run_result)
 
         event_pack = build_llm_event_pack(validated_program, raw_result)
-        dump_json(event_pack, event_pack_path)
+        dump_json(event_pack, workspace.event_pack)
 
         try:
             critic_result = evaluate_prompt_event_video(
@@ -196,9 +199,9 @@ def optimize_prompt(
                 model=config.critic_model or config.model,
                 eval_input=CriticEvaluationInput(
                     task=task,
-                    ir_path=ir_validated,
-                    event_pack_path=event_pack_path,
-                    video_path=video_path,
+                    ir_path=workspace.ir_validated,
+                    event_pack_path=workspace.event_pack,
+                    video_path=workspace.video_path,
                     xml_paths_by_body=_resolve_articulated_asset_paths_by_body(validated_program),
                     sample_every_sec=config.sample_every_sec,
                     max_frames=config.max_frames,
@@ -209,6 +212,7 @@ def optimize_prompt(
                 hosted_prompt_id=config.critic_hosted_prompt_id,
                 hosted_prompt_version=config.critic_hosted_prompt_version,
                 prompt_variant=config.critic_prompt_variant,
+                log_path=workspace.critic_log,
             )
             analysis_json = critic_result.analysis_json
             critic_log_payload = {
@@ -231,9 +235,9 @@ def optimize_prompt(
                 "stage_logs": [],
             }
 
-        dump_json(analysis_json, critic_json)
-        dump_json(critic_log_payload, critic_log)
-        dump_json(_round_usage_payload(generator_result, critic_log_payload), usage_json)
+        dump_json(analysis_json, workspace.critic_json)
+        dump_json(critic_log_payload, workspace.critic_log)
+        dump_json(_round_usage_payload(generator_result, critic_log_payload), workspace.usage_json)
 
         verdict = analysis_json.get("verdict")
         passed = verdict == "pass"
@@ -243,7 +247,7 @@ def optimize_prompt(
                 round_index=round_index,
                 verdict=final_verdict,
                 passed=passed,
-                round_dir=str(round_dir),
+                round_dir=str(workspace.round_dir),
             )
         )
         if passed:
@@ -251,7 +255,7 @@ def optimize_prompt(
                 task=task,
                 status="passed",
                 rounds=rounds,
-                final_round_dir=str(round_dir),
+                final_round_dir=str(workspace.round_dir),
                 final_verdict=final_verdict,
             )
 
@@ -287,24 +291,7 @@ def _run_batch_task(
             rounds=result.rounds,
         )
     except Exception as exc:  # noqa: BLE001
-        failure_payload = {
-            "case_id": spec.case_id,
-            "task": spec.task,
-            "status": "failed",
-            "error_type": type(exc).__name__,
-            "error": str(exc),
-            "traceback": traceback.format_exc(),
-        }
-        dump_json(failure_payload, case_root / "failure.json")
-        return BatchOptimizationItemResult(
-            case_id=spec.case_id,
-            task=spec.task,
-            status="failed",
-            final_round_dir=str(case_root),
-            final_verdict=None,
-            rounds=[],
-            error=str(exc),
-        )
+        return _batch_failure_result(spec=spec, case_root=case_root, exc=exc)
 
 
 def optimize_prompts_batch(
@@ -343,24 +330,7 @@ def optimize_prompts_batch(
                 spec = task_specs[index]
                 case_root = run_root / spec.case_id
                 case_root.mkdir(parents=True, exist_ok=True)
-                failure_payload = {
-                    "case_id": spec.case_id,
-                    "task": spec.task,
-                    "status": "failed",
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                    "traceback": traceback.format_exc(),
-                }
-                dump_json(failure_payload, case_root / "failure.json")
-                item = BatchOptimizationItemResult(
-                    case_id=spec.case_id,
-                    task=spec.task,
-                    status="failed",
-                    final_round_dir=str(case_root),
-                    final_verdict=None,
-                    rounds=[],
-                    error=str(exc),
-                )
+                item = _batch_failure_result(spec=spec, case_root=case_root, exc=exc)
             ordered_results[index] = item
 
     items = [item for item in ordered_results if item is not None]
@@ -392,6 +362,62 @@ def _resolve_run_root(output_root: str | None) -> Path:
         path = Path("agent/runs/opt") / timestamp
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _prepare_round_workspace(*, run_root: Path, config: OptimizationConfig, round_index: int) -> RoundWorkspace:
+    round_name = f"round_{round_index:02d}"
+    round_dir = run_root / round_name
+    round_dir.mkdir(parents=True, exist_ok=True)
+
+    assets_dir = Path(config.assets_dir) / run_root.name / round_name
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    mesh_assets_dir = Path(config.mesh_assets_dir) / run_root.name / round_name
+    mesh_assets_dir.mkdir(parents=True, exist_ok=True)
+
+    return RoundWorkspace(
+        round_dir=round_dir,
+        assets_dir=assets_dir,
+        mesh_assets_dir=mesh_assets_dir,
+        ir_generated=round_dir / "ir.generated.json",
+        generation_log=round_dir / "generation.log.json",
+        ir_run=round_dir / "ir.run.json",
+        ir_validated=round_dir / "ir.validated.json",
+        run_result=round_dir / "run_result.json",
+        event_pack=round_dir / "event_pack.json",
+        critic_json=round_dir / "critic.json",
+        critic_log=round_dir / "critic.log.json",
+        usage_json=round_dir / "llm_usage.json",
+        task_txt=round_dir / "task.txt",
+        generator_feedback_txt=round_dir / "generator_feedback.txt",
+        generator_feedback_json=round_dir / "generator_feedback.json",
+        video_path=round_dir / "render.mp4",
+    )
+
+
+def _batch_failure_result(
+    *,
+    spec: OptimizationTaskSpec,
+    case_root: Path,
+    exc: Exception,
+) -> BatchOptimizationItemResult:
+    failure_payload = {
+        "case_id": spec.case_id,
+        "task": spec.task,
+        "status": "failed",
+        "error_type": type(exc).__name__,
+        "error": str(exc),
+        "traceback": traceback.format_exc(),
+    }
+    dump_json(failure_payload, case_root / "failure.json")
+    return BatchOptimizationItemResult(
+        case_id=spec.case_id,
+        task=spec.task,
+        status="failed",
+        final_round_dir=str(case_root),
+        final_verdict=None,
+        rounds=[],
+        error=str(exc),
+    )
 
 
 def _prepare_run_payload(
@@ -436,7 +462,7 @@ def _load_articulated_asset_texts_by_body(program) -> dict[str, str]:
     return texts_by_body
 
 
-def _generation_log_payload(result, config: OptimizationConfig) -> dict[str, Any]:
+def _generation_log_payload(result) -> dict[str, Any]:
     xml_results_by_body = result.xml_results_by_body
     mesh_results_by_body = result.mesh_results_by_body
     return {
@@ -493,9 +519,7 @@ def _generator_usage_summary(result) -> dict[str, Any]:
 def _round_usage_payload(generator_result, critic_log_payload: dict[str, Any]) -> dict[str, Any]:
     generator_usage = _generator_usage_summary(generator_result)
     critic_stage_logs = critic_log_payload.get("stage_logs")
-    critic_entries = []
-    if isinstance(critic_stage_logs, list):
-        critic_entries = [log.get("usage") for log in critic_stage_logs if isinstance(log, dict)]
+    critic_entries = _critic_usage_entries(critic_stage_logs)
     return {
         "generator": generator_usage,
         "critic": {
@@ -510,6 +534,12 @@ def _round_usage_payload(generator_result, critic_log_payload: dict[str, Any]) -
             ]
         ),
     }
+
+
+def _critic_usage_entries(stage_logs: Any) -> list[dict[str, Any] | None]:
+    if not isinstance(stage_logs, list):
+        return []
+    return [log.get("usage") for log in stage_logs if isinstance(log, dict)]
 
 
 def _build_synthetic_critic_analysis(

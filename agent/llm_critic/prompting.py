@@ -46,6 +46,7 @@ Your job:
 - In addition to correctness, consider IR conciseness (but not at the expense of clarity). If multiple actions can be merged into one equivalent multi-entity action without changing behavior, prefer that as the cleaner formulation. This is only a suggestion, but should not be used to determine success vs failure.
 - When the task leaves scene composition open-ended, provide suggestions leading to visible motion, meaningful contact, and noticeable evolution over time. Do not treat this as hard requirement and use it to judge success.
 - For deformable or soft-body tasks, evaluate both whole-body motion and visible deformation. Use deformable observation fields such as bounding-box changes and vertex-displacement summaries when present, and do not judge soft bodies by rigid-body pose stability alone.
+- Observation `contacts.other_entities` values are derived from AABB-overlap heuristics for both rigid and deformable bodies. Treat them only as coarse spatial-overlap signals. They are neither sufficient nor necessary evidence of true physical contact, so do not use them alone to prove or disprove contact success.
 - Base all suggested fixes on the provided generator tool-library capability only.
 - Do not suggest unavailable controllers, target-tracking systems, sensors, or new runtime abilities that the current tool library cannot express.
 - Every item in `priority_fixes` must be implementable through the provided tool library and current IR/XML path.
@@ -131,6 +132,7 @@ CRITIC_RETRIEVAL_SYSTEM_PROMPT = """You are a stage-2 simulation critic for robo
 You already have a compact digest and a stage-1 critic result. Use tools to retrieve only the extra evidence you need.
 Prefer the smallest possible retrieval needed to produce a reliable final judgement.
 Do not request large irrelevant IR or event-pack slices.
+Observation `contacts.other_entities` values are derived from AABB-overlap heuristics for both rigid and deformable bodies. They are neither sufficient nor necessary evidence of true physical contact; use them only as weak proximity signals and cross-check them against video, motion, and deformation evidence.
 Return the same final JSON schema as the main critic:
 {
   "verdict": "pass" | "partial" | "fail",
@@ -170,23 +172,19 @@ Use only provided evidence and tool outputs. Do not invent unseen details.
 
 
 def build_critic_prompt_cache_key() -> str:
-    digest = hashlib.sha1(CRITIC_SYSTEM_PROMPT.encode("utf-8")).hexdigest()[:16]
-    return f"rigid_critic:{digest}"
+    return _build_prompt_cache_key("rigid_critic", CRITIC_SYSTEM_PROMPT)
 
 
 def build_compact_critic_prompt_cache_key() -> str:
-    digest = hashlib.sha1((CRITIC_SYSTEM_PROMPT + "\ncompact").encode("utf-8")).hexdigest()[:16]
-    return f"rigid_critic_compact:{digest}"
+    return _build_prompt_cache_key("rigid_critic_compact", CRITIC_SYSTEM_PROMPT, suffix="compact")
 
 
 def build_stage1_critic_prompt_cache_key() -> str:
-    digest = hashlib.sha1((CRITIC_STAGE1_SYSTEM_PROMPT + "\nstage1").encode("utf-8")).hexdigest()[:16]
-    return f"rigid_critic_stage1:{digest}"
+    return _build_prompt_cache_key("rigid_critic_stage1", CRITIC_STAGE1_SYSTEM_PROMPT, suffix="stage1")
 
 
 def build_stage2_critic_prompt_cache_key() -> str:
-    digest = hashlib.sha1((CRITIC_RETRIEVAL_SYSTEM_PROMPT + "\nstage2").encode("utf-8")).hexdigest()[:16]
-    return f"rigid_critic_stage2:{digest}"
+    return _build_prompt_cache_key("rigid_critic_stage2", CRITIC_RETRIEVAL_SYSTEM_PROMPT, suffix="stage2")
 
 
 def build_critic_hosted_prompt_ref(
@@ -211,49 +209,23 @@ def build_critic_user_content(
     input_digest: dict[str, Any],
     sampled_frames: list[SampledFrame],
 ) -> list[dict[str, Any]]:
-    if xml_texts_by_body:
-        rendered_xml_text = json.dumps(xml_texts_by_body, ensure_ascii=False, indent=2)
-    else:
-        rendered_xml_text = "<none provided>"
-    content: list[dict[str, Any]] = [
-        {
-            "type": "input_text",
-            "text": (
-                "Evaluate whether the simulation output satisfies the task. "
-                "The digest includes the generator tool-library capability summary. "
-                "You must constrain fixes to that capability set."
-            ),
-        },
-        {"type": "input_text", "text": f"Task prompt:\n{task}"},
-        {"type": "input_text", "text": f"Raw IR JSON:\n{json.dumps(ir, ensure_ascii=False, indent=2)}"},
-        {"type": "input_text", "text": f"Raw articulated asset texts by body (optional):\n{rendered_xml_text}"},
-        {"type": "input_text", "text": f"Raw event-pack JSON:\n{json.dumps(event_pack, ensure_ascii=False, indent=2)}"},
-        {
-            "type": "input_text",
-            "text": (
-                "Input digest (supporting summary and metadata, not the primary grading target):\n"
-                f"{json.dumps(input_digest, ensure_ascii=False, indent=2)}"
-            ),
-        },
-        {
-            "type": "input_text",
-            "text": (
-                "Use parameter notes, parameter relationship notes, and schema descriptions when deciding which field "
-                "is actually responsible for a major problem. The following images are sampled frames in chronological order."
-            ),
-        },
-    ]
-    for frame in sampled_frames:
-        content.append({"type": "input_text", "text": f"Frame {frame.index + 1} / {len(sampled_frames)}"})
-        content.append({"type": "input_image", "image_url": frame.data_url})
-    content.append(
-        {
-            "type": "input_text",
-            "text": (
-                "Now return the required JSON object using evidence from task, event-pack, and video frames. "
-                "Focus on the main blockers, but for each main blocker provide a detailed, field-level modification."
-            ),
-        }
+    content = _build_main_critic_user_content(
+        intro_text=(
+            "Evaluate whether the simulation output satisfies the task. "
+            "The digest includes the generator tool-library capability summary. "
+            "You must constrain fixes to that capability set."
+        ),
+        digest_label="Input digest (supporting summary and metadata, not the primary grading target)",
+        post_digest_text=(
+            "Use parameter notes, parameter relationship notes, and schema descriptions when deciding which field "
+            "is actually responsible for a major problem. The following images are sampled frames in chronological order."
+        ),
+        digest=input_digest,
+        task=task,
+        ir=ir,
+        event_pack=event_pack,
+        xml_texts_by_body=xml_texts_by_body,
+        sampled_frames=sampled_frames,
     )
     return content
 
@@ -267,53 +239,81 @@ def build_compact_critic_user_content(
     input_digest: dict[str, Any],
     sampled_frames: list[SampledFrame],
 ) -> list[dict[str, Any]]:
-    if xml_texts_by_body:
-        rendered_xml_text = json.dumps(xml_texts_by_body, ensure_ascii=False, indent=2)
-    else:
-        rendered_xml_text = "<none provided>"
+    content = _build_main_critic_user_content(
+        intro_text=(
+            "Evaluate whether the simulation output satisfies the task. "
+            "Use the compact digest as the main structured context and stay within the provided tool-library boundary."
+        ),
+        digest_label="Compact input digest (compact capability summary plus compact metadata)",
+        post_digest_text="The following images are sampled frames in chronological order.",
+        digest=input_digest,
+        task=task,
+        ir=ir,
+        event_pack=event_pack,
+        xml_texts_by_body=xml_texts_by_body,
+        sampled_frames=sampled_frames,
+    )
+    return content
+
+
+def _build_prompt_cache_key(prefix: str, prompt_text: str, *, suffix: str | None = None) -> str:
+    cache_material = prompt_text if suffix is None else f"{prompt_text}\n{suffix}"
+    digest = hashlib.sha1(cache_material.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}:{digest}"
+
+
+def _build_main_critic_user_content(
+    *,
+    intro_text: str,
+    digest_label: str,
+    post_digest_text: str,
+    digest: dict[str, Any],
+    task: str,
+    ir: dict[str, Any],
+    event_pack: dict[str, Any],
+    xml_texts_by_body: dict[str, str],
+    sampled_frames: list[SampledFrame],
+) -> list[dict[str, Any]]:
     content: list[dict[str, Any]] = [
-        {
-            "type": "input_text",
-            "text": (
-                "Evaluate whether the simulation output satisfies the task. "
-                "Use the compact digest as the main structured context and stay within the provided tool-library boundary."
-            ),
-        },
+        {"type": "input_text", "text": intro_text},
         {"type": "input_text", "text": f"Task prompt:\n{task}"},
         {"type": "input_text", "text": f"Raw IR JSON:\n{json.dumps(ir, ensure_ascii=False, indent=2)}"},
-        {"type": "input_text", "text": f"Raw articulated asset texts by body (optional):\n{rendered_xml_text}"},
+        {
+            "type": "input_text",
+            "text": f"Raw articulated asset texts by body (optional):\n{_render_xml_texts(xml_texts_by_body)}",
+        },
         {"type": "input_text", "text": f"Raw event-pack JSON:\n{json.dumps(event_pack, ensure_ascii=False, indent=2)}"},
         {
             "type": "input_text",
-            "text": "Compact input digest (compact capability summary plus compact metadata):\n"
-            + json.dumps(input_digest, ensure_ascii=False, indent=2),
+            "text": f"{digest_label}:\n{json.dumps(digest, ensure_ascii=False, indent=2)}",
         },
-        {
-            "type": "input_text",
-            "text": "The following images are sampled frames in chronological order.",
-        },
+        {"type": "input_text", "text": post_digest_text},
     ]
-    for frame in sampled_frames:
-        content.append({"type": "input_text", "text": f"Frame {frame.index + 1} / {len(sampled_frames)}"})
-        content.append({"type": "input_image", "image_url": frame.data_url})
-    content.append(
-        {
-            "type": "input_text",
-            "text": (
-                "Now return the required JSON object using evidence from task, event-pack, and video frames. "
-                "Focus on the main blockers, but for each main blocker provide a detailed, field-level modification."
-            ),
-        }
-    )
+    _append_sampled_frames(content, sampled_frames)
+    content.append({"type": "input_text", "text": _FINAL_CRITIC_INSTRUCTION})
     return content
+
+
+def _render_xml_texts(xml_texts_by_body: dict[str, str]) -> str:
+    return json.dumps(xml_texts_by_body, ensure_ascii=False, indent=2) if xml_texts_by_body else "<none provided>"
+
+
+def _append_sampled_frames(content: list[dict[str, Any]], sampled_frames: list[SampledFrame]) -> None:
+    frame_count = len(sampled_frames)
+    for frame in sampled_frames:
+        content.append({"type": "input_text", "text": f"Frame {frame.index + 1} / {frame_count}"})
+        content.append({"type": "input_image", "image_url": frame.data_url})
+
+
+_FINAL_CRITIC_INSTRUCTION = (
+    "Now return the required JSON object using evidence from task, event-pack, and video frames. "
+    "Focus on the main blockers, but for each main blocker provide a detailed, field-level modification."
+)
 
 
 def build_stage1_critic_user_content(
     *,
     task: str,
-    ir: dict[str, Any],
-    event_pack: dict[str, Any],
-    xml_texts_by_body: dict[str, str],
     input_digest: dict[str, Any],
     sampled_frames: list[SampledFrame],
 ) -> list[dict[str, Any]]:
@@ -335,9 +335,7 @@ def build_stage1_critic_user_content(
             "text": "Sampled frames available in chronological order below.",
         },
     ]
-    for frame in sampled_frames:
-        content.append({"type": "input_text", "text": f"Frame {frame.index + 1} / {len(sampled_frames)}"})
-        content.append({"type": "input_image", "image_url": frame.data_url})
+    _append_sampled_frames(content, sampled_frames)
     content.append(
         {
             "type": "input_text",
@@ -371,9 +369,7 @@ def build_stage2_retrieval_user_content(
         {"type": "input_text", "text": "Stage-1 analysis:\n" + json.dumps(stage1_analysis, ensure_ascii=False, indent=2)},
         {"type": "input_text", "text": "Sampled frames available in chronological order below."},
     ]
-    for frame in sampled_frames:
-        content.append({"type": "input_text", "text": f"Frame {frame.index + 1} / {len(sampled_frames)}"})
-        content.append({"type": "input_image", "image_url": frame.data_url})
+    _append_sampled_frames(content, sampled_frames)
     content.append(
         {
             "type": "input_text",

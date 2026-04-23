@@ -181,6 +181,16 @@ def _build_constraints(
             "multiple bodies instead of generating near-duplicate mesh assets."
         ),
         "mesh_local_frame_policy": MESH_LOCAL_FRAME_POLICY,
+        "mesh_runtime_path_policy": (
+            "For generated mesh assets, `bodies[].shape.file` must use the canonical runtime mesh path from "
+            "`generate_mesh_asset` (`mesh_path`, usually under `processed/repaired*.obj`). Do not point the main IR "
+            "to `textured_mesh_path`."
+        ),
+        "mesh_texture_branch_policy": (
+            "If texture generation is enabled, the textured OBJ branch (`textured/model.obj`, MTL, base color, and "
+            "related texture images) is an auxiliary texture asset branch only. It is not the runtime geometry input "
+            "for the main simulation IR."
+        ),
         "mesh_scale_policy": MESH_SCALE_POLICY,
         "mesh_bbox_policy": MESH_BBOX_POLICY,
         "articulated_body_mesh_policy": ARTICULATED_BODY_MESH_POLICY,
@@ -298,6 +308,11 @@ def _build_parameter_notes() -> dict[str, str]:
             "this also changes the physical tetrahedralization size because the geometry itself is rescaled before "
             "remeshing and TetGen. When mesh bounding-box metadata is available, use that `bbox_size` evidence to "
             "estimate `shape.scale` instead of guessing."
+        ),
+        "bodies[].shape.file": (
+            "For generated mesh bodies, the main runtime IR must point `shape.file` to the canonical repaired mesh "
+            "path returned as `mesh_path` (typically under `processed/repaired*.obj`). Do not use `textured/model.obj` "
+            "as the main runtime mesh, even when texture generation succeeds."
         ),
         "bodies[].fixed": (
             "Whether a rigid body is fixed in the world. Use this for rigid primitive, rigid mesh, or URDF obstacles, "

@@ -23,6 +23,14 @@ Texture-specific scripts are split by intent:
 - `run_mesh_meshy_texture_suite.sh`: standalone textured mesh generation / repair / render validation
 - `run_opt_deformable_texture_suite.sh`: full task optimization with deformable textured bodies
 
+`run_opt_deformable_texture_suite.sh` inherits batch parallelism from [agent/configs.py](../configs.py) via `CONFIGS.optimization.max_parallel` and emits:
+
+- `summary.json`
+- `openai_usage_summary.json`
+- `openai_usage_summary.tsv`
+
+If a case leaves behind an empty `round_*` directory, the script now skips the compile step for that round instead of failing a second time on a missing `ir.validated.json`.
+
 ## Generated Artifact Roots
 
 Current artifact roots:

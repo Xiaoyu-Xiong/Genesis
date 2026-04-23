@@ -7,6 +7,7 @@ from typing import Literal
 @dataclass(slots=True, frozen=True)
 class RuntimeConfigs:
     sim_dt: float = 0.01
+    sim_substeps: int = 1
     render_every_n_steps: int = 3
     render_res: tuple[int, int] = (640, 480)
 
@@ -37,14 +38,29 @@ class DeformableConfigs:
     fem_friction_mu: float = 0.3
     fem_contact_resistance: float | None = None
     fem_hessian_invariant: bool = False
+    ipc_newton_max_iterations: int | None = None
+    ipc_newton_min_iterations: int | None = 3
+    ipc_newton_tolerance: float | None = 0.02
+    ipc_newton_ccd_tolerance: float | None = 0.5
+    ipc_newton_use_adaptive_tolerance: bool | None = True
+    ipc_newton_translation_tolerance: float | None = 0.05
+    ipc_newton_semi_implicit_enable: bool | None = None
+    ipc_newton_semi_implicit_beta_tolerance: float | None = None
+    ipc_n_linesearch_iterations: int | None = 16
+    ipc_linesearch_report_energy: bool | None = None
+    ipc_linear_system_solver: Literal["linear_pcg", "direct"] | None = None
+    ipc_linear_system_tolerance: float | None = None
+    ipc_contact_enable: bool | None = None
     ipc_contact_d_hat: float = 0.002
     ipc_contact_friction_enable: bool = True
     ipc_contact_resistance: float = 1.5e5
-    ipc_contact_eps_velocity: float = 0.01
+    ipc_contact_eps_velocity: float = 0.02
     ipc_contact_constitution: Literal["ipc", "isometric"] = "ipc"
     ipc_collision_detection_method: Literal["linear_bvh", "spatial_hash"] = "linear_bvh"
-    ipc_constraint_strength_translation: float = 0.7
-    ipc_constraint_strength_rotation: float = 0.3
+    ipc_cfl_enable: bool | None = True
+    ipc_sanity_check_enable: bool | None = False
+    ipc_constraint_strength_translation: float = 0.5
+    ipc_constraint_strength_rotation: float = 0.2
     ipc_enable_rigid_ground_contact: bool = False
     ipc_enable_rigid_rigid_contact: bool = True
     ipc_two_way_coupling: bool = True
@@ -54,7 +70,7 @@ class DeformableConfigs:
 
 @dataclass(slots=True, frozen=True)
 class OptimizationConfigs:
-    model: str = "gpt-5.4 mini"
+    model: str = "gpt-5.4-mini"
     critic_model: str = ""
     reasoning_effort: str = "xhigh"
     critic_reasoning_effort: str = ""
@@ -62,11 +78,12 @@ class OptimizationConfigs:
     prompt_cache_retention: Literal["in_memory", "24h"] = "24h"
     critic_two_stage: bool = True
     critic_stage1_prompt_variant: Literal["compact", "full"] = "compact"
-    critic_stage1_max_frames: int = 6
-    critic_stage1_max_width: int = 384
-    critic_stage1_reasoning_effort: str = "medium"
-    critic_stage2_tool_max_rounds: int = 6
-    max_parallel: int = 10
+    critic_stage1_max_frames: int = 24
+    critic_stage1_max_width: int = 300
+    critic_stage1_reasoning_effort: str = "xhigh"
+    critic_force_escalate_on_stage1_pass: bool = True
+    critic_stage2_tool_max_rounds: int = 10
+    max_parallel: int = 3
     backend: str = "gpu"
     max_opt_rounds: int = 12
     max_attempts: int = 20

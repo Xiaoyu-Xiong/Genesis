@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from ...configs import CONFIGS
@@ -40,6 +41,14 @@ def sanitize_payload(payload: dict[str, object]) -> dict[str, object]:
                 sanitized_bodies.append(body_any)
                 continue
             body = dict(body_any)
+            shape = body.get("shape")
+            if isinstance(shape, dict):
+                shape = dict(shape)
+                if shape.get("kind") == "mesh":
+                    file_path = shape.get("file")
+                    if isinstance(file_path, str) and file_path.strip():
+                        shape["file"] = _rewrite_generated_runtime_mesh_path(file_path)
+                body["shape"] = shape
             if body.get("simulation_kind") == "deformable":
                 collision = body.get("collision")
                 if isinstance(collision, dict):
@@ -80,3 +89,11 @@ def sanitize_payload(payload: dict[str, object]) -> dict[str, object]:
 
     normalized["actions"] = sanitized
     return normalized
+
+
+def _rewrite_generated_runtime_mesh_path(file_path: str) -> str:
+    path = Path(file_path)
+    if path.name != "model.obj" or path.parent.name != "textured":
+        return file_path
+    candidate = path.parent.parent / "processed" / "repaired.obj"
+    return candidate.as_posix() if candidate.exists() else file_path

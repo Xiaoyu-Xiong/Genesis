@@ -74,6 +74,7 @@ def create_runtime_context(gs: Any, program: RigidIR) -> RuntimeContext:
     scene_kwargs: dict[str, Any] = {
         "sim_options": gs.options.SimOptions(
             dt=program.scene.sim.dt,
+            substeps=CONFIGS.runtime.sim_substeps,
             gravity=tuple(program.scene.sim.gravity),
         ),
         "viewer_options": viewer_options,
@@ -101,12 +102,27 @@ def create_runtime_context(gs: Any, program: RigidIR) -> RuntimeContext:
         else:
             scene_kwargs["fem_options"] = gs.options.FEMOptions()
             scene_kwargs["coupler_options"] = gs.options.IPCCouplerOptions(
+                newton_max_iterations=CONFIGS.deformable.ipc_newton_max_iterations,
+                newton_min_iterations=CONFIGS.deformable.ipc_newton_min_iterations,
+                newton_tolerance=CONFIGS.deformable.ipc_newton_tolerance,
+                newton_ccd_tolerance=CONFIGS.deformable.ipc_newton_ccd_tolerance,
+                newton_use_adaptive_tolerance=CONFIGS.deformable.ipc_newton_use_adaptive_tolerance,
+                newton_translation_tolerance=CONFIGS.deformable.ipc_newton_translation_tolerance,
+                newton_semi_implicit_enable=CONFIGS.deformable.ipc_newton_semi_implicit_enable,
+                newton_semi_implicit_beta_tolerance=CONFIGS.deformable.ipc_newton_semi_implicit_beta_tolerance,
+                n_linesearch_iterations=CONFIGS.deformable.ipc_n_linesearch_iterations,
+                linesearch_report_energy=CONFIGS.deformable.ipc_linesearch_report_energy,
+                linear_system_solver=CONFIGS.deformable.ipc_linear_system_solver,
+                linear_system_tolerance=CONFIGS.deformable.ipc_linear_system_tolerance,
+                contact_enable=CONFIGS.deformable.ipc_contact_enable,
                 contact_d_hat=CONFIGS.deformable.ipc_contact_d_hat,
                 contact_friction_enable=CONFIGS.deformable.ipc_contact_friction_enable,
                 contact_resistance=CONFIGS.deformable.ipc_contact_resistance,
                 contact_eps_velocity=CONFIGS.deformable.ipc_contact_eps_velocity,
                 contact_constitution=CONFIGS.deformable.ipc_contact_constitution,
                 collision_detection_method=CONFIGS.deformable.ipc_collision_detection_method,
+                cfl_enable=CONFIGS.deformable.ipc_cfl_enable,
+                sanity_check_enable=CONFIGS.deformable.ipc_sanity_check_enable,
                 constraint_strength_translation=CONFIGS.deformable.ipc_constraint_strength_translation,
                 constraint_strength_rotation=CONFIGS.deformable.ipc_constraint_strength_rotation,
                 enable_rigid_ground_contact=CONFIGS.deformable.ipc_enable_rigid_ground_contact,

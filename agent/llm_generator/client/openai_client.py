@@ -10,7 +10,6 @@ from urllib import error, request
 from ...configs import CONFIGS
 from .responses_format import (
     assistant_message_from_responses,
-    coerce_content_to_text,
     convert_messages_to_responses_input,
     convert_tool_choice,
     convert_tools,
@@ -53,36 +52,6 @@ class OpenAIResponsesClient:
             )
         base_url = os.getenv(base_url_env, "https://api.openai.com/v1")
         return cls(api_key=api_key, base_url=base_url.rstrip("/"), timeout_sec=timeout_sec)
-
-    def responses_json(
-        self,
-        *,
-        model: str,
-        system_prompt: str,
-        user_prompt: str,
-        temperature: float | None = None,
-        reasoning_effort: str | None = None,
-        prompt: dict[str, object] | None = None,
-        prompt_cache_key: str | None = None,
-        prompt_cache_retention: str | None = None,
-    ) -> str:
-        message = self.responses_completion(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-            prompt=prompt,
-            prompt_cache_key=prompt_cache_key,
-            prompt_cache_retention=prompt_cache_retention,
-            response_format={"type": "json_object"},
-        )
-        text = coerce_content_to_text(message.get("content"))
-        if not text:
-            raise OpenAIRequestError("OpenAI response contained empty content.")
-        return text
 
     def responses_completion(
         self,

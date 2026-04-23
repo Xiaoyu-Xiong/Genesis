@@ -12,7 +12,7 @@ from ..ir_schema import (
     SetTorqueActionIR,
     StepActionIR,
 )
-from .helpers import contact_other_entities, count_contacts, get_floating_base_root_state, to_serializable
+from .helpers import get_floating_base_root_state, observed_contact_summary, to_serializable
 from .helpers import get_deformable_observation_state
 from .models import ActuatorBinding, RuntimeContext, RuntimeState
 from .selectors import resolve_dofs_idx_local, resolve_links_idx
@@ -178,16 +178,13 @@ def dispatch_action(action_index: int, action: Any, runtime: RuntimeContext, sta
                 "state": state_dict,
             }
 
-            if action.include_contacts:
-                contact_data = target_entity.get_contacts()
-                event["contacts"] = {
-                    "count": count_contacts(contact_data),
-                    "other_entities": contact_other_entities(
-                        contact_data,
-                        target_entity_name=entity_name,
-                        scene_entities=runtime.entities,
-                    ),
-                }
+            event["contacts"] = observed_contact_summary(
+                target_entity_name=entity_name,
+                target_entity=target_entity,
+                scene_entities=runtime.entities,
+                deformable_observation_state=deformable_observation_state,
+                include_count=action.include_contacts,
+            )
 
             state.events.append(event)
         return

@@ -53,9 +53,19 @@ echo "Run root: $RUN_ROOT"
 echo "Python: ${PYTHON_CMD[*]}"
 
 cat > "$TASK_FILE" <<'CASES'
-textured_duck_plate_press|Create a scene where around 10 identical medium-sized soft rubber ducks with bright toy-like texture are compressed by a descending rigid plate, showing visible squashing, render 10s behavior
+traffic_barrel_compactor_lane|Create a scene where multiple identical soft orange traffic barrels with reflective lane markings are crowded into a box and compressed by a moving rigid compactor over 10s
 
-cap_pull_and_release|Create a scene where a soft textured baseball cap is pulled outward by moving rigid blockers and then released, making the brim and crown visibly deform over 10s
+watermelon_panel_squeeze|Create a scene where several identical soft striped watermelons are trapped on a low platform and squeezed sideways by two rigid panels, showing obvious bulging, flattening, and pileup over 10s
+
+toy_bunny_gate_jam|Create a scene where several identical soft toy bunnies with bright painted details are compressed by a rigid plate over 10s
+
+spray_bottle_crate_press|Create a scene where a group of identical soft translucent spray bottles with label texture is partially boxed in and compressed from above by a rigid plate, showing visible buckling and recovery over 10s
+
+striped_candy_hopper_crush|Create a playful scene where many identical soft striped candy pieces slide into a shallow hopper and are then compacted by a rigid pusher, producing clear deformation, crowding, and surface texture motion over 10s
+
+wooden_barrel_sweep_stack|Create a scene where several identical soft wooden barrels with visible wood grain and metal band texture are swept into a corner by a heavy rigid block, causing rolling, squashing, and pile reshaping over 10s
+
+banana_bunch_press_array|Create a scene where several identical soft bananas with readable yellow peel texture are arranged in rows and compressed by a descending rigid frame, creating obvious bending, flattening, and lateral spreading over 10s
 CASES
 
 SUMMARY_JSON="$RUN_ROOT/summary.json"
@@ -65,7 +75,6 @@ opt_cmd=(
   --tasks-file "$TASK_FILE"
   --out-dir "$RUN_ROOT"
   --out "$SUMMARY_JSON"
-  --max-parallel 2
   --mesh-texture-enabled
 )
 
@@ -80,6 +89,10 @@ run_cmd "${PYTHON_CMD[@]}" agent/scripts/summarize_openai_usage.py \
 
 while IFS= read -r round_dir; do
   [[ -z "$round_dir" ]] && continue
+  if [[ ! -f "$round_dir/ir.validated.json" ]]; then
+    echo "!! skipping compile for $round_dir because ir.validated.json is missing"
+    continue
+  fi
   case_id="$(basename "$(dirname "$round_dir")")"
   echo "==> [$case_id] compile $(basename "$round_dir")"
   run_cmd "${PYTHON_CMD[@]}" -m agent.cli compile \

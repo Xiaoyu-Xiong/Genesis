@@ -1,12 +1,8 @@
 from __future__ import annotations
 
 import base64
-import json
-import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 
 class VideoSamplingError(RuntimeError):
@@ -23,83 +19,12 @@ def _encode_jpeg_data_url(raw: bytes) -> str:
     return f"data:image/jpeg;base64,{base64.b64encode(raw).decode('ascii')}"
 
 
-def _run_cmd(cmd: list[str]) -> str:
+def _import_cv2():
     try:
-        proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
-    except FileNotFoundError as exc:
-        raise VideoSamplingError(f"Command not found: {cmd[0]}") from exc
-    except subprocess.CalledProcessError as exc:
-        stderr = (exc.stderr or "").strip()
-        stdout = (exc.stdout or "").strip()
-        detail = stderr if stderr else stdout
-        raise VideoSamplingError(f"Command failed: {' '.join(cmd)}\n{detail}") from exc
-    return (proc.stdout or "").strip()
-
-
-def _ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
-
-
-def _probe_video_duration_ffprobe(video_path: Path) -> float:
-    out = _run_cmd(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "json",
-            str(video_path),
-        ]
-    )
-    try:
-        parsed = json.loads(out)
-        duration = float(parsed["format"]["duration"])
+        import cv2
     except Exception as exc:  # noqa: BLE001
-        raise VideoSamplingError(f"Unable to parse duration from ffprobe output: {out[:500]}") from exc
-    if duration <= 0:
-        raise VideoSamplingError(f"Invalid video duration: {duration}")
-    return duration
-
-
-def _sample_frames_ffmpeg(
-    video_path: Path,
-    *,
-    sample_every_sec: float,
-    max_frames: int,
-    max_width: int,
-) -> list[SampledFrame]:
-    fps = 1.0 / sample_every_sec
-
-    with TemporaryDirectory(prefix="rigid_critic_") as tmp_dir:
-        tmp_path = Path(tmp_dir)
-        frame_pattern = tmp_path / "frame_%03d.jpg"
-        _run_cmd(
-            [
-                "ffmpeg",
-                "-v",
-                "error",
-                "-i",
-                str(video_path),
-                "-vf",
-                f"fps={fps},scale='min({max_width},iw)':-2",
-                "-frames:v",
-                str(max_frames),
-                "-q:v",
-                "3",
-                str(frame_pattern),
-            ]
-        )
-
-        frame_paths = sorted(tmp_path.glob("frame_*.jpg"))
-        if not frame_paths:
-            raise VideoSamplingError("No frames were sampled from the input video.")
-
-        sampled: list[SampledFrame] = []
-        for index, frame_path in enumerate(frame_paths):
-            sampled.append(SampledFrame(index=index, data_url=_encode_jpeg_data_url(frame_path.read_bytes())))
-        return sampled
+        raise VideoSamplingError("OpenCV is not available for video sampling.") from exc
+    return cv2
 
 
 def _build_interval_indices(total: int, fps: float, sample_every_sec: float, max_frames: int) -> list[int]:
@@ -114,16 +39,24 @@ def _build_interval_indices(total: int, fps: float, sample_every_sec: float, max
     return indices
 
 
+def _resize_frame_if_needed(frame, *, max_width: int):
+    height, width = frame.shape[:2]
+    if width <= max_width:
+        return frame
+    cv2 = _import_cv2()
+    scale = max_width / float(width)
+    target_height = max(1, int(round(height * scale)))
+    return cv2.resize(frame, (max_width, target_height), interpolation=cv2.INTER_LANCZOS4)
+
+
 def _sample_frames_cv2(
     video_path: Path,
     *,
     sample_every_sec: float,
     max_frames: int,
+    max_width: int,
 ) -> list[SampledFrame]:
-    try:
-        import cv2
-    except Exception as exc:  # noqa: BLE001
-        raise VideoSamplingError("OpenCV is not available for video fallback sampling.") from exc
+    cv2 = _import_cv2()
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -143,6 +76,7 @@ def _sample_frames_cv2(
             ok, frame = cap.read()
             if not ok or frame is None:
                 continue
+            frame = _resize_frame_if_needed(frame, max_width=max_width)
             ok_jpg, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
             if not ok_jpg:
                 continue
@@ -151,19 +85,12 @@ def _sample_frames_cv2(
         cap.release()
 
     if not sampled:
-        raise VideoSamplingError("OpenCV fallback failed to sample any frames.")
+        raise VideoSamplingError("OpenCV sampling failed to sample any frames.")
     return sampled
 
 
 def probe_video_duration_sec(video_path: Path) -> float:
-    if _ffmpeg_available():
-        return _probe_video_duration_ffprobe(video_path)
-    try:
-        import cv2
-    except Exception as exc:  # noqa: BLE001
-        raise VideoSamplingError(
-            "Cannot probe video duration: neither ffprobe nor OpenCV is available."
-        ) from exc
+    cv2 = _import_cv2()
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -193,11 +120,9 @@ def sample_video_frames_as_data_urls(
         raise VideoSamplingError("`max_frames` must be positive.")
     if max_width <= 0:
         raise VideoSamplingError("`max_width` must be positive.")
-    if _ffmpeg_available():
-        return _sample_frames_ffmpeg(
-            video_path,
-            sample_every_sec=sample_every_sec,
-            max_frames=max_frames,
-            max_width=max_width,
-        )
-    return _sample_frames_cv2(video_path, sample_every_sec=sample_every_sec, max_frames=max_frames)
+    return _sample_frames_cv2(
+        video_path,
+        sample_every_sec=sample_every_sec,
+        max_frames=max_frames,
+        max_width=max_width,
+    )

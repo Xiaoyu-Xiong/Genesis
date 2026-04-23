@@ -98,8 +98,10 @@ def build_body_material(gs: Any, body: BodyIR) -> Any | None:
             hessian_invariant=CONFIGS.deformable.fem_hessian_invariant,
         )
     coup_type_override = None
-    if CONFIGS.deformable.simulation_backend == "fem_ipc" and not body.is_articulated:
-        if body.fixed:
+    if CONFIGS.deformable.simulation_backend == "fem_ipc":
+        if body.is_articulated:
+            coup_type_override = "two_way_soft_constraint"
+        elif body.fixed:
             coup_type_override = "ipc_only"
         else:
             coup_type_override = "two_way_soft_constraint"

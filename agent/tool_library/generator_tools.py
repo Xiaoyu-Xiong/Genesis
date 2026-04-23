@@ -341,6 +341,11 @@ class GeneralIRAgentToolLibrary:
         return {
             "body_name": body_name,
             "mesh_path": result.mesh_path,
+            "runtime_mesh_path": result.mesh_path,
+            "runtime_mesh_path_note": (
+                "Use this repaired runtime mesh path in bodies[].shape.file. "
+                "Do not use textured_mesh_path in the main simulation IR."
+            ),
             "attempts": result.attempts,
             "raw_manifold_ok": result.raw_manifold_ok,
             "repaired_manifold_ok": result.repaired_manifold_ok,

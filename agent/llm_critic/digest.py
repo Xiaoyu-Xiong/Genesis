@@ -88,19 +88,7 @@ def build_input_digest(
     sample_every_sec: float,
     max_frames: int,
 ) -> dict[str, Any]:
-    execution = event_pack.get("execution")
-    sim_duration_sec = None
-    if isinstance(execution, dict):
-        value = execution.get("final_time_sec")
-        if isinstance(value, int | float) and not isinstance(value, bool):
-            sim_duration_sec = float(value)
-
-    observation_count = None
-    observations = event_pack.get("observations")
-    if isinstance(observations, dict):
-        timeline = observations.get("timeline")
-        if isinstance(timeline, list):
-            observation_count = len(timeline)
+    metrics = _build_event_supporting_metrics(event_pack)
 
     return {
         "task_prompt": task,
@@ -122,9 +110,9 @@ def build_input_digest(
             for body_name, xml_info in xml_infos_by_body.items()
         },
         "supporting_metrics": {
-            "sim_duration_sec": sim_duration_sec,
-            "observation_count": observation_count,
-            "estimated_displacement_by_entity_m": _estimate_displacement_by_entity(event_pack),
+            "sim_duration_sec": metrics["sim_duration_sec"],
+            "observation_count": metrics["observation_count"],
+            "estimated_displacement_by_entity_m": metrics["estimated_displacement_by_entity_m"],
         },
         "ir_digest": _build_ir_digest(ir),
         "event_pack": event_pack,
@@ -141,27 +129,7 @@ def build_compact_input_digest(
     sample_every_sec: float,
     max_frames: int,
 ) -> dict[str, Any]:
-    execution = event_pack.get("execution")
-    sim_duration_sec = None
-    if isinstance(execution, dict):
-        value = execution.get("final_time_sec")
-        if isinstance(value, int | float) and not isinstance(value, bool):
-            sim_duration_sec = float(value)
-
-    observations = event_pack.get("observations")
-    observation_count = None
-    observed_entities: list[str] = []
-    if isinstance(observations, dict):
-        timeline = observations.get("timeline")
-        if isinstance(timeline, list):
-            observation_count = len(timeline)
-            observed_entities = sorted(
-                {
-                    item.get("entity")
-                    for item in timeline
-                    if isinstance(item, dict) and isinstance(item.get("entity"), str)
-                }
-            )
+    metrics = _build_event_supporting_metrics(event_pack)
 
     return {
         "task_prompt": task,
@@ -181,13 +149,48 @@ def build_compact_input_digest(
             for body_name, xml_info in xml_infos_by_body.items()
         },
         "supporting_metrics": {
-            "sim_duration_sec": sim_duration_sec,
-            "observation_count": observation_count,
-            "observed_entities": observed_entities,
-            "estimated_displacement_by_entity_m": _estimate_displacement_by_entity(event_pack),
+            "sim_duration_sec": metrics["sim_duration_sec"],
+            "observation_count": metrics["observation_count"],
+            "observed_entities": metrics["observed_entities"],
+            "estimated_displacement_by_entity_m": metrics["estimated_displacement_by_entity_m"],
         },
         "ir_digest": _build_ir_digest(ir),
     }
+
+
+def _build_event_supporting_metrics(event_pack: dict[str, Any]) -> dict[str, Any]:
+    timeline = _observation_timeline(event_pack)
+    observed_entities = sorted(
+        {
+            item.get("entity")
+            for item in timeline
+            if isinstance(item, dict) and isinstance(item.get("entity"), str)
+        }
+    )
+    return {
+        "sim_duration_sec": _final_time_sec(event_pack),
+        "observation_count": len(timeline) if timeline else None,
+        "observed_entities": observed_entities,
+        "estimated_displacement_by_entity_m": _estimate_displacement_by_entity(event_pack),
+    }
+
+
+def _final_time_sec(event_pack: dict[str, Any]) -> float | None:
+    execution = event_pack.get("execution")
+    if not isinstance(execution, dict):
+        return None
+    value = execution.get("final_time_sec")
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _observation_timeline(event_pack: dict[str, Any]) -> list[dict[str, Any]]:
+    observations = event_pack.get("observations")
+    if not isinstance(observations, dict):
+        return []
+    timeline = observations.get("timeline")
+    return [item for item in timeline if isinstance(item, dict)] if isinstance(timeline, list) else []
 
 
 def _estimate_displacement_by_entity(event_pack: dict[str, Any]) -> dict[str, float]:
@@ -240,6 +243,7 @@ def _build_ir_digest(ir: dict[str, Any]) -> dict[str, Any]:
     bodies = [body for body in bodies_any if isinstance(body, dict)] if isinstance(bodies_any, list) else []
     actions_any = ir.get("actions", [])
     actions = [action for action in actions_any if isinstance(action, dict)] if isinstance(actions_any, list) else []
+    articulated_body_names = [body.get("name") for body in bodies if _is_articulated_body(body)]
 
     op_counter = Counter()
     total_step_count = 0
@@ -257,16 +261,8 @@ def _build_ir_digest(ir: dict[str, Any]) -> dict[str, Any]:
         "bodies": bodies,
         "body_count": len(bodies),
         "mesh_body_summaries": _build_mesh_body_summaries(bodies),
-        "articulated_body_names": [
-            body.get("name")
-            for body in bodies
-            if isinstance(body.get("shape"), dict) and body["shape"].get("kind") in {"mjcf", "urdf"}
-        ],
-        "articulated_body_count": sum(
-            1
-            for body in bodies
-            if isinstance(body.get("shape"), dict) and body["shape"].get("kind") in {"mjcf", "urdf"}
-        ),
+        "articulated_body_names": articulated_body_names,
+        "articulated_body_count": len(articulated_body_names),
         "actions_summary": {
             "count": len(actions),
             "op_counts": dict(sorted(op_counter.items())),
@@ -298,3 +294,8 @@ def _build_mesh_body_summaries(bodies: list[dict[str, Any]]) -> dict[str, dict[s
             )
         summaries[body_name] = summary
     return summaries
+
+
+def _is_articulated_body(body: dict[str, Any]) -> bool:
+    shape = body.get("shape")
+    return isinstance(shape, dict) and shape.get("kind") in {"mjcf", "urdf"}

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from ...ir_schema import RigidIR
 from ..client import OpenAIResponsesClient, coerce_content_to_text
@@ -236,6 +236,7 @@ def generate_ir_with_tool_agent(
     previous_mesh_summaries_by_body: dict[str, dict[str, Any]] | None = None,
     hosted_prompt_id: str | None = None,
     hosted_prompt_version: str | None = None,
+    progress_callback: Callable[[list[IRGenerationRoundLog]], None] | None = None,
 ) -> IRGenerationResult:
     if max_rounds < 1:
         raise ValueError("`max_rounds` must be >= 1.")
@@ -310,13 +311,6 @@ def generate_ir_with_tool_agent(
 
                 batch_calls.append({"id": call_id, "name": name, "arguments_json": arguments_json})
 
-            batch_results = tool_library.execute_tool_calls_batch(batch_calls)
-            for batch_call, result in zip(batch_calls, batch_results, strict=True):
-                call_id = batch_call["id"]
-                name = batch_call["name"]
-                tool_results.append({"id": call_id, "name": name, "result": result})
-                next_messages.append(_tool_result_message(call_id, name, result))
-
             round_log = IRGenerationRoundLog(
                 round=round_idx,
                 assistant_content=assistant_content or None,
@@ -326,6 +320,15 @@ def generate_ir_with_tool_agent(
                 usage=assistant_message.get("_usage") if isinstance(assistant_message.get("_usage"), dict) else None,
             )
             logs.append(round_log)
+            _emit_progress(progress_callback, logs)
+
+            batch_results = tool_library.execute_tool_calls_batch(batch_calls)
+            for batch_call, result in zip(batch_calls, batch_results, strict=True):
+                call_id = batch_call["id"]
+                name = batch_call["name"]
+                tool_results.append({"id": call_id, "name": name, "result": result})
+                next_messages.append(_tool_result_message(call_id, name, result))
+                _emit_progress(progress_callback, logs)
 
             successful_validate_result = None
             for tool_result in reversed(tool_results):
@@ -383,6 +386,7 @@ def generate_ir_with_tool_agent(
                     usage=assistant_message.get("_usage") if isinstance(assistant_message.get("_usage"), dict) else None,
                 )
             )
+            _emit_progress(progress_callback, logs)
             return IRGenerationResult(
                 model=model,
                 rounds=round_idx,
@@ -403,6 +407,7 @@ def generate_ir_with_tool_agent(
                 usage=assistant_message.get("_usage") if isinstance(assistant_message.get("_usage"), dict) else None,
             )
         )
+        _emit_progress(progress_callback, logs)
 
         pending_messages = [
             {
@@ -424,3 +429,11 @@ def generate_ir_with_tool_agent(
     raise IRGenerationError(
         f"Failed to generate valid IR within {max_rounds} rounds. Last validation error: {last_error}"
     )
+
+
+def _emit_progress(
+    progress_callback: Callable[[list[IRGenerationRoundLog]], None] | None,
+    logs: list[IRGenerationRoundLog],
+) -> None:
+    if progress_callback is not None:
+        progress_callback(logs)

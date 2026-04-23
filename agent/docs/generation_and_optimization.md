@@ -17,6 +17,9 @@ Current OpenAI-facing pipeline details:
 - generator and critic requests now default to `prompt_cache_retention="24h"`
 - batch runs emit per-round OpenAI usage artifacts via `llm_usage.json`
 - `optimize-batch` supports `--max-parallel` for memory-heavy suites
+- for generated mesh bodies, the main runtime IR must use the canonical repaired runtime mesh path returned as `mesh_path` (typically `processed/repaired*.obj`), not auxiliary textured OBJ assets
+- during active runs, `generation.log.json` and `critic.log.json` are refreshed incrementally as generator / critic tool rounds complete, so partially populated logs during execution are expected
+- critic video sampling is now unified on OpenCV for both duration probing and frame extraction; when downscaling is needed, frames are resized with OpenCV Lanczos4
 
 Texture generation for mesh assets can be enabled explicitly with:
 
@@ -49,7 +52,13 @@ This layer is responsible for:
 - routing articulated XML generation
 - routing mesh generation
 - enforcing constraints such as density bounds and initial-scene validation
-- sanitizing generator payloads before schema parse, including stripping deformable-body collision fields that are unsupported in the current FEM+IPC pipeline
+- sanitizing generator payloads before schema parse, including stripping deformable-body collision fields that are unsupported in the current FEM+IPC pipeline and rewriting mistakenly selected generated textured OBJ paths back to the canonical repaired runtime mesh path when available
+
+For the current `agent` FEM+IPC runtime path, articulated rigid bodies are routed onto IPC `two_way_soft_constraint` coupling in both direct runtime execution and compiled output, instead of using the engine's fixed-base `external_articulation` auto-selection path.
+
+For FEM+IPC sanity failures, the validator now preserves more of libuipc's original diagnostic lines, including `SimplicialSurfaceIntersectionCheck` output, and annotates runtime object names such as `fem_0_0` or `rigid_link_3_0` back to inferred IR body names when that mapping can be recovered before scene build. This feedback is returned through `validate_ir` tool errors and through the generator's local finalization error path, so revision rounds can see specific overlapping body pairs instead of only a generic "world is not valid" message. When a specific geometric root cause such as initial intersection or half-plane clearance failure is already present, the validator suppresses later cascading `rigid state accessor` noise from the same failed build so the generator is not steered by the wrong secondary error.
+
+Observation contact lists in the runtime/event-pack are currently unified onto AABB-overlap heuristics for both rigid and deformable bodies. Critic prompting explicitly treats these lists as weak spatial-overlap signals only; they are neither sufficient nor necessary evidence of true physical contact and must be cross-checked against video, motion, and deformation evidence.
 
 ## Critic
 
@@ -98,6 +107,8 @@ The current critic path is two-stage when enabled in [agent/configs.py](../confi
 1. stage 1 compact screening
 2. stage 2 retrieval-based critic only when stage 1 escalates
 
+By default, a stage-1 `pass` still forces escalation into stage 2 for a second check. This is meant to catch false-positive compact passes in visually ambiguous cases.
+
 Usage accounting is preserved per component:
 
 - generator IR
@@ -143,3 +154,67 @@ Notable rules:
 - config values are static Python defaults
 - they are no longer loaded from environment variables
 - run-specific behavior should prefer explicit CLI flags
+
+### Runtime And IPC Knobs
+
+For FEM+IPC scenes, the most important stability knobs now live in
+[agent/configs.py](../configs.py) under `RuntimeConfigs` and `DeformableConfigs`.
+
+- `runtime.sim_dt`: top-level simulation step duration in seconds. Smaller values reduce integration error and
+  contact jitter at higher runtime cost.
+- `runtime.sim_substeps`: number of internal solver substeps per `scene.step()`. Raising this improves contact-rich
+  stability without changing the scene-level duration encoded by IR step counts, but increases runtime roughly
+  proportionally.
+- `deformable.ipc_newton_max_iterations`: cap on IPC Newton iterations per step. Higher values can improve
+  convergence in hard contact scenes, at extra cost.
+- `deformable.ipc_newton_min_iterations`: minimum Newton iterations before early termination is allowed. Useful when
+  the solver exits too aggressively on noisy scenes.
+- `deformable.ipc_newton_tolerance`: velocity convergence tolerance for Newton. Smaller values are stricter and
+  usually more stable, but slower.
+- `deformable.ipc_newton_ccd_tolerance`: CCD tolerance for Newton. Smaller values make collision handling stricter
+  and can reduce tunneling or late collision response.
+- `deformable.ipc_newton_use_adaptive_tolerance`: whether Newton tolerance adapts during solve. This can improve
+  robustness when scenes range from easy to stiff contact.
+- `deformable.ipc_newton_translation_tolerance`: translation-rate convergence threshold. Lower values force tighter
+  convergence on residual rigid/soft motion.
+- `deformable.ipc_newton_semi_implicit_enable`: enables libuipc semi-implicit Newton mode. This is often worth
+  testing first when free rigid bodies coupled to soft bodies show persistent oscillation.
+- `deformable.ipc_newton_semi_implicit_beta_tolerance`: auxiliary tolerance for semi-implicit Newton mode. Tighten
+  only after deciding to use semi-implicit solve at all.
+- `deformable.ipc_n_linesearch_iterations`: maximum line-search backtracking iterations. Higher values can make
+  difficult contact solves more robust when the first Newton step overshoots.
+- `deformable.ipc_linesearch_report_energy`: debug flag that asks libuipc to report line-search energy.
+- `deformable.ipc_linear_system_solver`: inner linear solver choice. `linear_pcg` is usually cheaper; `direct` may be
+  more robust on small but stiff scenes if supported by the local libuipc build.
+- `deformable.ipc_linear_system_tolerance`: tolerance for the linear solver. Smaller values mean a more accurate but
+  slower inner solve.
+- `deformable.ipc_contact_enable`: global contact on/off switch for IPC. Mostly useful for debugging rather than
+  tuning production scenes.
+- `deformable.ipc_contact_d_hat`: contact activation distance. Larger values detect contact earlier and can soften
+  sharp impacts; too large can make contacts look mushy.
+- `deformable.ipc_contact_friction_enable`: enables IPC friction.
+- `deformable.ipc_contact_resistance`: default contact resistance / stiffness fallback used when a material does not
+  define its own IPC resistance. Larger values make contact harder and can increase chatter if other settings are too
+  aggressive.
+- `deformable.ipc_contact_eps_velocity`: low-speed friction regularization threshold. Increasing it often helps
+  suppress stick-slip jitter and noisy contact reversals.
+- `deformable.ipc_contact_constitution`: contact law variant such as `ipc` or `isometric`.
+- `deformable.ipc_collision_detection_method`: collision-detection backend.
+- `deformable.ipc_cfl_enable`: enables libuipc CFL safeguards. This can improve robustness in aggressive scenes that
+  otherwise take too-large effective updates.
+- `deformable.ipc_sanity_check_enable`: enables libuipc sanity checks, which are useful while debugging scene setup
+  and solver pathologies.
+- `deformable.ipc_constraint_strength_translation`: strength of soft transform constraints that couple Genesis rigid
+  bodies to IPC rigid representations. Higher values make the coupling stiffer and can amplify high-frequency
+  feedback.
+- `deformable.ipc_constraint_strength_rotation`: rotational counterpart of the above. Lowering this is often useful
+  when a free rigid plate jitters in roll/pitch while pressing soft bodies.
+- `deformable.ipc_enable_rigid_ground_contact`: whether rigid-ground pairs also participate in IPC.
+- `deformable.ipc_enable_rigid_rigid_contact`: whether rigid-rigid pairs participate in IPC.
+- `deformable.ipc_two_way_coupling`: whether IPC reaction forces feed back into Genesis rigid bodies. Disabling this
+  can reduce jitter, but it also removes physically important soft-to-rigid feedback.
+- `deformable.ipc_enable_rigid_dofs_sync`: whether IPC reference DOF state is synchronized from Genesis each step.
+  Tightening this can help some articulated cases but may amplify small state divergence.
+- `deformable.ipc_free_base_driven_by_ipc`: whether a free-base rigid body is fully driven by IPC rather than by the
+  Genesis-side soft transform constraint. This is a high-impact switch for scenes with free rigid plates or pushers
+  interacting with soft bodies.

@@ -65,6 +65,7 @@ Important limitation:
 
 - `mjcf` bodies do not accept body-level `fixed`
 - fixed-base MJCF behavior must be encoded inside the XML
+- in the current `agent` FEM+IPC runtime path, articulated rigid bodies are forced onto IPC `two_way_soft_constraint` coupling, even when the imported articulated base is fixed
 
 ### Mesh Shape
 
@@ -119,6 +120,14 @@ For deformable bodies:
 - do not use actuator actions on deformables
 - prefer deformable-friendly observation fields such as `bbox_*` and displacement statistics
 
+Observation events now always include a `contacts` payload with an `other_entities` list for the observed body.
+
+- for both rigid and deformable bodies, this list is derived from AABB overlap against the other scene entities
+- it is marked `exact=false` and `source="aabb_overlap"`
+- treat it as a coarse spatial-overlap heuristic rather than exact physical contact information
+
+`include_contacts=true` is still supported and now adds `contacts.count = len(contacts.other_entities)`, i.e. the number of overlapping AABB candidates, not an exact contact-pair count.
+
 ## Runtime
 
 [agent/cli.py](../cli.py) provides:
@@ -163,3 +172,10 @@ Useful observation indexes:
 - `observations.by_entity_indices`
 - `observations.by_entity_tag_indices`
 - `observations.by_entity_last_observation`
+
+Each observation timeline item may also include:
+
+- `contacts.other_entities`: names of bodies currently touching or overlapping the observed body
+- `contacts.exact`: currently always `false`
+- `contacts.source`: currently `aabb_overlap`
+- `contacts.count`: optional AABB-overlap candidate count when `include_contacts=true`

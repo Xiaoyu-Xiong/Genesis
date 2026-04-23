@@ -47,6 +47,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> None:
         hosted_prompt_id=args.hosted_prompt_id,
         hosted_prompt_version=args.hosted_prompt_version,
         prompt_variant=args.prompt_variant,
+        log_path=args.log_out,
     )
 
     dump_json(result.analysis_json, args.out)

@@ -109,8 +109,10 @@ def body_material_source(body: BodyIR) -> str | None:
         ]
         return f"gs.materials.FEM.Elastic({', '.join(kwargs)})"
     coup_type_override = None
-    if CONFIGS.deformable.simulation_backend == "fem_ipc" and not body.is_articulated:
-        if body.fixed:
+    if CONFIGS.deformable.simulation_backend == "fem_ipc":
+        if body.is_articulated:
+            coup_type_override = "two_way_soft_constraint"
+        elif body.fixed:
             coup_type_override = "ipc_only"
         else:
             coup_type_override = "two_way_soft_constraint"

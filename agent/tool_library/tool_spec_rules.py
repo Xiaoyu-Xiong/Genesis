@@ -36,6 +36,15 @@ MESH_LOCAL_FRAME_POLICY = (
     "Generated mesh assets are post-processed so their geometric centroid is at the local origin. "
     "Use the returned axis-aligned bounding box to choose sensible world placement and scale."
 )
+MESH_RUNTIME_PATH_POLICY = (
+    "When `generate_mesh_asset` returns both a canonical simulation mesh path and textured asset paths, always use "
+    "the canonical repaired runtime mesh path (`mesh_path`, typically under `processed/repaired*.obj`) in "
+    "`bodies[].shape.file`. Do not use `textured_mesh_path` in the main simulation IR."
+)
+MESH_TEXTURE_BRANCH_POLICY = (
+    "The textured OBJ branch (`textured/model.obj`, MTL, base_color, and related texture files) is an auxiliary "
+    "texture/debug asset branch. It is not the runtime geometry input for the main IR."
+)
 MESH_SCALE_POLICY = (
     "For mesh bodies, if the imported or generated mesh is globally too large or too small for the scene, adjust "
     "`bodies[].shape.scale` to resize the whole mesh uniformly. Prefer changing `shape.scale` for overall mesh size "
@@ -169,6 +178,8 @@ def build_ir_agent_process_requirements(*, mesh_generation_available: bool) -> l
         f"- {MESH_DECISION_POLICY}",
         f"- {MESH_SCALE_POLICY}",
         f"- {MESH_BBOX_POLICY}",
+        f"- {MESH_RUNTIME_PATH_POLICY}",
+        f"- {MESH_TEXTURE_BRANCH_POLICY}",
         f"- {DEFORMABLE_BODY_POLICY}",
         f"- {DEFORMABLE_GEOMETRY_POLICY}",
         f"- {DEFORMABLE_MATERIAL_POLICY}",
@@ -192,6 +203,8 @@ def build_ir_agent_process_requirements(*, mesh_generation_available: bool) -> l
             [
                 "- If a non-articulated rigid or deformable body needs a generated mesh asset and the tool is available, call generate_mesh_asset once for that body.",
                 "- Every generate_mesh_asset tool call must include the target `body_name`.",
+                "- After `generate_mesh_asset`, wire `bodies[].shape.file` to the returned `mesh_path` runtime asset, not to `textured_mesh_path`.",
+                "- Treat `textured_mesh_path` and the downloaded texture files as auxiliary texture assets only; they are not valid replacements for the repaired runtime mesh path in the main IR.",
                 f"- {MESH_LOCAL_FRAME_POLICY}",
                 "- If several non-articulated bodies intentionally share one geometry, use the same `reuse_key` when calling generate_mesh_asset so one generated asset can be reused.",
                 "- If multiple mesh bodies need generated assets, batch those generate_mesh_asset tool calls in one response when possible.",

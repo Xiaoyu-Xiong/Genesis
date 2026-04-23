@@ -123,6 +123,119 @@ def contact_other_entities(
     return other_entities
 
 
+def _first_aabb(aabb_value: Any) -> tuple[list[float], list[float]] | None:
+    data = to_serializable(aabb_value)
+    if not isinstance(data, list):
+        return None
+    if len(data) == 2 and all(isinstance(item, list) for item in data):
+        mins = _as_float_vector(data[0])
+        maxs = _as_float_vector(data[1])
+        if mins is None or maxs is None or len(mins) != 3 or len(maxs) != 3:
+            return None
+        return mins, maxs
+    if len(data) >= 1 and isinstance(data[0], list):
+        first = data[0]
+        if isinstance(first, list) and len(first) == 2 and all(isinstance(item, list) for item in first):
+            mins = _as_float_vector(first[0])
+            maxs = _as_float_vector(first[1])
+            if mins is None or maxs is None or len(mins) != 3 or len(maxs) != 3:
+                return None
+            return mins, maxs
+    return None
+
+
+def entity_bbox(
+    entity: Any,
+    *,
+    deformable_observation_state: dict[str, Any] | None = None,
+) -> tuple[list[float], list[float]] | None:
+    if deformable_observation_state is not None:
+        bbox_min = _as_float_vector(deformable_observation_state.get("bbox_min"))
+        bbox_max = _as_float_vector(deformable_observation_state.get("bbox_max"))
+        if bbox_min is not None and bbox_max is not None and len(bbox_min) == 3 and len(bbox_max) == 3:
+            return bbox_min, bbox_max
+
+    if is_deformable_entity(entity):
+        deformable_state = get_deformable_observation_state(entity)
+        if deformable_state is None:
+            return None
+        bbox_min = _as_float_vector(deformable_state.get("bbox_min"))
+        bbox_max = _as_float_vector(deformable_state.get("bbox_max"))
+        if bbox_min is None or bbox_max is None or len(bbox_min) != 3 or len(bbox_max) != 3:
+            return None
+        return bbox_min, bbox_max
+
+    get_aabb = getattr(entity, "get_AABB", None)
+    if get_aabb is None:
+        return None
+    try:
+        return _first_aabb(get_aabb(allow_fast_approx=True))
+    except TypeError:
+        try:
+            return _first_aabb(get_aabb())
+        except Exception:  # noqa: BLE001
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _aabb_overlaps(
+    lhs_min: list[float],
+    lhs_max: list[float],
+    rhs_min: list[float],
+    rhs_max: list[float],
+    *,
+    eps: float = 1e-6,
+) -> bool:
+    return all(lhs_min[i] <= rhs_max[i] + eps and rhs_min[i] <= lhs_max[i] + eps for i in range(3))
+
+
+def bbox_contact_other_entities(
+    *,
+    target_entity_name: str,
+    target_bbox: tuple[list[float], list[float]] | None,
+    scene_entities: dict[str, Any],
+) -> list[str]:
+    if target_bbox is None:
+        return []
+    target_min, target_max = target_bbox
+    overlaps: list[str] = []
+    for other_entity_name, other_entity in scene_entities.items():
+        if other_entity_name == target_entity_name:
+            continue
+        other_bbox = entity_bbox(other_entity)
+        if other_bbox is None:
+            continue
+        other_min, other_max = other_bbox
+        if _aabb_overlaps(target_min, target_max, other_min, other_max):
+            overlaps.append(other_entity_name)
+    return overlaps
+
+
+def observed_contact_summary(
+    *,
+    target_entity_name: str,
+    target_entity: Any,
+    scene_entities: dict[str, Any],
+    deformable_observation_state: dict[str, Any] | None = None,
+    include_count: bool = False,
+) -> dict[str, Any]:
+    target_bbox = entity_bbox(target_entity, deformable_observation_state=deformable_observation_state)
+    other_entities = bbox_contact_other_entities(
+        target_entity_name=target_entity_name,
+        target_bbox=target_bbox,
+        scene_entities=scene_entities,
+    )
+    summary = {
+        "other_entities": other_entities,
+        "exact": False,
+        "source": "aabb_overlap",
+    }
+    if include_count:
+        summary["count"] = len(other_entities)
+    return summary
+
+
 def is_floating_base_entity(entity: Any) -> bool:
     try:
         return int(entity.n_qs) >= 7 and int(entity.n_dofs) >= 6
@@ -346,9 +459,20 @@ def capture_entity_snapshot(entity: Any) -> dict[str, Any]:
                 snapshot[field] = deformable_state[field]
 
     try:
-        snapshot["contacts"] = {"count": count_contacts(entity.get_contacts())}
+        scene_entities = {
+            other_entity.name: other_entity
+            for other_entity in getattr(getattr(entity, "scene", None), "entities", [])
+            if getattr(other_entity, "name", None) is not None
+        }
     except Exception:  # noqa: BLE001
-        pass
+        scene_entities = {getattr(entity, "name", "<unknown_entity>"): entity}
+    snapshot["contacts"] = observed_contact_summary(
+        target_entity_name=getattr(entity, "name", "<unknown_entity>"),
+        target_entity=entity,
+        scene_entities=scene_entities,
+        deformable_observation_state=deformable_state,
+        include_count=True,
+    )
 
     return snapshot
 

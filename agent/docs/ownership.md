@@ -97,10 +97,6 @@ Shared boundary files it drives, with required Physics Runtime review:
 - [genesis/utils/element.py](../../genesis/utils/element.py)
 - [fem_entity.py](../../genesis/engine/entities/fem_entity.py)
 
-Shared debug / validation utility:
-
-- [debug_main_pipeline_texture.py](../scripts/debug_main_pipeline_texture.py)
-
 Typical tasks:
 
 - Meshy failures

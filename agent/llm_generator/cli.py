@@ -32,6 +32,7 @@ def _cmd_generate(args: argparse.Namespace) -> None:
         hosted_prompt_id=args.hosted_prompt_id,
         hosted_prompt_version=args.hosted_prompt_version,
         mesh_texture_enabled=args.mesh_texture_enabled,
+        log_path=args.log_out,
     )
     dump_json(result.ir_json, args.out)
 

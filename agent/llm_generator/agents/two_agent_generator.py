@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import os
 from pathlib import Path
 from typing import Any
 
+from ...io_utils import dump_json
 from ...mesh.summary import estimate_scaled_bbox_size, load_mesh_asset_summary
+from ...usage import aggregate_usage_metrics
 from ..client import OpenAIResponsesClient
 from ...tool_library import GeneralIRAgentToolLibrary
-from .ir_agent import IRGenerationResult, generate_ir_with_tool_agent
+from .ir_agent import IRGenerationResult, IRGenerationRoundLog, generate_ir_with_tool_agent
 from .mesh_agent import MeshGenerationResult, generate_mesh_asset_with_meshy, load_existing_mesh_generation_result
 from .xml_agent import XMLGenerationResult, generate_articulated_xml_with_openai
 
@@ -264,6 +266,73 @@ def _determine_generation_mode(
     return "ir_agent_no_xml"
 
 
+def build_generation_log_payload(result: TwoAgentGenerationResult) -> dict[str, Any]:
+    return _build_generation_log_payload_from_parts(
+        model=result.model,
+        mode=result.mode,
+        articulated_requested=result.articulated_requested,
+        ir_logs=result.ir_result.logs,
+        xml_results_by_body=result.xml_results_by_body,
+        mesh_results_by_body=result.mesh_results_by_body,
+    )
+
+
+def _build_generation_log_payload_from_parts(
+    *,
+    model: str,
+    mode: str,
+    articulated_requested: bool,
+    ir_logs: list[IRGenerationRoundLog],
+    xml_results_by_body: dict[str, XMLGenerationResult],
+    mesh_results_by_body: dict[str, MeshGenerationResult],
+) -> dict[str, Any]:
+    ir_entries = [getattr(log, "usage", None) for log in ir_logs]
+    xml_entries = [
+        getattr(log, "usage", None)
+        for xml_result in xml_results_by_body.values()
+        for log in xml_result.logs
+    ]
+    return {
+        "model": model,
+        "mode": mode,
+        "articulated_requested": articulated_requested,
+        "ir_rounds": len(ir_logs),
+        "xml_results_by_body": {
+            body_name: {
+                "xml_path": xml_result.xml_path,
+                "attempts": xml_result.attempts,
+            }
+            for body_name, xml_result in sorted(xml_results_by_body.items())
+        },
+        "mesh_results_by_body": {
+            body_name: {
+                "mesh_path": mesh_result.mesh_path,
+                "raw_manifold_ok": mesh_result.raw_manifold_ok,
+                "repaired_manifold_ok": mesh_result.repaired_manifold_ok,
+                "texture_requested": mesh_result.texture_requested,
+                "texture_succeeded": mesh_result.texture_succeeded,
+                "textured_mesh_path": mesh_result.textured_mesh_path,
+                "base_color_path": mesh_result.base_color_path,
+            }
+            for body_name, mesh_result in sorted(mesh_results_by_body.items())
+        },
+        "ir_logs": [asdict(log) for log in ir_logs],
+        "xml_logs_by_body": {
+            body_name: [asdict(log) for log in xml_result.logs]
+            for body_name, xml_result in sorted(xml_results_by_body.items())
+        },
+        "mesh_logs_by_body": {
+            body_name: [asdict(log) for log in mesh_result.logs]
+            for body_name, mesh_result in sorted(mesh_results_by_body.items())
+        },
+        "usage_summary": {
+            "generator_ir": aggregate_usage_metrics(ir_entries),
+            "generator_xml": aggregate_usage_metrics(xml_entries),
+            "generator_total": aggregate_usage_metrics([*ir_entries, *xml_entries]),
+        },
+    }
+
+
 def generate_ir_two_agent(
     *,
     task: str,
@@ -285,6 +354,7 @@ def generate_ir_two_agent(
     hosted_prompt_id: str | None = None,
     hosted_prompt_version: str | None = None,
     mesh_texture_enabled: bool | None = None,
+    log_path: str | Path | None = None,
 ) -> TwoAgentGenerationResult:
     xml_out_dir = _prepare_asset_dir(assets_dir)
     mesh_out_dir = _prepare_asset_dir(mesh_assets_dir)
@@ -326,6 +396,7 @@ def generate_ir_two_agent(
         force_primitive_mode=force_primitive_mode,
         additional_requirements=additional_requirements,
     )
+    progress_log_path = None if log_path is None else Path(log_path)
 
     ir_result = generate_ir_with_tool_agent(
         task=task,
@@ -350,6 +421,25 @@ def generate_ir_two_agent(
         previous_mesh_summaries_by_body=_previous_mesh_summaries_by_body(previous_ir_json),
         hosted_prompt_id=hosted_prompt_id,
         hosted_prompt_version=hosted_prompt_version,
+        progress_callback=(
+            None
+            if progress_log_path is None
+            else lambda logs: dump_json(
+                _build_generation_log_payload_from_parts(
+                    model=model,
+                    mode=_determine_generation_mode(
+                        force_primitive_mode=force_primitive_mode,
+                        xml_results_by_body=tool_library.generated_xml_results_by_body,
+                        mesh_results_by_body=tool_library.generated_mesh_results_by_body,
+                    ),
+                    articulated_requested=False,
+                    ir_logs=logs,
+                    xml_results_by_body=tool_library.generated_xml_results_by_body,
+                    mesh_results_by_body=tool_library.generated_mesh_results_by_body,
+                ),
+                progress_log_path,
+            )
+        ),
     )
 
     xml_results_by_body = tool_library.generated_xml_results_by_body
@@ -361,7 +451,7 @@ def generate_ir_two_agent(
         mesh_results_by_body=mesh_results_by_body,
     )
 
-    return TwoAgentGenerationResult(
+    result = TwoAgentGenerationResult(
         model=model,
         mode=mode,
         articulated_requested=articulated_requested,
@@ -369,3 +459,6 @@ def generate_ir_two_agent(
         xml_results_by_body=xml_results_by_body,
         mesh_results_by_body=mesh_results_by_body,
     )
+    if progress_log_path is not None:
+        dump_json(build_generation_log_payload(result), progress_log_path)
+    return result
