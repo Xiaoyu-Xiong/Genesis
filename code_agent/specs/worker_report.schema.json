@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "worker_report.schema.json",
+  "title": "Worker Report",
+  "type": "object",
+  "required": [
+    "role",
+    "status",
+    "changed_files",
+    "exports",
+    "source_code",
+    "assumptions",
+    "commands_run",
+    "unresolved_risks",
+    "handoff_notes"
+  ],
+  "properties": {
+    "role": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["completed", "blocked", "partial"] },
+    "changed_files": { "type": "array", "items": { "type": "string" } },
+    "exports": { "type": "array", "items": { "type": "string" } },
+    "source_code": { "type": "string", "minLength": 1 },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "commands_run": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "purpose", "result"],
+        "properties": {
+          "command": { "type": "string" },
+          "purpose": { "type": "string" },
+          "result": { "type": ["string", "null"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "unresolved_risks": { "type": "array", "items": { "type": "string" } },
+    "handoff_notes": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

@@ -17,7 +17,7 @@ class CodexConfigs:
     prompt_cache_retention: Literal["in_memory", "24h"] = "24h"
     planner_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     reviewer_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
-    worker_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
+    worker_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     ask_for_approval: Literal["untrusted", "on-request", "never"] = "never"
 
 

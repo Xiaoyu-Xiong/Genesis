@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "planner_output.schema.json",
+  "title": "Planner Output",
+  "type": "object",
+  "required": [
+    "scene_brief",
+    "scene_plan",
+    "asset_requests",
+    "module_contracts",
+    "dispatch_graph",
+    "execution_plan",
+    "risk_register"
+  ],
+  "properties": {
+    "scene_brief": {
+      "type": "object",
+      "required": ["user_intent", "required_entities", "interaction_goal", "success_criteria", "assumptions"],
+      "properties": {
+        "user_intent": { "type": "string", "minLength": 1 },
+        "required_entities": { "type": "array", "items": { "type": "string" } },
+        "interaction_goal": { "type": "string", "minLength": 1 },
+        "success_criteria": { "type": "array", "items": { "type": "string" } },
+        "failure_criteria": { "type": "array", "items": { "type": "string" } },
+        "assumptions": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "scene_plan": {
+      "type": "object",
+      "required": ["simulation_strategy", "physics_risks", "resource_level", "rendering_needs"],
+      "properties": {
+        "simulation_strategy": { "type": "string", "minLength": 1 },
+        "physics_risks": { "type": "array", "items": { "type": "string" } },
+        "resource_level": { "type": "string", "enum": ["low", "medium", "high"] },
+        "rendering_needs": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "asset_requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "asset_type", "purpose", "simulation_role"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "asset_type": { "type": "string", "minLength": 1 },
+          "purpose": { "type": "string", "minLength": 1 },
+          "scale": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+          "bbox": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+          "texture_needs": { "type": ["string", "null"] },
+          "simulation_role": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "module_contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["owner_role", "target_files", "allowed_write_paths", "required_exports", "forbidden_edits"],
+        "properties": {
+          "owner_role": { "type": "string", "minLength": 1 },
+          "target_files": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "allowed_write_paths": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "required_exports": { "type": "array", "items": { "type": "string" } },
+          "input_dependencies": { "type": "array", "items": { "type": "string" } },
+          "asset_dependencies": { "type": "array", "items": { "type": "string" } },
+          "forbidden_edits": { "type": "array", "items": { "type": "string" } },
+          "smoke_expectation": { "type": ["string", "null"] },
+          "final_report_schema": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "dispatch_graph": {
+      "type": "object",
+      "required": ["nodes", "edges"],
+      "properties": {
+        "nodes": { "type": "array", "items": { "type": "string" } },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["from", "to"],
+            "properties": {
+              "from": { "type": "string" },
+              "to": { "type": "string" },
+              "reason": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "parallel_groups": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } },
+        "wait_for_asset_manifest": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "execution_plan": {
+      "type": "object",
+      "required": ["mode", "step_budget", "render_budget"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["local_apptainer_smoke", "gpu_sbatch", "skip"] },
+        "backend": { "type": ["string", "null"] },
+        "step_budget": { "type": "integer", "minimum": 0 },
+        "render_budget": { "type": "integer", "minimum": 0 },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "risk_register": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

@@ -9,6 +9,7 @@ Top-level documents that intentionally remain in the `code_agent/` root:
 
 Directory-specific documentation:
 
+- [Implementation Status](status.md)
 - [Orchestration](orchestration.md)
 - [Codex](codex.md)
 - [Execution](execution.md)

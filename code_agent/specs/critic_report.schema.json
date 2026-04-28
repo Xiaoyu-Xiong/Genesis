@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "critic_report.schema.json",
+  "title": "Critic Report",
+  "type": "object",
+  "required": [
+    "verdict",
+    "score",
+    "observations",
+    "failure_modes",
+    "recommended_owner",
+    "repair_summary",
+    "evidence"
+  ],
+  "properties": {
+    "verdict": { "type": "string", "enum": ["pass", "needs_repair", "inconclusive"] },
+    "score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "observations": { "type": "array", "items": { "type": "string" } },
+    "failure_modes": { "type": "array", "items": { "type": "string" } },
+    "recommended_owner": {
+      "type": "string",
+      "enum": ["planner", "scene", "body", "action", "rendering", "integrator", "execution", "none"]
+    },
+    "repair_summary": { "type": ["string", "null"] },
+    "evidence": {
+      "type": "object",
+      "required": ["metrics", "frames", "video", "event_logs"],
+      "properties": {
+        "metrics": { "type": "array", "items": { "type": "string" } },
+        "frames": { "type": "array", "items": { "type": "string" } },
+        "video": { "type": ["string", "null"] },
+        "event_logs": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

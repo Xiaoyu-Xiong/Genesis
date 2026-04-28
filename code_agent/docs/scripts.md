@@ -5,23 +5,29 @@
 Each category directory contains:
 
 - `cases.txt`: `case_id|prompt` cases copied or adapted from legacy `agent/scripts` suites and existing Genesis examples.
-- `run.sh`: a wrapper that copies cases into a run directory and invokes the future `code_agent.cli run-suite` entrypoint.
+- `run.sh`: a wrapper that copies cases into a run directory and invokes `code_agent.cli run-suite`.
 
-The `code_agent` CLI is not implemented yet. Until it exists, `run.sh` exits with a clear message unless `CODE_AGENT_CMD`
-is set to an experimental command.
-
-Usage shape:
+Usage:
 
 ```bash
-code_agent/scripts/rigid_primitives/run.sh --run-root code_agent/workspaces/suites/rigid_primitives/dev
+apptainer exec /ocean/projects/cis250078p/xxiong1/containers/genesis.sif \
+  bash code_agent/scripts/rigid_primitives/run.sh \
+  --run-root code_agent/workspaces/suites/rigid_primitives/dev \
+  --cpu --codex-mode off --generation-mode codex --max-cases 1 --no-render
 ```
 
-Override command example:
+Useful options forwarded to `code_agent.cli run-suite`:
 
-```bash
-CODE_AGENT_CMD="apptainer exec --nv /ocean/projects/cis250078p/xxiong1/containers/genesis.sif uv run python -m code_agent.cli run-suite" \
-  code_agent/scripts/rigid_primitives/run.sh
-```
+- `--cpu` or `--gpu`: choose backend. The current smoke validation uses `--cpu`.
+- `--codex-mode off|auto|required`: disable planner, record planner/fallback, or require planner success.
+- `--generation-mode codex|fallback`: choose Codex writer generation or the deterministic fallback generator.
+- `--max-cases N`: run a subset while iterating.
+- `--render` or `--no-render`: enable or skip generated render output.
+- `--repair-rounds N`: allow owner-routed Codex writer repair attempts after critic failure.
+- `--timeout-sec N`: timeout for each generated simulation.
+
+`--codex-mode` currently controls only the planner adapter. It does not select writer generation; use
+`--generation-mode` for that.
 
 ## Categories
 
@@ -97,3 +103,6 @@ Cases:
 
 Future scripts that invoke Python, `uv`, `pytest`, or Genesis must run inside Apptainer or through approved sbatch
 execution.
+
+The scripts detect when they are already inside Apptainer and then call `uv run python -m code_agent.cli run-suite`
+directly. From the host, they wrap the CLI with `apptainer exec` using the standard Genesis image.

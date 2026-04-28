@@ -47,10 +47,14 @@ run_code_agent_suite() {
       echo "Set CODE_AGENT_CMD to an experimental command, or implement code_agent.cli run-suite." >&2
       exit 3
     fi
-    code_agent_cmd=(
-      apptainer exec --nv "$apptainer_image"
-      uv run python -m code_agent.cli run-suite
-    )
+    if [[ -n "${APPTAINER_CONTAINER:-}" || -n "${SINGULARITY_CONTAINER:-}" ]]; then
+      code_agent_cmd=(uv run python -m code_agent.cli run-suite)
+    else
+      code_agent_cmd=(
+        apptainer exec "$apptainer_image"
+        uv run python -m code_agent.cli run-suite
+      )
+    fi
   fi
 
   run_cmd "${code_agent_cmd[@]}" \

@@ -158,6 +158,8 @@ outputs/
 agent/runs
 agent/generated_assets
 agent/generated_meshes
+code_agent/workspaces/
 __tracked_surface.stl
 tetgen*
 baselines/
+code_agent/workspaces/

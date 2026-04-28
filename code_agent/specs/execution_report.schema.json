@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "execution_report.schema.json",
+  "title": "Execution Report",
+  "type": "object",
+  "required": ["status", "command", "exit_code", "duration_sec", "artifacts", "stdout_path", "stderr_path"],
+  "properties": {
+    "status": { "type": "string", "enum": ["passed", "failed", "timed_out", "skipped"] },
+    "command": { "type": "array", "items": { "type": "string" } },
+    "exit_code": { "type": ["integer", "null"] },
+    "duration_sec": { "type": "number", "minimum": 0 },
+    "backend": { "type": ["string", "null"] },
+    "stdout_path": { "type": "string" },
+    "stderr_path": { "type": "string" },
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "run_result": { "type": ["string", "null"] },
+        "event_log": { "type": ["string", "null"] },
+        "metrics": { "type": ["string", "null"] },
+        "video": { "type": ["string", "null"] },
+        "frames_dir": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "errors": { "type": "array", "items": { "type": "string" } },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}
