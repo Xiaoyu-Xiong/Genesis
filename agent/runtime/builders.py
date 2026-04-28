@@ -3,10 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from ..configs import CONFIGS
-from ..ir_schema import (
+from ..ir_schema.body import (
     BodyIR,
     BoxShapeIR,
-    CollisionIR,
     CylinderShapeIR,
     FEMElasticMaterialIR,
     MJCFShapeIR,
@@ -15,6 +14,7 @@ from ..ir_schema import (
     SphereShapeIR,
     URDFShapeIR,
 )
+from ..ir_schema.scene import CollisionIR
 
 
 def build_body_morph(gs: Any, body: BodyIR) -> Any:
@@ -99,12 +99,9 @@ def build_body_material(gs: Any, body: BodyIR) -> Any | None:
         )
     coup_type_override = None
     if CONFIGS.deformable.simulation_backend == "fem_ipc":
-        if body.is_articulated:
-            coup_type_override = "two_way_soft_constraint"
-        elif body.fixed:
-            coup_type_override = "ipc_only"
-        else:
-            coup_type_override = "two_way_soft_constraint"
+        # Keep all IR rigid bodies visible to Genesis' rigid solver for pure rigid contact.
+        # Hidden IPC-only support planes are created separately in setup.py.
+        coup_type_override = "two_way_soft_constraint"
     return build_rigid_material(gs, rho=body.rho, collision=body.collision, coup_type_override=coup_type_override)
 
 

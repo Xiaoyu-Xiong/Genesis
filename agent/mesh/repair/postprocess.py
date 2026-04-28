@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from .ftetwild_backend import repair_mesh_with_ftetwild
-from .models import MeshRepairConfig, MeshRepairResult
+from ..models import MeshRepairConfig, MeshRepairResult
+from .backend import repair_mesh_with_ftetwild
 
 
 def repair_mesh_for_simulation(

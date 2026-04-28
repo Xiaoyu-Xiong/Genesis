@@ -5,14 +5,14 @@ import json
 from pathlib import Path
 
 from ...configs import CONFIGS
-from ...mesh import (
+from ...mesh.models import (
     MeshRepairConfig,
     MeshyApiConfig,
     MeshyGenerationConfig,
     MeshyTextureConfig,
     TextToMeshBundle,
-    generate_meshy_mesh_from_text,
 )
+from ...mesh.pipeline import generate_meshy_mesh_from_text
 
 
 @dataclass(slots=True)

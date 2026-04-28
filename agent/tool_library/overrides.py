@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from ..configs import CONFIGS
-from ..ir_schema import RigidIR
-from ..llm_generator.constraints import ensure_program_has_render, synchronize_render_timing
+from ..ir_schema.program import RigidIR
+from ..llm_generator.constraints.general_constraints import ensure_program_has_render
+from ..llm_generator.constraints.render_defaults import synchronize_render_timing
 
 
 def apply_system_defaults(program: RigidIR) -> RigidIR:

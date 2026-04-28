@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .compiler_backend import compile_rigid_ir_to_file
+from .compiler_backend.generator import compile_rigid_ir_to_file
 from .io_utils import dump_json, load_json_object
-from .ir_schema import RigidIR, normalize_ir, parse_ir_payload
-from .runtime import build_llm_event_pack, run_rigid_ir
+from .ir_schema.program import RigidIR, normalize_ir, parse_ir_payload
+from .runtime.event_pack import build_llm_event_pack
+from .runtime.runner import run_rigid_ir
 
 
 def _cmd_schema(args: argparse.Namespace) -> None:

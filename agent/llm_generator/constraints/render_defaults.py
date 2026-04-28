@@ -3,7 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 import math
 
-from ...ir_schema import RenderIR, RigidIR
+from ...ir_schema.program import RigidIR
+from ...ir_schema.scene import RenderIR
 
 DEFAULT_RENDER_VIDEO_PATH = "agent/runs/llm_generated/render.mp4"
 

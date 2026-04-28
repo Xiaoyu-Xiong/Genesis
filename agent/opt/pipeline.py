@@ -1,115 +1,38 @@
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict, dataclass, replace
-from datetime import datetime
-import fcntl
+from dataclasses import replace
 import multiprocessing as mp
 from pathlib import Path
-import traceback
 from typing import Any
 
-from ..configs import CONFIGS
 from ..io_utils import dump_json
-from ..llm_critic import CriticEvaluationInput, evaluate_prompt_event_video
-from ..llm_generator import OpenAIResponsesClient, generate_ir_two_agent
-from ..llm_generator.constraints import parse_sanitize_validate
-from ..runtime import build_llm_event_pack, run_rigid_ir
-from ..usage import aggregate_usage_metrics
+from ..llm_critic.critic import CriticEvaluationInput, evaluate_prompt_event_video
+from ..llm_generator.agents.two_agent_generator import generate_ir_two_agent
+from ..llm_generator.client.openai_client import OpenAIResponsesClient
+from ..llm_generator.constraints.general_constraints import parse_sanitize_validate
+from ..runtime.event_pack import build_llm_event_pack
+from ..runtime.runner import run_rigid_ir
+from .artifacts import (
+    SimulationFileLock,
+    build_batch_failure_result,
+    build_generation_log_payload,
+    build_round_usage_payload,
+    load_articulated_asset_texts_by_body,
+    prepare_round_workspace,
+    prepare_run_payload,
+    resolve_articulated_asset_paths_by_body,
+    resolve_run_root,
+)
 from .feedback import build_generator_feedback_package
-
-_SIMULATION_LOCK_PATH = Path(__file__).resolve().parents[1] / "runs" / ".simulation.lock"
-
-
-@dataclass(slots=True)
-class OptimizationConfig:
-    model: str = CONFIGS.optimization.model
-    xml_model: str | None = None
-    critic_model: str | None = None
-    hosted_prompt_id: str | None = None
-    hosted_prompt_version: str | None = None
-    critic_hosted_prompt_id: str | None = None
-    critic_hosted_prompt_version: str | None = None
-    critic_prompt_variant: str = CONFIGS.optimization.critic_prompt_variant
-    temperature: float | None = None
-    critic_temperature: float | None = None
-    reasoning_effort: str | None = None
-    critic_reasoning_effort: str | None = None
-    backend: str = CONFIGS.optimization.backend
-    max_opt_rounds: int = CONFIGS.optimization.max_opt_rounds
-    generator_max_rounds: int = CONFIGS.optimization.max_attempts
-    xml_max_attempts: int = CONFIGS.optimization.xml_max_attempts
-    timeout_sec: float = CONFIGS.optimization.timeout_sec
-    assets_dir: str = "agent/generated_assets"
-    mesh_assets_dir: str = "agent/generated_meshes"
-    sample_every_sec: float = CONFIGS.optimization.sample_every_sec
-    max_frames: int = CONFIGS.optimization.max_frames
-    max_width: int = CONFIGS.optimization.max_width
-    output_root: str | None = None
-    api_key_env: str = "OPENAI_API_KEY"
-    base_url_env: str = "OPENAI_BASE_URL"
-    mesh_texture_enabled: bool = CONFIGS.meshy_request.texture_enabled
-
-
-@dataclass(slots=True)
-class OptimizationRoundResult:
-    round_index: int
-    verdict: str | None
-    passed: bool
-    round_dir: str
-
-
-@dataclass(slots=True)
-class OptimizationResult:
-    task: str
-    status: str
-    rounds: list[OptimizationRoundResult]
-    final_round_dir: str
-    final_verdict: str | None
-
-
-@dataclass(slots=True)
-class OptimizationTaskSpec:
-    case_id: str
-    task: str
-
-
-@dataclass(slots=True)
-class BatchOptimizationItemResult:
-    case_id: str
-    task: str
-    status: str
-    final_round_dir: str
-    final_verdict: str | None
-    rounds: list[OptimizationRoundResult]
-    error: str | None = None
-
-
-@dataclass(slots=True)
-class BatchOptimizationResult:
-    status: str
-    run_root: str
-    items: list[BatchOptimizationItemResult]
-
-
-@dataclass(slots=True)
-class RoundWorkspace:
-    round_dir: Path
-    assets_dir: Path
-    mesh_assets_dir: Path
-    ir_generated: Path
-    generation_log: Path
-    ir_run: Path
-    ir_validated: Path
-    run_result: Path
-    event_pack: Path
-    critic_json: Path
-    critic_log: Path
-    usage_json: Path
-    task_txt: Path
-    generator_feedback_txt: Path
-    generator_feedback_json: Path
-    video_path: Path
+from .models import (
+    BatchOptimizationItemResult,
+    BatchOptimizationResult,
+    OptimizationConfig,
+    OptimizationResult,
+    OptimizationRoundResult,
+    OptimizationTaskSpec,
+)
 
 
 def optimize_prompt(
@@ -123,7 +46,7 @@ def optimize_prompt(
         timeout_sec=config.timeout_sec,
     )
 
-    run_root = _resolve_run_root(config.output_root)
+    run_root = resolve_run_root(config.output_root)
     rounds: list[OptimizationRoundResult] = []
     feedback_package: dict[str, Any] | None = None
     previous_ir_json: dict[str, Any] | None = None
@@ -133,7 +56,7 @@ def optimize_prompt(
     final_verdict: str | None = None
 
     for round_index in range(1, config.max_opt_rounds + 1):
-        workspace = _prepare_round_workspace(run_root=run_root, config=config, round_index=round_index)
+        workspace = prepare_round_workspace(run_root=run_root, config=config, round_index=round_index)
         final_round_dir = workspace.round_dir
 
         generator_result = generate_ir_two_agent(
@@ -172,9 +95,9 @@ def optimize_prompt(
             dump_json(feedback_package, workspace.generator_feedback_json)
 
         dump_json(generator_result.ir_json, workspace.ir_generated)
-        dump_json(_generation_log_payload(generator_result), workspace.generation_log)
+        dump_json(build_generation_log_payload(generator_result), workspace.generation_log)
 
-        run_payload = _prepare_run_payload(
+        run_payload = prepare_run_payload(
             generator_result.ir_json,
             backend=config.backend,
             video_path=workspace.video_path,
@@ -184,9 +107,9 @@ def optimize_prompt(
         validated_program = parse_sanitize_validate(run_payload, normalize=True)
         dump_json(validated_program.model_dump(mode="json"), workspace.ir_validated)
         previous_ir_json = validated_program.model_dump(mode="json")
-        previous_xml_texts_by_body = _load_articulated_asset_texts_by_body(validated_program)
+        previous_xml_texts_by_body = load_articulated_asset_texts_by_body(validated_program)
 
-        with _simulation_file_lock():
+        with SimulationFileLock():
             raw_result = run_rigid_ir(validated_program, normalize=False)
         dump_json(raw_result, workspace.run_result)
 
@@ -202,7 +125,7 @@ def optimize_prompt(
                     ir_path=workspace.ir_validated,
                     event_pack_path=workspace.event_pack,
                     video_path=workspace.video_path,
-                    xml_paths_by_body=_resolve_articulated_asset_paths_by_body(validated_program),
+                    xml_paths_by_body=resolve_articulated_asset_paths_by_body(validated_program),
                     sample_every_sec=config.sample_every_sec,
                     max_frames=config.max_frames,
                     max_width=config.max_width,
@@ -237,7 +160,7 @@ def optimize_prompt(
 
         dump_json(analysis_json, workspace.critic_json)
         dump_json(critic_log_payload, workspace.critic_log)
-        dump_json(_round_usage_payload(generator_result, critic_log_payload), workspace.usage_json)
+        dump_json(build_round_usage_payload(generator_result, critic_log_payload), workspace.usage_json)
 
         verdict = analysis_json.get("verdict")
         passed = verdict == "pass"
@@ -291,7 +214,7 @@ def _run_batch_task(
             rounds=result.rounds,
         )
     except Exception as exc:  # noqa: BLE001
-        return _batch_failure_result(spec=spec, case_root=case_root, exc=exc)
+        return build_batch_failure_result(spec=spec, case_root=case_root, exc=exc)
 
 
 def optimize_prompts_batch(
@@ -305,7 +228,7 @@ def optimize_prompts_batch(
     if max_parallel < 1:
         raise ValueError("`max_parallel` must be >= 1.")
 
-    run_root = _resolve_run_root(config.output_root)
+    run_root = resolve_run_root(config.output_root)
     ordered_results: list[BatchOptimizationItemResult | None] = [None] * len(task_specs)
 
     executor_kwargs: dict[str, Any] = {
@@ -330,7 +253,7 @@ def optimize_prompts_batch(
                 spec = task_specs[index]
                 case_root = run_root / spec.case_id
                 case_root.mkdir(parents=True, exist_ok=True)
-                item = _batch_failure_result(spec=spec, case_root=case_root, exc=exc)
+                item = build_batch_failure_result(spec=spec, case_root=case_root, exc=exc)
             ordered_results[index] = item
 
     items = [item for item in ordered_results if item is not None]
@@ -340,206 +263,6 @@ def optimize_prompts_batch(
         run_root=str(run_root),
         items=items,
     )
-
-
-class _simulation_file_lock:
-    def __enter__(self):
-        _SIMULATION_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-        self._file = _SIMULATION_LOCK_PATH.open("a+", encoding="utf-8")
-        fcntl.flock(self._file.fileno(), fcntl.LOCK_EX)
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
-        self._file.close()
-
-
-def _resolve_run_root(output_root: str | None) -> Path:
-    if output_root is not None:
-        path = Path(output_root)
-    else:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = Path("agent/runs/opt") / timestamp
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def _prepare_round_workspace(*, run_root: Path, config: OptimizationConfig, round_index: int) -> RoundWorkspace:
-    round_name = f"round_{round_index:02d}"
-    round_dir = run_root / round_name
-    round_dir.mkdir(parents=True, exist_ok=True)
-
-    assets_dir = Path(config.assets_dir) / run_root.name / round_name
-    assets_dir.mkdir(parents=True, exist_ok=True)
-    mesh_assets_dir = Path(config.mesh_assets_dir) / run_root.name / round_name
-    mesh_assets_dir.mkdir(parents=True, exist_ok=True)
-
-    return RoundWorkspace(
-        round_dir=round_dir,
-        assets_dir=assets_dir,
-        mesh_assets_dir=mesh_assets_dir,
-        ir_generated=round_dir / "ir.generated.json",
-        generation_log=round_dir / "generation.log.json",
-        ir_run=round_dir / "ir.run.json",
-        ir_validated=round_dir / "ir.validated.json",
-        run_result=round_dir / "run_result.json",
-        event_pack=round_dir / "event_pack.json",
-        critic_json=round_dir / "critic.json",
-        critic_log=round_dir / "critic.log.json",
-        usage_json=round_dir / "llm_usage.json",
-        task_txt=round_dir / "task.txt",
-        generator_feedback_txt=round_dir / "generator_feedback.txt",
-        generator_feedback_json=round_dir / "generator_feedback.json",
-        video_path=round_dir / "render.mp4",
-    )
-
-
-def _batch_failure_result(
-    *,
-    spec: OptimizationTaskSpec,
-    case_root: Path,
-    exc: Exception,
-) -> BatchOptimizationItemResult:
-    failure_payload = {
-        "case_id": spec.case_id,
-        "task": spec.task,
-        "status": "failed",
-        "error_type": type(exc).__name__,
-        "error": str(exc),
-        "traceback": traceback.format_exc(),
-    }
-    dump_json(failure_payload, case_root / "failure.json")
-    return BatchOptimizationItemResult(
-        case_id=spec.case_id,
-        task=spec.task,
-        status="failed",
-        final_round_dir=str(case_root),
-        final_verdict=None,
-        rounds=[],
-        error=str(exc),
-    )
-
-
-def _prepare_run_payload(
-    ir_json: dict[str, Any],
-    *,
-    backend: str,
-    video_path: Path,
-) -> dict[str, Any]:
-    payload = dict(ir_json)
-    scene_any = payload.get("scene")
-    scene = dict(scene_any) if isinstance(scene_any, dict) else {}
-    scene["backend"] = backend
-    scene["show_viewer"] = False
-
-    render_any = scene.get("render")
-    render = dict(render_any) if isinstance(render_any, dict) else {}
-    render["output_video"] = str(video_path)
-    render["gui"] = False
-    scene["render"] = render
-    payload["scene"] = scene
-    return payload
-
-
-def _resolve_articulated_asset_paths_by_body(program) -> dict[str, Path]:
-    paths_by_body: dict[str, Path] = {}
-    for body in program.bodies:
-        if body.shape.kind not in {"mjcf", "urdf"}:
-            continue
-        file_path = getattr(body.shape, "file", None)
-        if not isinstance(file_path, str):
-            continue
-        path = Path(file_path)
-        if path.exists():
-            paths_by_body[body.name] = path
-    return paths_by_body
-
-
-def _load_articulated_asset_texts_by_body(program) -> dict[str, str]:
-    texts_by_body: dict[str, str] = {}
-    for body_name, path in _resolve_articulated_asset_paths_by_body(program).items():
-        texts_by_body[body_name] = path.read_text(encoding="utf-8")
-    return texts_by_body
-
-
-def _generation_log_payload(result) -> dict[str, Any]:
-    xml_results_by_body = result.xml_results_by_body
-    mesh_results_by_body = result.mesh_results_by_body
-    return {
-        "model": result.model,
-        "mode": result.mode,
-        "articulated_requested": result.articulated_requested,
-        "ir_rounds": result.ir_result.rounds,
-        "xml_results_by_body": {
-            body_name: {
-                "xml_path": xml_result.xml_path,
-                "attempts": xml_result.attempts,
-            }
-            for body_name, xml_result in sorted(xml_results_by_body.items())
-        },
-        "mesh_results_by_body": {
-            body_name: {
-                "mesh_path": mesh_result.mesh_path,
-                "raw_manifold_ok": mesh_result.raw_manifold_ok,
-                "repaired_manifold_ok": mesh_result.repaired_manifold_ok,
-                "texture_requested": mesh_result.texture_requested,
-                "texture_succeeded": mesh_result.texture_succeeded,
-                "textured_mesh_path": mesh_result.textured_mesh_path,
-                "base_color_path": mesh_result.base_color_path,
-            }
-            for body_name, mesh_result in sorted(mesh_results_by_body.items())
-        },
-        "ir_logs": [asdict(log) for log in result.ir_result.logs],
-        "xml_logs_by_body": {
-            body_name: [asdict(log) for log in xml_result.logs]
-            for body_name, xml_result in sorted(xml_results_by_body.items())
-        },
-        "mesh_logs_by_body": {
-            body_name: [asdict(log) for log in mesh_result.logs]
-            for body_name, mesh_result in sorted(mesh_results_by_body.items())
-        },
-        "usage_summary": _generator_usage_summary(result),
-    }
-
-
-def _generator_usage_summary(result) -> dict[str, Any]:
-    ir_entries = [getattr(log, "usage", None) for log in result.ir_result.logs]
-    xml_entries = [
-        getattr(log, "usage", None)
-        for xml_result in result.xml_results_by_body.values()
-        for log in xml_result.logs
-    ]
-    return {
-        "generator_ir": aggregate_usage_metrics(ir_entries),
-        "generator_xml": aggregate_usage_metrics(xml_entries),
-        "generator_total": aggregate_usage_metrics([*ir_entries, *xml_entries]),
-    }
-
-
-def _round_usage_payload(generator_result, critic_log_payload: dict[str, Any]) -> dict[str, Any]:
-    generator_usage = _generator_usage_summary(generator_result)
-    critic_stage_logs = critic_log_payload.get("stage_logs")
-    critic_entries = _critic_usage_entries(critic_stage_logs)
-    return {
-        "generator": generator_usage,
-        "critic": {
-            "stages": critic_stage_logs if isinstance(critic_stage_logs, list) else [],
-            "critic_total": aggregate_usage_metrics(critic_entries),
-        },
-        "overall_total": aggregate_usage_metrics(
-            [
-                generator_usage.get("generator_ir"),
-                generator_usage.get("generator_xml"),
-                *critic_entries,
-            ]
-        ),
-    }
-
-
-def _critic_usage_entries(stage_logs: Any) -> list[dict[str, Any] | None]:
-    if not isinstance(stage_logs, list):
-        return []
-    return [log.get("usage") for log in stage_logs if isinstance(log, dict)]
 
 
 def _build_synthetic_critic_analysis(

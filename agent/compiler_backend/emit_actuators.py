@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from ..ir_schema import RigidIR
+from ..ir_schema.program import RigidIR
 from .formatting import fmt_int_tuple, fmt_scalar_or_tuple, fmt_str_tuple
 
 

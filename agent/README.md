@@ -48,7 +48,7 @@ Important shared-boundary files are not "free edit" zones. In particular:
 - `genesis/utils/element.py`
 - `genesis/engine/entities/fem_entity.py`
 - `agent/llm_generator/agents/two_agent_generator.py`
-- `agent/tool_library/program_constraints.py`
+- `agent/tool_library/constraints/program.py`
 - `agent/opt/pipeline.py`
 
 For the detailed ownership matrix, shared-file review expectations, and collaboration contract, see
@@ -67,11 +67,17 @@ For the detailed ownership matrix, shared-file review expectations, and collabor
 
 - `ir_schema/`
 - `runtime/`
+- `runtime/observation/`
 - `compiler_backend/`
 - `tool_library/`
+- `tool_library/payloads/`
+- `tool_library/constraints/`
 - `llm_generator/`
 - `llm_critic/`
 - `mesh/`
+- `mesh/repair/`
+- `mesh/texture/`
+- `mesh/workflow/`
 - `opt/`
 - `scripts/`
 - `generated_assets/`

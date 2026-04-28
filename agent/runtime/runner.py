@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from ..ir_schema import RigidIR, normalize_ir, parse_ir_payload
+from ..ir_schema.program import RigidIR, normalize_ir, parse_ir_payload
 from .action_dispatch import dispatch_action
 from .helpers import capture_entity_snapshot, finalize_recording
 from .models import RuntimeState

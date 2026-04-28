@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...ir_schema import RigidIR, normalize_ir, parse_ir_payload
+from ...ir_schema.program import RigidIR, normalize_ir, parse_ir_payload
 from .observation_policy import ALLOWED_OBSERVE_FIELDS, validate_observation_policy
 from .payload_normalization import GeneralIRValidationError, extract_first_json_object, sanitize_payload
 from .render_defaults import (

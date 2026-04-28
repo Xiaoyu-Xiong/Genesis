@@ -6,7 +6,7 @@ import sys
 
 import trimesh
 
-from .models import MeshManifoldCheckResult
+from ..models import MeshManifoldCheckResult
 
 
 def run_mesh_manifold_check(mesh_path: Path, *, face_cap_for_full_check: int = 100000) -> MeshManifoldCheckResult:

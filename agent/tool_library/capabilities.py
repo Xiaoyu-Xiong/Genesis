@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..configs import CONFIGS
-from .tool_specs import (
+from .payloads.specs import (
     COMPACT_HARD_RULE_KEYS,
     build_generation_guide_payload,
     build_observation_field_guide_payload,

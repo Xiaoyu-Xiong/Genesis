@@ -160,3 +160,4 @@ agent/generated_assets
 agent/generated_meshes
 __tracked_surface.stl
 tetgen*
+baselines/

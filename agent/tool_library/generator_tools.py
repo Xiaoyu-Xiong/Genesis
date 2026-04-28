@@ -5,12 +5,12 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
-from ..ir_schema import RigidIR
-from ..mesh.summary import load_mesh_asset_summary
+from ..ir_schema.program import RigidIR
+from ..mesh.workflow.summary import load_mesh_asset_summary
 from ..llm_generator.constraints.general_constraints import parse_sanitize_validate
 from .overrides import apply_system_defaults
-from .program_constraints import validate_program_constraints
-from .tool_specs import (
+from .constraints.program import validate_program_constraints
+from .payloads.specs import (
     build_generation_bootstrap_payload,
     build_tool_specs,
 )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..configs import CONFIGS
+from ...configs import CONFIGS
 
 ROOT_STRUCTURE_NOTE = "Use top-level `bodies` list."
 BODY_COUNT_POLICY = "Multiple bodies are allowed, including multiple articulated bodies."
@@ -101,9 +101,11 @@ else:
     )
     DEFORMABLE_SCENE_POLICY = (
         "In deformable FEM+IPC scenes, standard `scene.add_ground` semantics remain available. When `scene.add_ground=true`, "
-        "the runtime keeps pure rigid-ground and pure rigid-rigid contact on Genesis' rigid solver, while FEM-involving "
-        "contact uses IPC. The ground is represented both as a normal Genesis rigid ground for rigid bodies and as a "
-        "hidden IPC-only plane for FEM-ground contact. When using FEM+IPC, do not generate bodies with initial "
+        "the runtime keeps pure rigid-ground and, when rigid-rigid IPC contact is disabled, pure rigid-rigid contact "
+        "on Genesis' rigid solver, while FEM-involving contact uses IPC. IR rigid bodies, including fixed obstacles, "
+        "are represented in IPC through two-way soft constraints rather than IPC-only rigid bodies. The ground is "
+        "represented both as a normal Genesis rigid ground for rigid bodies and as a hidden IPC-only plane for FEM-ground "
+        "contact. When using FEM+IPC, do not generate bodies with initial "
         "penetration or interpenetration. Leave a small positive clearance between all bodies and support surfaces."
     )
 DEFORMABLE_ACTION_POLICY = (

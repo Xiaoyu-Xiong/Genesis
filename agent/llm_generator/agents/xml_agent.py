@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..client import OpenAIResponsesClient, coerce_content_to_text
+from ..client.openai_client import OpenAIResponsesClient
+from ..client.responses_format import coerce_content_to_text
 from .prompt_utils import truncate_prompt_text
 
 

@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from ...io_utils import dump_json
-from ...mesh.summary import estimate_scaled_bbox_size, load_mesh_asset_summary
+from ...mesh.workflow.summary import estimate_scaled_bbox_size, load_mesh_asset_summary
 from ...usage import aggregate_usage_metrics
-from ..client import OpenAIResponsesClient
-from ...tool_library import GeneralIRAgentToolLibrary
+from ..client.openai_client import OpenAIResponsesClient
+from ...tool_library.generator_tools import GeneralIRAgentToolLibrary
 from .ir_agent import IRGenerationResult, IRGenerationRoundLog, generate_ir_with_tool_agent
 from .mesh_agent import MeshGenerationResult, generate_mesh_asset_with_meshy, load_existing_mesh_generation_result
 from .xml_agent import XMLGenerationResult, generate_articulated_xml_with_openai

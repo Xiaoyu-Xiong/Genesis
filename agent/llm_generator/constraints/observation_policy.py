@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from ...ir_schema import ObserveActionIR, RigidIR, StepActionIR
+from ...ir_schema.actions import ObserveActionIR, StepActionIR
+from ...ir_schema.program import RigidIR
 from .payload_normalization import GeneralIRValidationError
 
 ALLOWED_OBSERVE_FIELDS = {

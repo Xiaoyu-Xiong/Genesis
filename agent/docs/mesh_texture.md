@@ -4,7 +4,12 @@ This document covers standalone mesh generation, repair, texture generation, tex
 
 ## Standalone Mesh Pipeline
 
-[agent/mesh](../mesh) contains the standalone mesh pipeline.
+[agent/mesh](../mesh) contains the standalone mesh pipeline. The root keeps the CLI, shared models, and main
+orchestration; implementation details live in three subdirectories:
+
+- `workflow/`: Meshy API access, pipeline-stage helpers, and asset summaries
+- `repair/`: manifold checks and fTetWild / pytetwild repair
+- `texture/`: repaired-mesh UV generation, texture transfer, and textured validation renders
 
 Main responsibilities:
 
@@ -69,6 +74,14 @@ For generated mesh bodies, the canonical runtime geometry path is the repaired m
 Current repaired-mesh rebake is no longer vertex-color-only. The active transfer path uses `xatlas` for target UV atlas generation, then rasterizes target-atlas texels, lifts each covered texel center back to a 3D point on the target surface, projects that point to the source textured mesh with `igl.point_mesh_squared_distance`, and samples the raw source texture there. This preserves raw texture detail much better than the older "sample color once per target vertex, then linearly interpolate inside each target triangle" path.
 
 The deformable render path is no longer a separate experiment; it is wired into the active FEM mesh path.
+
+Implementation is split by stage:
+
+- `texture/transfer.py`: transfer orchestration and result packaging
+- `texture/parameterization.py`: target UV unwrap via `xatlas`
+- `texture/bake.py`: source-surface projection and per-texel baking
+- `texture/obj_io.py`: OBJ / MTL rewriting and small mesh-file transforms
+- `texture/render_views.py`: textured multi-view validation renders
 
 ## Current Recommended Repaired-Mesh Texture Path
 

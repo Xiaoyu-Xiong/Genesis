@@ -4,8 +4,8 @@ from collections import Counter
 import json
 from typing import Any
 
-from ..mesh.summary import estimate_scaled_bbox_size, load_mesh_asset_summary
-from ..tool_library import (
+from ..mesh.workflow.summary import estimate_scaled_bbox_size, load_mesh_asset_summary
+from ..tool_library.capabilities import (
     build_compact_generator_tool_context,
     build_generator_tool_context,
 )

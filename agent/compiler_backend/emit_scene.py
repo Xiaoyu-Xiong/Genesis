@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Callable
 
 from ..configs import CONFIGS
-from ..ir_schema import RenderIR, RigidIR
+from ..ir_schema.program import RigidIR
+from ..ir_schema.scene import RenderIR
 from .formatting import fmt_tuple, safe_var_name
 from .morph_material import body_material_source, body_morph_source, emit_collision_overrides, material_kwargs_from_collision
 

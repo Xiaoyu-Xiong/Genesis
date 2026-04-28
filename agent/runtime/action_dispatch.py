@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..ir_schema import (
+from ..ir_schema.actions import (
     ApplyExternalWrenchActionIR,
     ObserveActionIR,
     SetDofsPositionActionIR,
@@ -12,8 +12,12 @@ from ..ir_schema import (
     SetTorqueActionIR,
     StepActionIR,
 )
-from .helpers import get_floating_base_root_state, observed_contact_summary, to_serializable
-from .helpers import get_deformable_observation_state
+from .helpers import (
+    get_deformable_observation_state,
+    get_floating_base_root_state,
+    observed_contact_summary,
+    to_serializable,
+)
 from .models import ActuatorBinding, RuntimeContext, RuntimeState
 from .selectors import resolve_dofs_idx_local, resolve_links_idx
 

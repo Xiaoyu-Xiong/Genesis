@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from typing import Callable
 
-from ..ir_schema import (
+from ..ir_schema.actions import (
     ApplyExternalWrenchActionIR,
     ObserveActionIR,
-    RenderIR,
     SetDofsPositionActionIR,
     SetDofsVelocityActionIR,
     SetPoseActionIR,
     SetTargetPosActionIR,
     SetTorqueActionIR,
-    RigidIR,
     StepActionIR,
 )
+from ..ir_schema.program import RigidIR
+from ..ir_schema.scene import RenderIR
 from .formatting import fmt_int_tuple, fmt_str_tuple, fmt_tuple, fmt_vec3
 
 

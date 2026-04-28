@@ -6,9 +6,11 @@ from pathlib import Path
 
 from ..configs import CONFIGS
 from ..io_utils import dump_json
-from .pipeline import (
+from .models import (
     OptimizationConfig,
     OptimizationTaskSpec,
+)
+from .pipeline import (
     optimize_prompt,
     optimize_prompts_batch,
 )

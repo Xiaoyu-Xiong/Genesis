@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from ..io_utils import dump_json
-from ..llm_generator.client import OpenAIResponsesClient, REASONING_EFFORT_VALUES
+from ..llm_generator.client.openai_client import OpenAIResponsesClient, REASONING_EFFORT_VALUES
 from .critic import CriticEvaluationInput, evaluate_prompt_event_video
 
 

@@ -4,7 +4,7 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
-from ..ir_schema import RigidIR, parse_ir_payload
+from ..ir_schema.program import RigidIR, parse_ir_payload
 
 LLM_EVENT_PACK_VERSION = "genesis.rigid.event_pack.v2"
 

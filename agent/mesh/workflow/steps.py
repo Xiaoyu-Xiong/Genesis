@@ -6,9 +6,8 @@ import shutil
 import time
 from pathlib import Path
 
-from ..io_utils import dump_json
-from .meshy_client import MeshyClient
-from .models import (
+from ...io_utils import dump_json
+from ..models import (
     MeshManifoldCheckResult,
     MeshRepairConfig,
     MeshRepairResult,
@@ -16,8 +15,10 @@ from .models import (
     MeshyTextureConfig,
     MeshyTextureResult,
 )
-from .postprocess import build_ftetwild_retry_configs, repair_mesh_for_simulation
-from .sanity import run_mesh_manifold_check
+from ..repair.postprocess import build_ftetwild_retry_configs, repair_mesh_for_simulation
+from ..repair.sanity import run_mesh_manifold_check
+from ..texture.obj_io import rewrite_mtl_base_color, rewrite_obj_mtllib
+from .meshy import MeshyClient
 
 
 def run_repair_pipeline(
@@ -263,56 +264,6 @@ def extract_task_id(payload: dict[str, object]) -> str:
     if not isinstance(result, str) or not result.strip():
         raise ValueError("Meshy submit response did not contain a valid `result` task id.")
     return result.strip()
-
-
-def rewrite_obj_mtllib(obj_path: Path, *, mtl_name: str) -> None:
-    text = obj_path.read_text(encoding="utf-8", errors="ignore")
-    lines = text.splitlines()
-    replaced = False
-    rewritten_lines: list[str] = []
-    for line in lines:
-        if line.startswith("mtllib "):
-            rewritten_lines.append(f"mtllib {mtl_name}")
-            replaced = True
-        else:
-            rewritten_lines.append(line)
-    if not replaced:
-        rewritten_lines.insert(0, f"mtllib {mtl_name}")
-    obj_path.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
-
-
-def rewrite_mtl_base_color(mtl_path: Path, *, texture_name: str) -> None:
-    if not mtl_path.exists():
-        raise FileNotFoundError(f"Expected MTL file not found: {mtl_path}")
-
-    lines = mtl_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    rewritten_lines: list[str] = []
-    saw_map_kd = False
-    saw_newmtl = False
-    inserted_in_current_block = False
-
-    for line in lines:
-        if line.startswith("newmtl "):
-            if saw_newmtl and not inserted_in_current_block:
-                rewritten_lines.append(f"map_Kd {texture_name}")
-            rewritten_lines.append(line)
-            saw_newmtl = True
-            inserted_in_current_block = False
-            continue
-        if line.startswith("map_Kd "):
-            rewritten_lines.append(f"map_Kd {texture_name}")
-            saw_map_kd = True
-            inserted_in_current_block = True
-            continue
-        rewritten_lines.append(line)
-
-    if saw_newmtl and not inserted_in_current_block:
-        rewritten_lines.append(f"map_Kd {texture_name}")
-        saw_map_kd = True
-    if not saw_newmtl and not saw_map_kd:
-        rewritten_lines.extend(["newmtl material_0", f"map_Kd {texture_name}"])
-
-    mtl_path.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
 
 
 def augment_meshy_geometry_prompt(prompt: str) -> str:

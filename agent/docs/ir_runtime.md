@@ -65,7 +65,10 @@ Important limitation:
 
 - `mjcf` bodies do not accept body-level `fixed`
 - fixed-base MJCF behavior must be encoded inside the XML
-- in the current `agent` FEM+IPC runtime path, articulated rigid bodies are forced onto IPC `two_way_soft_constraint` coupling, even when the imported articulated base is fixed
+- in the current `agent` FEM+IPC runtime path, all IR rigid bodies are forced onto IPC `two_way_soft_constraint`
+  coupling, including fixed obstacles and articulated bodies
+- the hidden FEM support ground remains IPC-only; normal `scene.add_ground` remains a Genesis rigid ground for rigid
+  bodies
 
 ### Mesh Shape
 

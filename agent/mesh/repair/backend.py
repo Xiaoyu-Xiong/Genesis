@@ -6,7 +6,7 @@ import numpy as np
 import trimesh
 from trimesh import repair as trimesh_repair
 
-from .models import MeshRepairConfig, MeshRepairResult
+from ..models import MeshRepairConfig, MeshRepairResult
 
 
 def repair_mesh_with_ftetwild(

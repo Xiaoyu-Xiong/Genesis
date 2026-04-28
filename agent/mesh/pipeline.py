@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from ..io_utils import dump_json
-from .meshy_client import MeshyClient
 from .models import (
     MeshRepairConfig,
     MeshyApiConfig,
@@ -16,8 +15,10 @@ from .models import (
     MeshyTextureConfig,
     TextToMeshBundle,
 )
-from .sanity import run_mesh_manifold_check
-from .pipeline_steps import (
+from .repair.sanity import run_mesh_manifold_check
+from .texture.transfer import transfer_texture_to_repaired_mesh
+from .workflow.meshy import MeshyClient
+from .workflow.steps import (
     augment_meshy_geometry_prompt,
     extract_preview_task_id,
     run_repair_pipeline,
@@ -26,7 +27,6 @@ from .pipeline_steps import (
     slugify_prompt,
     time_stage,
 )
-from .texture_transfer import transfer_texture_to_repaired_mesh
 
 
 def default_mesh_output_dir(prompt: str, *, root: Path = Path("agent/generated_meshes")) -> Path:

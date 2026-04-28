@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..ir_schema import RenderIR
+from ..ir_schema.scene import RenderIR
 
 
 @dataclass

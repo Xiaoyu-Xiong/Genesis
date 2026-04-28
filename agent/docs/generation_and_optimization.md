@@ -39,12 +39,22 @@ uv run python -m agent.llm_generator.cli generate \
 
 ### Tool-Library Policy
 
-[agent/tool_library](../tool_library) contains:
+[agent/tool_library](../tool_library) is the policy layer between prompt-side generation and runtime capability.
 
-- generator-side hard rules
-- mesh / articulated tool specifications
-- validation logic
-- program constraints
+Current structure is:
+
+- payload and tool-bootstrap code:
+  - [payloads/generation.py](../tool_library/payloads/generation.py)
+  - [payloads/specs.py](../tool_library/payloads/specs.py)
+  - `tool_library/payloads/`
+- constraint and rule code:
+  - [constraints/program.py](../tool_library/constraints/program.py)
+  - [constraints/rules.py](../tool_library/constraints/rules.py)
+  - `tool_library/constraints/`
+- runtime adapters:
+  - [runtime_api.py](../tool_library/runtime_api.py)
+  - [capabilities.py](../tool_library/capabilities.py)
+  - [overrides.py](../tool_library/overrides.py)
 
 This layer is responsible for:
 
@@ -54,7 +64,11 @@ This layer is responsible for:
 - enforcing constraints such as density bounds and initial-scene validation
 - sanitizing generator payloads before schema parse, including stripping deformable-body collision fields that are unsupported in the current FEM+IPC pipeline and rewriting mistakenly selected generated textured OBJ paths back to the canonical repaired runtime mesh path when available
 
-For the current `agent` FEM+IPC runtime path, articulated rigid bodies are routed onto IPC `two_way_soft_constraint` coupling in both direct runtime execution and compiled output, instead of using the engine's fixed-base `external_articulation` auto-selection path.
+For the current `agent` FEM+IPC runtime path, all IR rigid bodies, including fixed obstacles and articulated rigid
+bodies, are routed onto IPC `two_way_soft_constraint` coupling in both direct runtime execution and compiled output.
+This keeps soft-rigid contact available through IPC while keeping the rigid bodies visible to Genesis' rigid solver
+for pure rigid contact whenever `deformable.ipc_enable_rigid_rigid_contact=false`. The hidden FEM support ground remains
+an IPC-only plane; normal `scene.add_ground` still adds a Genesis rigid ground for rigid bodies.
 
 For FEM+IPC sanity failures, the validator now preserves more of libuipc's original diagnostic lines, including `SimplicialSurfaceIntersectionCheck` output, and annotates runtime object names such as `fem_0_0` or `rigid_link_3_0` back to inferred IR body names when that mapping can be recovered before scene build. This feedback is returned through `validate_ir` tool errors and through the generator's local finalization error path, so revision rounds can see specific overlapping body pairs instead of only a generic "world is not valid" message. When a specific geometric root cause such as initial intersection or half-plane clearance failure is already present, the validator suppresses later cascading `rigid state accessor` noise from the same failed build so the generator is not steered by the wrong secondary error.
 
@@ -101,6 +115,12 @@ The optimization CLI also supports:
 - `--mesh-texture-enabled`
 
 so the full loop can request textured mesh assets when needed.
+
+The internal optimization implementation is split into:
+
+- [pipeline.py](../opt/pipeline.py): round orchestration and batch control
+- [models.py](../opt/models.py): config and result dataclasses
+- [artifacts.py](../opt/artifacts.py): workspace layout, run payload shaping, and usage/artifact helpers
 
 The current critic path is two-stage when enabled in [agent/configs.py](../configs.py):
 
@@ -210,7 +230,9 @@ For FEM+IPC scenes, the most important stability knobs now live in
 - `deformable.ipc_constraint_strength_rotation`: rotational counterpart of the above. Lowering this is often useful
   when a free rigid plate jitters in roll/pitch while pressing soft bodies.
 - `deformable.ipc_enable_rigid_ground_contact`: whether rigid-ground pairs also participate in IPC.
-- `deformable.ipc_enable_rigid_rigid_contact`: whether rigid-rigid pairs participate in IPC.
+- `deformable.ipc_enable_rigid_rigid_contact`: whether rigid-rigid pairs participate in IPC. When this is false, the
+  current agent rigid-body routing leaves pure rigid-rigid contact on Genesis' rigid solver while FEM-involving contact
+  remains in IPC.
 - `deformable.ipc_two_way_coupling`: whether IPC reaction forces feed back into Genesis rigid bodies. Disabling this
   can reduce jitter, but it also removes physically important soft-to-rigid feedback.
 - `deformable.ipc_enable_rigid_dofs_sync`: whether IPC reference DOF state is synchronized from Genesis each step.

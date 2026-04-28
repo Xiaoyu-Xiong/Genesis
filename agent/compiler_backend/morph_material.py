@@ -3,10 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from ..configs import CONFIGS
-from ..ir_schema import (
+from ..ir_schema.body import (
     BodyIR,
     BoxShapeIR,
-    CollisionIR,
     CylinderShapeIR,
     FEMElasticMaterialIR,
     MJCFShapeIR,
@@ -15,6 +14,7 @@ from ..ir_schema import (
     SphereShapeIR,
     URDFShapeIR,
 )
+from ..ir_schema.scene import CollisionIR
 from .formatting import fmt_tuple
 
 
@@ -110,12 +110,9 @@ def body_material_source(body: BodyIR) -> str | None:
         return f"gs.materials.FEM.Elastic({', '.join(kwargs)})"
     coup_type_override = None
     if CONFIGS.deformable.simulation_backend == "fem_ipc":
-        if body.is_articulated:
-            coup_type_override = "two_way_soft_constraint"
-        elif body.fixed:
-            coup_type_override = "ipc_only"
-        else:
-            coup_type_override = "two_way_soft_constraint"
+        # Keep compiled output consistent with runtime setup: IR rigid bodies remain visible to Genesis'
+        # rigid solver for pure rigid contact, while hidden support planes are emitted as ipc_only separately.
+        coup_type_override = "two_way_soft_constraint"
     kwargs = material_kwargs_from_collision(rho=body.rho, collision=body.collision, coup_type_override=coup_type_override)
     if not kwargs:
         return None

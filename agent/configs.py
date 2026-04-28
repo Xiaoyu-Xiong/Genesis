@@ -62,10 +62,10 @@ class DeformableConfigs:
     ipc_constraint_strength_translation: float = 0.5
     ipc_constraint_strength_rotation: float = 0.2
     ipc_enable_rigid_ground_contact: bool = False
-    ipc_enable_rigid_rigid_contact: bool = True
+    ipc_enable_rigid_rigid_contact: bool = False
     ipc_two_way_coupling: bool = True
-    ipc_enable_rigid_dofs_sync: bool = False
-    ipc_free_base_driven_by_ipc: bool = False
+    ipc_enable_rigid_dofs_sync: bool = True
+    ipc_free_base_driven_by_ipc: bool = True
 
 
 @dataclass(slots=True, frozen=True)
@@ -83,7 +83,7 @@ class OptimizationConfigs:
     critic_stage1_reasoning_effort: str = "xhigh"
     critic_force_escalate_on_stage1_pass: bool = True
     critic_stage2_tool_max_rounds: int = 10
-    max_parallel: int = 3
+    max_parallel: int = 2
     backend: str = "gpu"
     max_opt_rounds: int = 12
     max_attempts: int = 20

@@ -5,11 +5,12 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from ...ir_schema import RigidIR
-from ..client import OpenAIResponsesClient, coerce_content_to_text
+from ...ir_schema.program import RigidIR
+from ..client.openai_client import OpenAIResponsesClient
+from ..client.responses_format import coerce_content_to_text
 from ..constraints.general_constraints import extract_first_json_object, parse_sanitize_validate
-from ...tool_library import GeneralIRAgentToolLibrary
-from ...tool_library.tool_specs import build_ir_agent_process_requirements
+from ...tool_library.generator_tools import GeneralIRAgentToolLibrary
+from ...tool_library.constraints.rules import build_ir_agent_process_requirements
 from .prompt_utils import truncate_prompt_text
 
 

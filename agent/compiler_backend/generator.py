@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..ir_schema import RigidIR, normalize_ir, parse_ir_payload
+from ..ir_schema.program import RigidIR, normalize_ir, parse_ir_payload
 from .emit_actions import emit_action_loop
 from .emit_actuators import emit_actuator_setup
 from .emit_scene import emit_scene_setup

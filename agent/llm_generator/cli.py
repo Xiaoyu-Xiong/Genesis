@@ -5,8 +5,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ..io_utils import dump_json
-from .agents import generate_ir_two_agent
-from .client import OpenAIResponsesClient, REASONING_EFFORT_VALUES
+from .agents.two_agent_generator import generate_ir_two_agent
+from .client.openai_client import OpenAIResponsesClient, REASONING_EFFORT_VALUES
 
 
 def _cmd_generate(args: argparse.Namespace) -> None:

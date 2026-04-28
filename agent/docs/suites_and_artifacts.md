@@ -7,6 +7,7 @@ This document summarizes the main batch scripts and the artifact roots they prod
 Useful scripts under [agent/scripts](../scripts):
 
 - [run_opt_robot_suite.sh](../scripts/run_opt_robot_suite.sh)
+- [run_opt_robotics_scene_suite.sh](../scripts/run_opt_robotics_scene_suite.sh)
 - [run_opt_multibody_suite.sh](../scripts/run_opt_multibody_suite.sh)
 - [run_opt_mesh_suite.sh](../scripts/run_opt_mesh_suite.sh)
 - [run_opt_mesh_realworld_suite.sh](../scripts/run_opt_mesh_realworld_suite.sh)
@@ -22,6 +23,12 @@ Texture-specific scripts are split by intent:
 
 - `run_mesh_meshy_texture_suite.sh`: standalone textured mesh generation / repair / render validation
 - `run_opt_deformable_texture_suite.sh`: full task optimization with deformable textured bodies
+
+Robotics-oriented scripts are split by evaluation intent:
+
+- `run_opt_robot_suite.sh`: articulated robot motion and open-loop behavior tasks
+- `run_opt_robotics_scene_suite.sh`: compact classic robotics scene setup tasks using mostly primitive geometry, with
+  prompts that do not require complex control policies
 
 `run_opt_deformable_texture_suite.sh` inherits batch parallelism from [agent/configs.py](../configs.py) via `CONFIGS.optimization.max_parallel` and emits:
 
@@ -42,6 +49,7 @@ Current artifact roots:
 Common run roots:
 
 - `agent/runs/opt_robot_suite`
+- `agent/runs/opt_robotics_scene_suite`
 - `agent/runs/opt_multibody_suite`
 - `agent/runs/opt_mesh_suite`
 - `agent/runs/opt_mesh_realworld_suite`

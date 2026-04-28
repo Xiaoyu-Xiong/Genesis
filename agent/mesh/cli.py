@@ -17,7 +17,7 @@ from .models import (
     MeshyTextureConfig,
 )
 from .pipeline import default_mesh_output_dir, generate_meshy_mesh_from_text, parse_extra_payload
-from .sanity import run_mesh_manifold_check
+from .repair.sanity import run_mesh_manifold_check
 
 
 def _cmd_generate(args: argparse.Namespace) -> None:
@@ -99,7 +99,7 @@ def _cmd_manifold_check(args: argparse.Namespace) -> None:
 
 
 def _cmd_render_textured_views(args: argparse.Namespace) -> None:
-    from .render_views import render_textured_mesh_views
+    from .texture.render_views import render_textured_mesh_views
 
     outputs = render_textured_mesh_views(
         mesh_path=args.mesh,

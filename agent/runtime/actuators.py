@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..ir_schema import ActuatorIR
+from ..ir_schema.body import ActuatorIR
 from .models import ActuatorBinding
 from .selectors import resolve_dofs_idx_local, to_scalar_or_tuple
 

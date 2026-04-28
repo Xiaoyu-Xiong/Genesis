@@ -4,7 +4,7 @@ import os
 from typing import Any
 
 from ..configs import CONFIGS
-from ..ir_schema import RigidIR
+from ..ir_schema.program import RigidIR
 from .actuators import configure_actuators
 from .builders import apply_collision_overrides, build_body_material, build_body_morph, build_rigid_material
 from .helpers import get_follow_target_entity

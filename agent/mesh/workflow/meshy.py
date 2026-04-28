@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from urllib import error, parse, request
 
-from .models import MeshyApiConfig, MeshyGenerationConfig, MeshyRequestError
+from ..models import MeshyApiConfig, MeshyGenerationConfig, MeshyRequestError
 
 
 class MeshyClient:

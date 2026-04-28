@@ -4,9 +4,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ..compiler_backend import CompiledRigidArtifact, compile_rigid_ir_to_file, compile_rigid_ir_to_source
-from ..ir_schema import RigidIR, normalize_ir, parse_ir_payload
-from ..runtime import build_llm_event_pack, run_rigid_ir
+from ..compiler_backend.generator import CompiledRigidArtifact, compile_rigid_ir_to_file, compile_rigid_ir_to_source
+from ..ir_schema.program import RigidIR, normalize_ir, parse_ir_payload
+from ..runtime.event_pack import build_llm_event_pack
+from ..runtime.runner import run_rigid_ir
 
 
 class RigidToolLibrary:
@@ -96,7 +97,8 @@ class RigidToolLibrary:
         force_primitive_mode: bool = False,
         mesh_texture_enabled: bool | None = None,
     ) -> RigidIR:
-        from ..llm_generator import OpenAIResponsesClient, generate_ir_two_agent
+        from ..llm_generator.agents.two_agent_generator import generate_ir_two_agent
+        from ..llm_generator.client.openai_client import OpenAIResponsesClient
 
         client = OpenAIResponsesClient.from_env(
             api_key_env=api_key_env,

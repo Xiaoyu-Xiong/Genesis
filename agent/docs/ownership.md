@@ -40,14 +40,16 @@ Key files:
 - [body.py](../ir_schema/body.py)
 - [actions.py](../ir_schema/actions.py)
 - [builders.py](../runtime/builders.py)
+- [helpers.py](../runtime/helpers.py)
+- `runtime/observation/`
 - [setup.py](../runtime/setup.py)
 - [runner.py](../runtime/runner.py)
 - [event_pack.py](../runtime/event_pack.py)
 
 Shared boundary files it must review:
 
-- [program_constraints.py](../tool_library/program_constraints.py)
-- [tool_spec_rules.py](../tool_library/tool_spec_rules.py)
+- [program.py](../tool_library/constraints/program.py)
+- [rules.py](../tool_library/constraints/rules.py)
 - [genesis/utils/mesh.py](../../genesis/utils/mesh.py)
 - [genesis/utils/element.py](../../genesis/utils/element.py)
 - [fem_entity.py](../../genesis/engine/entities/fem_entity.py)
@@ -84,12 +86,14 @@ Primary ownership:
 Key files:
 
 - [pipeline.py](../mesh/pipeline.py)
-- [pipeline_steps.py](../mesh/pipeline_steps.py)
-- [meshy_client.py](../mesh/meshy_client.py)
-- [texture_transfer.py](../mesh/texture_transfer.py)
-- [render_views.py](../mesh/render_views.py)
-- [sanity.py](../mesh/sanity.py)
-- [ftetwild_backend.py](../mesh/ftetwild_backend.py)
+- [workflow/steps.py](../mesh/workflow/steps.py)
+- [workflow/meshy.py](../mesh/workflow/meshy.py)
+- [workflow/summary.py](../mesh/workflow/summary.py)
+- [repair/postprocess.py](../mesh/repair/postprocess.py)
+- [repair/backend.py](../mesh/repair/backend.py)
+- [repair/sanity.py](../mesh/repair/sanity.py)
+- [texture/transfer.py](../mesh/texture/transfer.py)
+- [texture/render_views.py](../mesh/texture/render_views.py)
 
 Shared boundary files it drives, with required Physics Runtime review:
 
@@ -135,11 +139,14 @@ Key files:
 - [two_agent_generator.py](../llm_generator/agents/two_agent_generator.py)
 - [xml_agent.py](../llm_generator/agents/xml_agent.py)
 - [prompt_utils.py](../llm_generator/agents/prompt_utils.py)
-- [tool_spec_rules.py](../tool_library/tool_spec_rules.py)
-- [tool_spec_payloads.py](../tool_library/tool_spec_payloads.py)
-- [program_constraints.py](../tool_library/program_constraints.py)
+- [constraints/rules.py](../tool_library/constraints/rules.py)
+- [constraints/program.py](../tool_library/constraints/program.py)
+- [payloads/generation.py](../tool_library/payloads/generation.py)
+- [payloads/specs.py](../tool_library/payloads/specs.py)
 - [prompting.py](../llm_critic/prompting.py)
 - [pipeline.py](../opt/pipeline.py)
+- [models.py](../opt/models.py)
+- [artifacts.py](../opt/artifacts.py)
 - [feedback.py](../opt/feedback.py)
 
 Shared boundary files requiring specialist review:
@@ -245,7 +252,7 @@ Reason:
 
 - it decides when mesh generation is invoked and how generated mesh assets enter the IR flow
 
-### `agent/tool_library/program_constraints.py`
+### `agent/tool_library/constraints/program.py`
 
 - primary owner: Prompt Policy Agent
 - required reviewers:
