@@ -24,6 +24,20 @@ The practical summary for `agent/` work is:
 - run git only from the host shell
 - prefer explicit CLI flags over ad hoc config mutation
 
+## Pipeline-Specific Maintenance Rules
+
+These rules apply to the current legacy `agent/` pipeline. They are intentionally scoped here so the repository root can
+stay focused on rules that apply across both the existing IR-based pipeline and future code-native work.
+
+- `agent/configs.py` is a static config module. Do not reintroduce environment-variable-driven config loading there.
+  For run-specific behavior, prefer explicit CLI flags.
+- When changing the `agent/` pipeline, suite scripts, or mesh / texture / deformable workflows, update the relevant
+  documentation under `agent/` in the same turn.
+- For `agent/` work, if the user does not explicitly prescribe a task split, decide whether to decompose the work across
+  the ownership areas documented in [Ownership and Collaboration](docs/ownership.md), and choose the split that minimizes
+  ambiguity and coordination cost. Explicit user instructions about scope, ownership, or task splitting always override
+  this default.
+
 ## Documentation Map
 
 - [IR and Runtime](docs/ir_runtime.md)

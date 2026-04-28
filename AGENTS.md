@@ -17,9 +17,6 @@ These rules are mandatory for this repository.
 - **For commands which require OpenAI API request**, the API response will take time based on OpenAI server loads, so do not assume immediate execution.
 - **When the user says they are already inside Apptainer, give commands without an Apptainer prefix.** In that case, do not re-wrap commands with `apptainer exec`.
 - **When the user asks for a command, prefer the shortest correct command.** Do not wrap a simple rerun in an unnecessarily complex script.
-- **`agent/configs.py` is a static config module.** Do not reintroduce environment-variable-driven config loading there. For run-specific behavior, prefer explicit CLI flags.
-- **When changing the `agent/` pipeline, suite scripts, or mesh / texture / deformable workflows, update the relevant documentation under `agent/` in the same turn.**
-- **For `agent/` work, if the user does not explicitly prescribe a task split, decide yourself whether to decompose the work across the ownership areas documented in `agent/docs/ownership.md`, and choose the split that minimizes ambiguity and coordination cost.** Explicit user instructions about scope, ownership, or task splitting always override this default.
 
 ## Quick Start
 
@@ -112,9 +109,4 @@ Do NOT ask when:
 | [CODING_CONVENTIONS.md](.github/contributing/CODING_CONVENTIONS.md) | Code style and patterns |
 | [EXAMPLES.md](.github/contributing/EXAMPLES.md) | Examples reference |
 | [PULL_REQUESTS.md](.github/contributing/PULL_REQUESTS.md) | PR guidelines |
-| [agent/README.md](agent/README.md) | Agent pipeline index and entry points |
-| [agent/docs/ir_runtime.md](agent/docs/ir_runtime.md) | IR model, body semantics, runtime, and event pack |
-| [agent/docs/generation_and_optimization.md](agent/docs/generation_and_optimization.md) | Generator, critic, optimization loop, and config overview |
-| [agent/docs/mesh_texture.md](agent/docs/mesh_texture.md) | Mesh generation, repair, texture transfer, and texture debug flow |
-| [agent/docs/suites_and_artifacts.md](agent/docs/suites_and_artifacts.md) | Suite scripts, artifact roots, and common workflows |
-| [agent/docs/ownership.md](agent/docs/ownership.md) | Subagent ownership boundaries, shared files, and collaboration contract |
+| [agent/README.md](agent/README.md) | Legacy `agent/` pipeline index, entry points, and pipeline-specific maintenance rules |

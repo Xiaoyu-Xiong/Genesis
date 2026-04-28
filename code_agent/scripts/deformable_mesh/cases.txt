@@ -1,0 +1,9 @@
+stanford_bunny_drop|Create a scene where 10 identical medium-sized soft Stanford Bunnies drop from a height into an open box container with visible collision and deformation, render 10s behavior.
+soft_monster_stack|Create a stylized scene where a tall stack of 10 medium-sized identical soft monster toys wobbles, leans, collapses, and deforms, render 10s behavior.
+rubber_duck_ramp_cascade|Create a playful ramp-and-bin scene where around 10 identical medium-sized soft rubber ducks slide, tumble, deform, and pile into a boxed area, render 10s behavior.
+traffic_cone_obstacle_sweep|Create a scene with around 10 identical medium-sized upright soft traffic cones arranged like an obstacle field, and let one heavier rigid primitive object sweep through them, render 10s behavior.
+mixed_plush_drop_pile|Create a scene where several identical medium-sized soft plush toys and a few heavier rigid toy blocks are dropped together so the pile churns and reshapes, render 10s behavior.
+mushroom_plate_support|Create a scene where a rigid plate or box settles onto a cluster of soft mushroom-shaped support meshes, render 10s behavior.
+teapot_corridor_cascade|Create a narrow corridor filled with around 10 identical soft Stanford teapots so a dense rigid block pushes through them and causes a cascading tumble over 10s.
+animal_mesh_mix|Create a scene with around 10 identical soft animal toys with varied silhouettes dropped into a shallow arena so they collide, tumble, and pile up, render 10s behavior.
+toy_mesh_jumble|Create a scene with around 10 identical toy-like soft mesh props such as ducks, stars, bears, and cars packed into a pen and disturbed by one heavier rigid object over 10s.

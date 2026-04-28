@@ -1,0 +1,8 @@
+box_pyramid_impact|Create a compact pyramid of small boxes resting on the ground, then launch one dense sphere at high speed into the lower layer so the pyramid collapses and scatters over 6s.
+sphere_rack_break|Create a tightly packed triangular rack of equal small spheres on the ground and launch one cue sphere at high speed into the rack to produce a billiards-style break over 6s.
+box_wall_breach|Create a short wall built from several stacked boxes and launch a heavy rectangular projectile into the center so the wall breaks apart and collapses over 6s.
+block_arch_collapse|Create a simple freestanding arch from rectangular blocks on the ground, then send a fast small sphere into one side so the arch loses support and collapses over 6s.
+mixed_bodies_on_slope|Create a fixed inclined plane with several spheres, boxes, and cylinders initially resting near the top, then let them move down the slope together, colliding, sliding, and rolling into each other over 6s.
+cylinder_cluster_scatter|Create a dense cluster of upright cylinders on the ground and launch one fast box through the cluster so the cylinders topple and scatter over 6s.
+offset_box_stack_settle|Create a tall stack of boxes with small alternating horizontal offsets so the stack is near the edge of stability, then simulate the settling and eventual toppling behavior over 6s.
+bin_fill_scatter|Create a fixed open-top bin from several static box walls, place a group of small spheres above it, and let them fall into the bin while colliding with each other and with the walls over 6s.

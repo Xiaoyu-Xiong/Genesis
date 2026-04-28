@@ -1,0 +1,8 @@
+mobile_base_patrol|Create a simple wheeled mobile robot that drives forward, pauses, turns, and drives to a second waypoint with a follow camera over 8s.
+forklift_maneuver|Generate a forklift-like articulated vehicle that drives forward and raises its fork assembly during motion over 8s.
+delta_robot_demo|Generate a delta-robot-style articulated mechanism and move its end platform through several distinct heights over 8s.
+excavator_scoop|Create an excavator-style arm on a tracked base and render a scoop-like arm motion sequence over 8s.
+scara_sequence|Generate a SCARA-style robot and move through multiple target positions with clear joint-space transitions over 8s.
+self_balancing_bot|Create a two-wheel self-balancing robot and render stabilization followed by a small forward motion over 8s.
+dual_robot_pushers|Create two separate compact mobile pushing robots. Place two movable boxes and one fixed wall in the scene. Render an 8s open-loop sequence where each robot drives toward its own box and pushes it in a different direction.
+arm_pair_target_gallery|Create two separate fixed-base articulated arms, plus several fixed target spheres arranged in space. Render an 8s open-loop sequence where each arm moves through its own sequence of poses near different targets.

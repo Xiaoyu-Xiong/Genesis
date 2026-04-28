@@ -11,6 +11,21 @@ orchestration; implementation details live in three subdirectories:
 - `repair/`: manifold checks and fTetWild / pytetwild repair
 - `texture/`: repaired-mesh UV generation, texture transfer, and textured validation renders
 
+## Code-Agent Migration Note
+
+The code-native pipeline has a migrated copy of this mesh implementation under
+[code_agent/assets/mesh](../../code_agent/assets/mesh). That copy is documented in
+[code_agent/docs/mesh.md](../../code_agent/docs/mesh.md) and is the mesh asset implementation used by the new
+[code_agent plan](../../code_agent/agentive_code_pipeline_plan.md).
+
+The migration intentionally preserves the existing Meshy, repair, texture-transfer, and validation responsibilities.
+The new `code_agent` layer should only normalize asset requests, call the migrated mesh pipeline, and summarize outputs
+into an Asset Manifest. MJCF/XML generation is not migrated from the legacy XML agent; the code-native plan routes it to
+a dedicated Codex XML worker instead.
+
+Legacy `agent/` runs still use this `agent/mesh` path and [agent/configs.py](../configs.py). Code-agent runs should use
+[code_agent/configs.py](../../code_agent/configs.py) for static Meshy and repair defaults.
+
 Main responsibilities:
 
 - Meshy preview generation

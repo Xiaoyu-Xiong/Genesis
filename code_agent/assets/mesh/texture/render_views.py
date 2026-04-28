@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+import math
+from pathlib import Path
+
+import numpy as np
+import trimesh
+
+import genesis as gs
+from genesis.utils.tools import save_img_arr
+
+
+def render_textured_mesh_views(
+    *,
+    mesh_path: str | Path,
+    out_dir: str | Path,
+    res: tuple[int, int] = (768, 768),
+    fov: float = 35.0,
+) -> dict[str, str]:
+    mesh_path = Path(mesh_path)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    mesh = trimesh.load_mesh(str(mesh_path), force="mesh", skip_texture=True, process=False)
+    if not isinstance(mesh, trimesh.Trimesh):
+        raise TypeError(f"Expected textured mesh path to load as Trimesh, got {type(mesh).__name__}")
+
+    bounds = mesh.bounds.astype(np.float64, copy=False)
+    bbox_min = bounds[0]
+    bbox_max = bounds[1]
+    extents = np.maximum(bbox_max - bbox_min, 1e-6)
+    center_xy = 0.5 * (bbox_min[:2] + bbox_max[:2])
+    translation = (-float(center_xy[0]), -float(center_xy[1]), -float(bbox_min[2]))
+    height = float(extents[2])
+    diagonal = float(np.linalg.norm(extents))
+    focus = np.array((0.0, 0.0, max(0.4 * height, 0.05)), dtype=np.float64)
+    distance = _camera_distance(diagonal=diagonal, fov=fov)
+    z_boost = max(0.15 * height, 0.05)
+
+    gs.init(backend=gs.cpu, logging_level="info")
+    scene = gs.Scene(
+        show_viewer=False,
+        renderer=gs.renderers.Rasterizer(),
+        viewer_options=gs.options.ViewerOptions(
+            res=res,
+            camera_pos=(distance, -distance, distance),
+            camera_lookat=tuple(focus.tolist()),
+            camera_fov=fov,
+        ),
+        vis_options=gs.options.VisOptions(
+            ambient_light=(0.85, 0.85, 0.85),
+            show_world_frame=False,
+            show_link_frame=False,
+            plane_reflection=False,
+        ),
+    )
+
+    scene.add_entity(
+        morph=gs.morphs.Plane(pos=(0.0, 0.0, -0.002)),
+        surface=gs.surfaces.Rough(color=(0.92, 0.92, 0.92, 1.0)),
+    )
+    scene.add_entity(
+        morph=gs.morphs.Mesh(
+            file=str(mesh_path),
+            scale=1.0,
+            pos=translation,
+        )
+    )
+    camera = scene.add_camera(
+        res=res,
+        pos=(distance, -distance, distance),
+        lookat=tuple(focus.tolist()),
+        fov=fov,
+        GUI=False,
+    )
+    scene.build()
+
+    view_specs = {
+        "front": {
+            "pos": (0.0, -distance, focus[2] + z_boost),
+            "lookat": tuple(focus.tolist()),
+            "up": (0.0, 0.0, 1.0),
+        },
+        "side": {
+            "pos": (distance, 0.0, focus[2] + z_boost),
+            "lookat": tuple(focus.tolist()),
+            "up": (0.0, 0.0, 1.0),
+        },
+        "top": {
+            "pos": (0.0, 0.0, distance),
+            "lookat": tuple(focus.tolist()),
+            "up": (0.0, 1.0, 0.0),
+        },
+        "iso": {
+            "pos": tuple((focus + _normalized(np.array((1.0, -1.0, 0.75))) * distance).tolist()),
+            "lookat": tuple(focus.tolist()),
+            "up": (0.0, 0.0, 1.0),
+        },
+    }
+
+    outputs: dict[str, str] = {}
+    for view_name, spec in view_specs.items():
+        camera.set_pose(pos=spec["pos"], lookat=spec["lookat"], up=spec["up"])
+        rgb_arr, _, _, _ = camera.render(rgb=True)
+        out_path = out_dir / f"{view_name}.png"
+        save_img_arr(np.asarray(rgb_arr), str(out_path))
+        outputs[view_name] = str(out_path)
+
+    return outputs
+
+
+def _camera_distance(*, diagonal: float, fov: float) -> float:
+    radius = max(diagonal * 0.5, 0.1)
+    fov_rad = math.radians(max(1.0, min(170.0, fov)))
+    return max((radius / math.tan(fov_rad * 0.5)) * 1.5, diagonal * 1.2, 0.75)
+
+
+def _normalized(vec: np.ndarray) -> np.ndarray:
+    norm = float(np.linalg.norm(vec))
+    if norm <= 1e-12:
+        return np.array((1.0, 0.0, 0.0), dtype=np.float64)
+    return vec / norm
