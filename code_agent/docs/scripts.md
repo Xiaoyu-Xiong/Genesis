@@ -1,33 +1,30 @@
 # Scripts and Suites
 
-`code_agent/scripts/` contains first-pass suite scripts and prompt cases for the code-native pipeline.
+`code_agent/scripts/` contains suite scripts and prompt cases for the code-native pipeline.
 
 Each category directory contains:
 
-- `cases.txt`: `case_id|prompt` cases copied or adapted from legacy `agent/scripts` suites and existing Genesis examples.
+- `cases.txt`: `case_id|prompt` cases adapted from suite prompts and existing Genesis examples.
 - `run.sh`: a wrapper that copies cases into a run directory and invokes `code_agent.cli run-suite`.
 
 Usage:
 
 ```bash
-apptainer exec /ocean/projects/cis250078p/xxiong1/containers/genesis.sif \
-  bash code_agent/scripts/rigid_primitives/run.sh \
+bash code_agent/scripts/rigid_primitives/run.sh \
   --run-root code_agent/workspaces/suites/rigid_primitives/dev \
-  --cpu --codex-mode off --generation-mode codex --max-cases 1 --no-render
+  --gpu --max-cases 1 --render
 ```
 
 Useful options forwarded to `code_agent.cli run-suite`:
 
-- `--cpu` or `--gpu`: choose backend. The current smoke validation uses `--cpu`.
-- `--codex-mode off|auto|required`: disable planner, record planner/fallback, or require planner success.
-- `--generation-mode codex|fallback`: choose Codex writer generation or the deterministic fallback generator.
+- `--gpu` or `--cpu`: choose backend. GPU is the default target for validation; CPU is for explicit CPU checks.
 - `--max-cases N`: run a subset while iterating.
 - `--render` or `--no-render`: enable or skip generated render output.
+- `--duration-sec N`, `--steps N`, `--render-fps N`: override inferred simulation duration, step count, or video fps.
 - `--repair-rounds N`: allow owner-routed Codex writer repair attempts after critic failure.
 - `--timeout-sec N`: timeout for each generated simulation.
 
-`--codex-mode` currently controls only the planner adapter. It does not select writer generation; use
-`--generation-mode` for that.
+The planner and all four writer modules run for every suite case.
 
 ## Categories
 
@@ -101,8 +98,7 @@ Cases:
 
 ## Execution Rule
 
-Future scripts that invoke Python, `uv`, `pytest`, or Genesis must run inside Apptainer or through approved sbatch
-execution.
+Future scripts that invoke Python, `uv`, `pytest`, or Genesis should run through the repository uv environment and use
+the dedicated local GPU by default. Use CPU only for explicit CPU checks or when GPU execution is unavailable.
 
-The scripts detect when they are already inside Apptainer and then call `uv run python -m code_agent.cli run-suite`
-directly. From the host, they wrap the CLI with `apptainer exec` using the standard Genesis image.
+The scripts call `uv run python -m code_agent.cli run-suite` directly.

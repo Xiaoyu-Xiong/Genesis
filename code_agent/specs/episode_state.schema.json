@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "episode_state.schema.json",
+  "title": "Planner Episode State",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "case_id",
+    "task",
+    "status",
+    "turn_index",
+    "control",
+    "budgets",
+    "workers",
+    "observations"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "case_id": { "type": "string", "minLength": 1 },
+    "task": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["running", "pass", "fail", "inconclusive"] },
+    "turn_index": { "type": "integer", "minimum": 0 },
+    "planner_output_path": { "type": ["string", "null"] },
+    "timing": { "type": ["object", "null"] },
+    "control": {
+      "type": "object",
+      "required": ["needs_integration", "needs_execution", "needs_critic"],
+      "properties": {
+        "needs_integration": { "type": "boolean" },
+        "needs_execution": { "type": "boolean" },
+        "needs_critic": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "budgets": {
+      "type": "object",
+      "required": ["max_planner_turns", "max_repair_rounds", "repair_attempts"],
+      "properties": {
+        "max_planner_turns": { "type": "integer", "minimum": 1 },
+        "max_repair_rounds": { "type": "integer", "minimum": 0 },
+        "repair_attempts": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "workers": { "type": "object" },
+    "integration": { "type": ["object", "null"] },
+    "execution": { "type": ["object", "null"] },
+    "critic": { "type": ["object", "null"] },
+    "commands": { "type": "array", "items": { "type": "object" } },
+    "observations": { "type": "array", "items": { "type": "object" } },
+    "stop_reason": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}

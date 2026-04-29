@@ -23,16 +23,16 @@ def transfer_texture_to_repaired_mesh(
 ) -> MeshTextureTransferResult:
     processed_dir = output_dir / "processed"
     processed_dir.mkdir(parents=True, exist_ok=True)
-    debug_dir = processed_dir / "repaired_texture_debug"
-    debug_dir.mkdir(parents=True, exist_ok=True)
+    diagnostics_dir = processed_dir / "repaired_texture_diagnostics"
+    diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
     output_mesh_path = target_mesh_path
     output_mtl_path = processed_dir / "repaired.mtl"
     output_texture_path = processed_dir / "base_color.png"
-    aligned_target_path = debug_dir / "repaired_aligned.obj"
-    exported_target_path = debug_dir / "repaired_textured_export.obj"
-    exported_texture_path = debug_dir / "baked_base_color.png"
-    debug_json_path = debug_dir / "transfer_debug.json"
+    aligned_target_path = diagnostics_dir / "repaired_aligned.obj"
+    exported_target_path = diagnostics_dir / "repaired_textured_export.obj"
+    exported_texture_path = diagnostics_dir / "baked_base_color.png"
+    diagnostics_json_path = diagnostics_dir / "transfer_diagnostics.json"
 
     stage_durations_sec: dict[str, float] = {}
     parameterization_filter: str | None = None
@@ -76,7 +76,7 @@ def transfer_texture_to_repaired_mesh(
         stage_durations_sec["parameterize_target_mesh"] = time.monotonic() - stage_start
 
         stage_start = time.monotonic()
-        bake_debug = bake_texture_from_source_mesh(
+        bake_diagnostics = bake_texture_from_source_mesh(
             source_base_color_path=source_base_color_path,
             target_parameterized_mesh_path=exported_target_path,
             output_texture_path=exported_texture_path,
@@ -100,7 +100,7 @@ def transfer_texture_to_repaired_mesh(
         rewrite_obj_mtllib(output_mesh_path, mtl_name=output_mtl_path.name)
         stage_durations_sec["canonicalize_outputs"] = time.monotonic() - stage_start
 
-        debug_payload = {
+        diagnostics_payload = {
             "ok": True,
             "source_mesh_path": str(source_mesh_path),
             "source_base_color_path": str(source_base_color_path),
@@ -115,9 +115,9 @@ def transfer_texture_to_repaired_mesh(
             "parameterization_filter": parameterization_filter,
             "transfer_filter": transfer_filter,
             "stage_durations_sec": stage_durations_sec,
-            "bake_debug": bake_debug,
+            "bake_diagnostics": bake_diagnostics,
         }
-        dump_json(debug_payload, debug_json_path)
+        dump_json(diagnostics_payload, diagnostics_json_path)
 
         return MeshTextureTransferResult(
             ok=True,
@@ -131,11 +131,11 @@ def transfer_texture_to_repaired_mesh(
             source_texture_size=texture_size,
             parameterization_filter=parameterization_filter,
             transfer_filter=transfer_filter,
-            debug_dir=debug_dir,
+            diagnostics_dir=diagnostics_dir,
             stage_durations_sec=stage_durations_sec,
         )
     except Exception as exc:  # noqa: BLE001
-        debug_payload = {
+        diagnostics_payload = {
             "ok": False,
             "source_mesh_path": str(source_mesh_path),
             "source_base_color_path": str(source_base_color_path),
@@ -149,7 +149,7 @@ def transfer_texture_to_repaired_mesh(
             "stage_durations_sec": stage_durations_sec,
             "error": f"{type(exc).__name__}: {exc}",
         }
-        dump_json(debug_payload, debug_json_path)
+        dump_json(diagnostics_payload, diagnostics_json_path)
         return MeshTextureTransferResult(
             ok=False,
             source_mesh_path=source_mesh_path,
@@ -162,7 +162,7 @@ def transfer_texture_to_repaired_mesh(
             source_texture_size=None,
             parameterization_filter=parameterization_filter,
             transfer_filter=transfer_filter,
-            debug_dir=debug_dir,
+            diagnostics_dir=diagnostics_dir,
             stage_durations_sec=stage_durations_sec,
             error=f"{type(exc).__name__}: {exc}",
         )

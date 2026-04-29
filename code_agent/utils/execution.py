@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .apptainer_cpu import ApptainerCpuRunConfig, run_apptainer_cpu
+from code_agent.utils.local_execution import LocalRunConfig, run_local
 
 
 @dataclass(slots=True)
@@ -38,7 +37,11 @@ def run_generated_simulation(
     run_dir: Path,
     backend: str,
     timeout_sec: float,
+    steps: int,
+    render_fps: int,
     render: bool = True,
+    duration_sec: float | None = None,
+    target_video_frames: int | None = None,
 ) -> ExecutionReport:
     reports_dir = run_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -50,16 +53,31 @@ def run_generated_simulation(
     except ValueError:
         main_file = str(main_path)
     render_arg = "--render" if render else "--no-render"
-    raw_report = run_apptainer_cpu(
-        ApptainerCpuRunConfig(
+    extra_args = [
+        "--backend",
+        backend,
+        "--out-dir",
+        "artifacts",
+        "--steps",
+        str(int(steps)),
+        "--fps",
+        str(int(render_fps)),
+    ]
+    if duration_sec is not None:
+        extra_args.extend(("--duration-sec", str(float(duration_sec))))
+    if target_video_frames is not None:
+        extra_args.extend(("--target-video-frames", str(int(target_video_frames))))
+    extra_args.append(render_arg)
+    raw_report = run_local(
+        LocalRunConfig(
             workspace_dir=run_dir,
             main_file=main_file,
             output_dir=reports_dir,
             timeout_sec=timeout_sec,
             python_executable="uv run python",
-            extra_args=("--backend", backend, "--out-dir", "artifacts", "--steps", "40", render_arg),
+            extra_args=tuple(extra_args),
             extra_artifact_paths=("artifacts",),
-            env={"GENESIS_BACKEND": backend, "APPTAINERENV_GENESIS_BACKEND": backend},
+            env={"GENESIS_BACKEND": backend},
         )
     )
     artifact_paths = raw_report.get("artifact_paths", [])
@@ -71,9 +89,5 @@ def run_generated_simulation(
         stdout_path=str(raw_report["stdout_path"]),
         stderr_path=str(raw_report["stderr_path"]),
         artifacts=artifacts,
-    )
-    (reports_dir / "legacy_execution_report.json").write_text(
-        json.dumps(report.to_dict(), indent=2) + "\n",
-        encoding="utf-8",
     )
     return report

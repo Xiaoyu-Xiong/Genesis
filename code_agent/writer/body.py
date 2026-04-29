@@ -14,7 +14,7 @@ SPEC = WorkerSpec(
     - `name`: string
     - `entity`: the Genesis entity returned by `scene.add_entity(...)`
     - `initial_velocity`: a 6-number tuple/list `(vx, vy, vz, wx, wy, wz)`
-    Use only dynamic rigid primitive bodies. Keep CPU smoke execution small: 3 to 8 dynamic bodies.
+    Use only dynamic rigid primitive bodies. Keep local GPU validation runs small: 3 to 8 dynamic bodies.
     Include at least one projectile or mover with nonzero initial velocity for impact/scatter tasks.
     Do not call `scene.build()`, do not step the scene, and do not write artifacts.
     """,

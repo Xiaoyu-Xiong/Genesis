@@ -1,79 +1,88 @@
 # Implementation Status
 
-This document records what is implemented in `code_agent/`, what is only a temporary MVP fallback, and what is still
-planned. It should be updated whenever the pipeline structure changes.
+This document records what is implemented in `code_agent/` and what is still planned. It should be updated whenever
+the pipeline structure changes.
 
 ## Implemented
 
 - `code_agent.cli run-suite` exists and can run prompt suites.
-- Suite orchestration can read `case_id|prompt` files, create per-case workspaces, call the Codex planner adapter,
-  generate a runnable project, execute it, evaluate artifacts, and write a suite summary.
-- The Codex adapter can run `codex exec`, save JSONL logs, save the final message, record stderr, and return structured
-  invocation results.
+- Suite utilities can read `case_id|prompt` files, create per-case workspaces, call the Codex planner, generate a
+  runnable project through writer agents, execute it, evaluate artifacts, and write a suite summary.
+- Runtime support code has been consolidated under `utils/`: Codex invocation, local execution, generated entrypoint
+  integration, timing resolution, and suite loading all live there.
+- `planner/agent.py` implements the Planner agent prompt and Codex invocation for each Planner turn.
+- `planner/session.py` and `planner/actions.py` implement the Planner-led episode harness. `utils/suite.py` starts one
+  `PlannerSession` per case instead of hard-coding the full generation/execution/critic sequence itself.
+- Planner turns emit structured actions through `planner_action.schema.json`: `write_plan`, `spawn_workers`,
+  `run_integrator`, `run_execution`, `run_critic`, `request_repair`, `run_python`, `run_pytest`, and `finish`.
+- `episode_state.schema.json` records the persisted case state shape. Runtime state is written to
+  `reports/episode_state.json`; planner actions and worker dispatches are appended to JSONL history files.
+- `utils/codex.py` uses explicit `CodexExecRequest` objects, saves JSONL logs and final messages, records stderr, and
+  returns structured invocation results.
 - Scene, Body, Action, and Rendering writer specs are split across four files:
-  `orchestration/workers/scene.py`, `body.py`, `action.py`, and `rendering.py`.
-- `orchestration/workers/dispatcher.py` dispatches those writers, parses `worker_report.schema.json`, writes each
-  returned `source_code` string to the target module, records `worker_dispatch.json`, and can rerun a single owning
-  worker during repair.
-- The current worker protocol is JSON-source based: Codex workers run read-only and return complete module source in
-  `source_code`; the coordinator writes files. This was chosen because direct Codex file editing hit nested sandbox
-  `bwrap ENOSPC` failures in the current environment.
-- `orchestration/integrator.py` writes the stable `src/main.py` that imports and wires Scene, Body, Action, and
+  `writer/scene.py`, `body.py`, `action.py`, and `rendering.py`.
+- `writer/dispatcher.py` dispatches those writers in `workspace-write` sandbox mode, parses
+  `worker_report.schema.json`, validates each target module, records `worker_dispatch.json`, and can rerun a single
+  owning worker during repair.
+- The current worker protocol is direct-edit based: Codex workers edit only their assigned generated module and return
+  structured report metadata.
+- `utils/integrator.py` writes the stable `src/main.py` that imports and wires Scene, Body, Action, and
   Rendering modules.
-- CPU execution is routed through Apptainer-aware execution code. Generated Genesis code is not launched through host
-  Python.
+- `utils/timing.py` consumes the planner's structured `execution_plan` plus explicit CLI overrides. It does
+  not parse task text itself.
+- Local GPU execution is routed through `utils/execution.py` and `utils/local_execution.py`. Generated Genesis code is
+  launched through the repository uv environment on the dedicated GPU by default.
 - Execution reports collect command metadata, stdout/stderr paths, exit status, timeout state, and discovered artifacts.
 - Deterministic evaluation checks execution success, required JSON artifacts, render artifacts when required, and writes
-  `critic_report.json`.
+  `artifact_evaluation.json`.
 - `evaluation/codex_critic.py` implements a single-pass Codex Critic over execution reports, metrics, event logs, and
   render stats.
-- `orchestration/suite.py` can route a failed run back to the critic-recommended owner when that owner is one of the
-  four implemented writers.
-- Rigid prompt suites have run through the MVP fallback path on CPU. A single rigid primitive case has also reached
-  successful Codex writer dispatch with all four generated modules materialized.
-- The legacy mesh pipeline has been migrated under `code_agent/assets/mesh`, but it is not yet connected to the main
-  suite generation path.
+- `PlannerSession` can route a failed run back to the Planner-selected owner when that owner is one of the four
+  implemented generation writers.
+- A rigid primitive case has reached successful Codex writer dispatch with all four generated modules materialized,
+  local GPU execution, Genesis camera rendering, deterministic checks, and single-pass Codex Critic evaluation.
+- The mesh asset implementation lives under `code_agent/assets/mesh`, but it is not yet connected to the main suite
+  generation path.
+- Documentation is centralized under `docs/`; per-directory README files were removed except for the package-level
+  `code_agent/README.md` and the docs index.
+- Package-level re-export files were removed from internal folders. Current imports use explicit module paths such as
+  `code_agent.planner.session`, `code_agent.writer.dispatcher`, and `code_agent.utils.execution`.
 
-## Temporary MVP Fallbacks
+## Current Runtime Path
 
-- `orchestration/generator.py` is a deterministic smoke generator. It writes fixed-template `scene.py`, `body.py`,
-  `action.py`, and `main.py` files so the outer pipeline can be tested.
-- The deterministic generator uses a tiny rigid primitive scene even for articulated or mesh prompts. It is not the
-  final code-native generation strategy.
-- The current generated render path is a lightweight top-down trajectory diagnostic assembled from sampled actor
-  positions. It is useful for smoke validation but is not the intended final rendering implementation.
-- `orchestration/generator.py` remains as `--generation-mode fallback`. It is useful for runner and artifact plumbing
-  checks, but it is no longer the only generation path.
-- `simple.py` is still the top-level evaluator wrapper. It now combines deterministic checks with the single-pass
-  Codex Critic rather than serving as a purely deterministic critic.
-- The generated Rendering Worker currently favors diagnostic top-down rendering from `event_log.json` for CPU/headless
-  robustness. Full Genesis camera rendering is still future work.
+- Planner first writes a structured `planner_output` through the `write_plan` action. The harness validates that output,
+  resolves duration, step budget, render fps, and target frame count, then writes `contracts/planner_output.json` and
+  `contracts/timing.json`.
+- Planner chooses subsequent actions from the harness action library. The harness performs the real Codex worker calls,
+  integration, local GPU execution, critic calls, controlled Python/Pytest commands, and finish handling.
+- The generated render path uses Genesis camera rendering hooks owned by the Rendering Worker. It adds cameras before
+  `scene.build()`, captures Genesis RGB frames during stepping, and writes video/stat artifacts after execution.
+- `evaluation/runner.py` is the top-level evaluator wrapper. It combines artifact checks with the single-pass Codex
+  Critic.
 
 ## Not Implemented Yet
 
-- The planner output is not yet fully schema-validated and expanded into strict per-worker contracts.
-- Worker write-scope validation currently means coordinator-controlled writes from `source_code`; git/workspace diff
+- Planner-led control is implemented as iterative Planner turns over persisted state. It is not a single persistent OS
+  process; each Planner decision is a `codex exec` invocation that consumes `episode_state.json`.
+- Episode resume from an interrupted run is not implemented yet; state is persisted for audit and future resume work.
+- Planner output is schema-constrained, but strict expansion into per-worker contract files is not yet implemented.
+- Worker write-scope validation currently checks the reported target module and required export; git/workspace diff
   audits and richer static ownership checks are not yet implemented.
-- Static Codex review is not yet connected between generation and execution.
-- Asset Bridge is not yet connected to suite orchestration.
+- Asset Bridge is not yet connected to the suite runtime.
 - Meshy generation, mesh repair, and texture transfer are not yet requested from planner asset requests in the main
   run loop.
 - Codex XML/MJCF generation is not implemented in the main run loop.
 - Generated articulated assets are not yet MuJoCo-import validated.
-- Debugger repair with a separate owner-routed `patch_plan.json` is not yet connected. The current repair loop uses
-  critic `recommended_owner` directly.
-- Retry budgets are minimal CLI parameters, not the full policy from `configs.py`.
-- Rigid primitive Codex generation has not yet been validated end-to-end through Genesis execution in the current CPU
-  environment. A control run of `examples/tutorials/hello_genesis.py` timed out after 120 seconds inside the configured
-  Apptainer image, so CPU runtime validation is currently blocked by environment/runtime cost rather than only by
-  writer dispatch.
+- The current repair loop uses critic `recommended_owner` directly.
+- Retry budgets are still primarily CLI/session parameters, not the full policy from `configs.py`.
+- One rigid primitive case has been validated end-to-end through Genesis execution and semantic critic acceptance on the
+  dedicated GPU. Broader suite coverage, repeated-run stability, and non-rigid/asset-heavy cases are not yet validated.
 
 ## Current Structural Next Step
 
-The next structural step is not to split more workers. The current four-writer split should be hardened:
+The next structural step is to harden the Planner-led episode loop rather than adding another manual sequence:
 
-- Add static review and import-level checks before execution.
-- Make execution validation practical for CPU by either shrinking Genesis smoke workloads further or adding an explicit
-  artifact-only dry-run mode while retaining strict Genesis execution as the real acceptance path.
-- Connect Asset Bridge, mesh requests, and Codex XML/MJCF generation.
-- Replace direct critic-owner repair with a structured `patch_plan.json` debugger step when needed.
+- Validate repeated-run stability on more rigid primitive cases.
+- Add resume support from `reports/episode_state.json`.
+- Add richer git/workspace diff audits for worker write scope.
+- Add Asset Bridge, mesh requests, and Codex XML/MJCF generation as additional Planner-callable actions.

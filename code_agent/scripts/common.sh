@@ -17,8 +17,6 @@ run_code_agent_suite() {
   local run_ts
   run_ts="$(date +%Y%m%d_%H%M%S)"
   local run_root="${RUN_ROOT:-code_agent/workspaces/suites/${suite_name}/${run_ts}}"
-  local apptainer_image="${APPTAINER_IMAGE:-/ocean/projects/cis250078p/xxiong1/containers/genesis.sif}"
-
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --run-root)
@@ -47,14 +45,7 @@ run_code_agent_suite() {
       echo "Set CODE_AGENT_CMD to an experimental command, or implement code_agent.cli run-suite." >&2
       exit 3
     fi
-    if [[ -n "${APPTAINER_CONTAINER:-}" || -n "${SINGULARITY_CONTAINER:-}" ]]; then
-      code_agent_cmd=(uv run python -m code_agent.cli run-suite)
-    else
-      code_agent_cmd=(
-        apptainer exec "$apptainer_image"
-        uv run python -m code_agent.cli run-suite
-      )
-    fi
+    code_agent_cmd=(uv run python -m code_agent.cli run-suite)
   fi
 
   run_cmd "${code_agent_cmd[@]}" \

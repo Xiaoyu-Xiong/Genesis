@@ -244,7 +244,7 @@ def select_pipeline_source_mesh(
     if texture_config is not None and texture_config.enabled:
         if texture_result is not None and texture_result.ok and texture_result.textured_mesh_path is not None:
             return texture_result.textured_mesh_path, "textured_raw_obj"
-        return raw_mesh_path, "preview_raw_fallback_after_texture_failure"
+        return raw_mesh_path, "preview_raw_after_texture_failure"
     return raw_mesh_path, "preview_raw_obj"
 
 

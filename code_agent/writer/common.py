@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from code_agent.codex.runner import CodexResult
+from code_agent.utils.codex import CodexExecResult
 
 WorkerRole = Literal["scene", "body", "action", "rendering"]
 
@@ -23,7 +23,7 @@ class WorkerDispatchResult:
     role: WorkerRole
     ok: bool
     target_path: Path
-    codex_result: CodexResult
+    codex_result: CodexExecResult
     worker_report: dict[str, object] | None = None
     error_message: str | None = None
 
@@ -31,11 +31,10 @@ class WorkerDispatchResult:
 COMMON_RULES = """
 You are authoring one module for a generated Genesis simulation project.
 You are not alone in the workspace: other workers own other modules.
-Do not edit files and do not use filesystem tools. Return the complete target module source code in the `source_code` JSON field.
-The coordinator will write `source_code` to the exact target path after your response.
+Edit only the exact target file assigned to you. Do not edit any other file.
 Do not run shell commands. Do not run Python, uv, pytest, Genesis, or any simulation.
-Use ASCII only. Keep code compact and robust for CPU smoke execution.
-The generated code must run inside the repository's Apptainer environment later, but you must not execute it yourself.
+Use ASCII only. Keep code compact and robust for local GPU execution.
+The generated code will run through the repository uv environment on the dedicated local GPU later, but you must not execute it yourself.
 """
 
 RIGID_API_GUIDE = """

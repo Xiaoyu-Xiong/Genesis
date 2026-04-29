@@ -16,11 +16,11 @@ from .models import (
     MeshyGenerationConfig,
     MeshyTextureConfig,
 )
-from .pipeline import default_mesh_output_dir, generate_meshy_mesh_from_text, parse_extra_payload
-from .repair.sanity import run_mesh_manifold_check
 
 
 def _cmd_generate(args: argparse.Namespace) -> None:
+    from .pipeline import default_mesh_output_dir, generate_meshy_mesh_from_text, parse_extra_payload
+
     repair_defaults = CONFIGS.mesh_repair
     output_dir = args.out_dir or default_mesh_output_dir(args.prompt, root=args.root_dir)
     api_config = MeshyApiConfig.from_env(
@@ -94,6 +94,8 @@ def _cmd_generate(args: argparse.Namespace) -> None:
 
 
 def _cmd_manifold_check(args: argparse.Namespace) -> None:
+    from .repair.sanity import run_mesh_manifold_check
+
     result = run_mesh_manifold_check(args.mesh)
     dump_json(result.to_dict(), args.out)
 
@@ -104,12 +106,14 @@ def _cmd_render_textured_views(args: argparse.Namespace) -> None:
     outputs = render_textured_mesh_views(
         mesh_path=args.mesh,
         out_dir=args.out_dir,
+        backend=args.backend,
         res=tuple(args.res),
         fov=args.fov,
     )
     payload = {
         "mesh_path": str(args.mesh),
         "out_dir": str(args.out_dir),
+        "backend": args.backend,
         "res": list(args.res),
         "fov": args.fov,
         "views": outputs,
@@ -399,6 +403,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_render.add_argument("--mesh", type=Path, required=True, help="Path to the textured OBJ file.")
     parser_render.add_argument("--out-dir", type=Path, required=True, help="Directory for rendered PNG views.")
+    parser_render.add_argument(
+        "--backend",
+        choices=("gpu", "cpu"),
+        default="gpu",
+        help="Genesis backend for preview rendering. Defaults to the local GPU.",
+    )
     parser_render.add_argument(
         "--res",
         type=int,

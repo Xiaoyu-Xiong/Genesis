@@ -14,6 +14,7 @@ def render_textured_mesh_views(
     *,
     mesh_path: str | Path,
     out_dir: str | Path,
+    backend: str = "gpu",
     res: tuple[int, int] = (768, 768),
     fov: float = 35.0,
 ) -> dict[str, str]:
@@ -37,7 +38,8 @@ def render_textured_mesh_views(
     distance = _camera_distance(diagonal=diagonal, fov=fov)
     z_boost = max(0.15 * height, 0.05)
 
-    gs.init(backend=gs.cpu, logging_level="info")
+    gs_backend = gs.cpu if backend == "cpu" else gs.gpu
+    gs.init(backend=gs_backend, logging_level="info")
     scene = gs.Scene(
         show_viewer=False,
         renderer=gs.renderers.Rasterizer(),

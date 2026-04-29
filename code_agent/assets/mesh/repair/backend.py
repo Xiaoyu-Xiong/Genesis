@@ -135,10 +135,10 @@ def _repair_mesh_with_ftetwild_attempt(
         if config.fix_normals:
             stage_start = _now()
             trimesh_repair.fix_normals(repaired_mesh, multibody=True)
-            operations.append("trimesh_fix_normals_fallback")
-            stage_durations["trimesh_fix_normals_fallback"] = _now() - stage_start
+            operations.append("trimesh_fix_normals_repair")
+            stage_durations["trimesh_fix_normals_repair"] = _now() - stage_start
         else:
-            stage_durations["trimesh_fix_normals_fallback"] = 0.0
+            stage_durations["trimesh_fix_normals_repair"] = 0.0
 
         stage_start = _now()
         centroid_before_translation, bbox_min, bbox_max, bbox_size = _center_mesh_at_centroid(repaired_mesh)

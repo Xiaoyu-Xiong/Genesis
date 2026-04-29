@@ -4,7 +4,7 @@ import json
 import textwrap
 from pathlib import Path
 
-from code_agent.codex.runner import run_codex_exec
+from code_agent.utils.codex import CodexExecRequest, run_codex_exec
 from code_agent.configs import CONFIGS
 
 from . import action, body, rendering, scene
@@ -35,7 +35,7 @@ def create_bodies(scene, task: str):
 from pathlib import Path
 
 
-def run_actions(scene, actors, *, out_dir: Path, steps: int = 40):
+def run_actions(scene, actors, *, out_dir: Path, steps: int, render_state=None):
     raise NotImplementedError("action worker did not replace this placeholder")
 ''',
     "rendering": '''from __future__ import annotations
@@ -43,13 +43,37 @@ def run_actions(scene, actors, *, out_dir: Path, steps: int = 40):
 from pathlib import Path
 
 
-def render_outputs(*, out_dir: Path, event_log_path: Path | None = None, metrics_path: Path | None = None):
+def setup_rendering(
+    scene,
+    actors,
+    *,
+    out_dir: Path,
+    steps: int,
+    fps: int,
+    duration_sec: float | None = None,
+    target_video_frames: int | None = None,
+):
+    raise NotImplementedError("rendering worker did not replace this placeholder")
+
+
+def capture_frame(render_state: dict, step: int) -> None:
+    raise NotImplementedError("rendering worker did not replace this placeholder")
+
+
+def finalize_rendering(render_state: dict, *, event_log_path: Path | None = None, metrics_path: Path | None = None):
     raise NotImplementedError("rendering worker did not replace this placeholder")
 ''',
 }
 
 
-def dispatch_workers(*, case_dir: Path, task: str, repair_context: str | None = None) -> list[WorkerDispatchResult]:
+def dispatch_worker_roles(
+    *,
+    case_dir: Path,
+    task: str,
+    planner_output: dict[str, object],
+    roles: tuple[WorkerRole, ...] | list[WorkerRole],
+    repair_context: str | None = None,
+) -> list[WorkerDispatchResult]:
     src_dir = case_dir / "src"
     logs_dir = case_dir / "logs"
     src_dir.mkdir(parents=True, exist_ok=True)
@@ -57,8 +81,16 @@ def dispatch_workers(*, case_dir: Path, task: str, repair_context: str | None = 
     _seed_worker_files(case_dir)
 
     results: list[WorkerDispatchResult] = []
-    for role in ("scene", "body", "action", "rendering"):
-        results.append(_run_worker(case_dir=case_dir, task=task, spec=WORKERS[role], repair_context=repair_context))
+    for role in roles:
+        results.append(
+            _run_worker(
+                case_dir=case_dir,
+                task=task,
+                planner_output=planner_output,
+                spec=WORKERS[role],
+                repair_context=repair_context,
+            )
+        )
     return results
 
 
@@ -66,7 +98,13 @@ def repair_worker(*, case_dir: Path, task: str, owner: str, failure_context: str
     role = _normalize_owner(owner)
     if role is None:
         return None
-    return _run_worker(case_dir=case_dir, task=task, spec=WORKERS[role], repair_context=failure_context)
+    return _run_worker(
+        case_dir=case_dir,
+        task=task,
+        planner_output=_load_planner_output(case_dir),
+        spec=WORKERS[role],
+        repair_context=failure_context,
+    )
 
 
 def write_worker_dispatch_report(case_dir: Path, results: list[WorkerDispatchResult]) -> None:
@@ -76,9 +114,9 @@ def write_worker_dispatch_report(case_dir: Path, results: list[WorkerDispatchRes
                 "role": item.role,
                 "ok": item.ok,
                 "target_path": str(item.target_path),
-                "returncode": item.codex_result.returncode,
+                "returncode": item.codex_result.exit_code,
                 "duration_sec": item.codex_result.duration_sec,
-                "final_message_path": str(item.codex_result.final_message_path),
+                "final_message_path": item.codex_result.final_message_path,
                 "worker_status": item.worker_report.get("status") if item.worker_report else None,
                 "exports": item.worker_report.get("exports") if item.worker_report else [],
                 "error_message": item.error_message,
@@ -103,6 +141,7 @@ def _run_worker(
     *,
     case_dir: Path,
     task: str,
+    planner_output: dict[str, object],
     spec: WorkerSpec,
     repair_context: str | None,
 ) -> WorkerDispatchResult:
@@ -110,30 +149,38 @@ def _run_worker(
     target_path.parent.mkdir(parents=True, exist_ok=True)
     logs_dir = case_dir / "logs"
     schema_path = Path("code_agent/specs/worker_report.schema.json")
-    prompt = _worker_prompt(case_dir=case_dir, task=task, spec=spec, repair_context=repair_context)
-    result = run_codex_exec(
-        role=spec.role if repair_context is None else f"{spec.role}_repair",
-        prompt=prompt,
-        workdir=Path.cwd(),
-        logs_dir=logs_dir,
-        sandbox=CONFIGS.codex.worker_sandbox,
-        model=CONFIGS.codex.worker_model,
-        output_schema=schema_path,
-        timeout_sec=600.0,
+    prompt = _worker_prompt(
+        case_dir=case_dir,
+        task=task,
+        planner_output=planner_output,
+        spec=spec,
+        repair_context=repair_context,
     )
-    worker_report, error_message = _parse_worker_report(result.final_message_path)
-    source_code = worker_report.get("source_code") if worker_report else None
-    if isinstance(source_code, str) and source_code.strip():
-        target_path.write_text(source_code.rstrip() + "\n", encoding="utf-8")
+    invocation_role = spec.role if repair_context is None else f"{spec.role}_repair"
+    result = run_codex_exec(
+        CodexExecRequest(
+            role=invocation_role,
+            prompt=prompt,
+            cwd=Path.cwd(),
+            sandbox=CONFIGS.codex.worker_sandbox,
+            model=CONFIGS.codex.worker_model,
+            output_schema_path=schema_path,
+            output_jsonl_path=logs_dir / f"codex_{invocation_role}.jsonl",
+            final_message_path=logs_dir / f"codex_{invocation_role}.final.json",
+            timeout_sec=600.0,
+        )
+    )
+    worker_report, error_message = _parse_worker_report(Path(result.final_message_path))
+    target_source = target_path.read_text(encoding="utf-8", errors="replace") if target_path.exists() else ""
     ok = (
-        result.ok
+        result.success
         and worker_report is not None
         and worker_report.get("status") == "completed"
-        and isinstance(source_code, str)
-        and spec.required_export in source_code
+        and _changed_files_include_target(worker_report, spec.target_file)
+        and spec.required_export in target_source
         and target_path.exists()
         and target_path.stat().st_size > 0
-        and "NotImplementedError" not in target_path.read_text(encoding="utf-8", errors="replace")
+        and "NotImplementedError" not in target_source
     )
     return WorkerDispatchResult(
         role=spec.role,
@@ -145,7 +192,14 @@ def _run_worker(
     )
 
 
-def _worker_prompt(*, case_dir: Path, task: str, spec: WorkerSpec, repair_context: str | None) -> str:
+def _worker_prompt(
+    *,
+    case_dir: Path,
+    task: str,
+    planner_output: dict[str, object],
+    spec: WorkerSpec,
+    repair_context: str | None,
+) -> str:
     mode = "repair the existing module source" if repair_context else "author the module source"
     return textwrap.dedent(
         f"""
@@ -154,13 +208,15 @@ def _worker_prompt(*, case_dir: Path, task: str, spec: WorkerSpec, repair_contex
         Task prompt:
         {task}
 
+        Planner output:
+        {json.dumps(planner_output, indent=2)}
+
         Role: {spec.role} worker
         Responsibility: {spec.responsibility}
         Mode: {mode}
         Exact target file: {case_dir / spec.target_file}
-        Allowed write paths: none. Do not edit files. Return source code in JSON only.
+        Allowed write paths: {case_dir / spec.target_file}
         Required export: `{spec.required_export}`
-        Required `source_code`: complete Python content that the coordinator can write to `{spec.target_file}`.
 
         {RIGID_API_GUIDE}
 
@@ -171,11 +227,22 @@ def _worker_prompt(*, case_dir: Path, task: str, spec: WorkerSpec, repair_contex
         {repair_context or ""}
 
         Final response must be JSON matching worker_report.schema.json.
-        Set status to `completed` only when `source_code` contains the full replacement module.
+        Set status to `completed` only after you have written the full replacement module to the exact target file.
         Set `commands_run` to an empty list if you did not run commands.
-        Include changed_files with exactly `{spec.target_file}` when completed, even though the coordinator writes it.
+        Include changed_files with exactly `{spec.target_file}` when completed.
         """
     ).strip()
+
+
+def _load_planner_output(case_dir: Path) -> dict[str, object]:
+    path = case_dir / "contracts" / "planner_output.json"
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _parse_worker_report(path: Path) -> tuple[dict[str, object] | None, str | None]:
@@ -188,6 +255,20 @@ def _parse_worker_report(path: Path) -> tuple[dict[str, object] | None, str | No
     if not isinstance(data, dict):
         return None, "worker final message is not a JSON object"
     return data, None
+
+
+def _changed_files_include_target(worker_report: dict[str, object], target_file: str) -> bool:
+    changed_files = worker_report.get("changed_files")
+    if not isinstance(changed_files, list):
+        return False
+    target = Path(target_file).as_posix()
+    for item in changed_files:
+        if not isinstance(item, str):
+            continue
+        item_path = Path(item).as_posix()
+        if item_path == target or item_path.endswith(f"/{target}"):
+            return True
+    return False
 
 
 def _normalize_owner(owner: str) -> WorkerRole | None:

@@ -282,7 +282,7 @@ class MeshTextureTransferResult:
     source_texture_size: tuple[int, int] | None = None
     parameterization_filter: str | None = None
     transfer_filter: str | None = None
-    debug_dir: Path | None = None
+    diagnostics_dir: Path | None = None
     stage_durations_sec: dict[str, float] = field(default_factory=dict)
     error: str | None = None
 
@@ -299,7 +299,7 @@ class MeshTextureTransferResult:
             "source_texture_size": list(self.source_texture_size) if self.source_texture_size is not None else None,
             "parameterization_filter": self.parameterization_filter,
             "transfer_filter": self.transfer_filter,
-            "debug_dir": None if self.debug_dir is None else str(self.debug_dir),
+            "diagnostics_dir": None if self.diagnostics_dir is None else str(self.diagnostics_dir),
             "stage_durations_sec": self.stage_durations_sec,
             "error": self.error,
         }

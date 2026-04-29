@@ -7,15 +7,13 @@ Top-level documents that intentionally remain in the `code_agent/` root:
 - [README](../README.md)
 - [Codex-First Code Agent Pipeline Plan](../agentive_code_pipeline_plan.md)
 
-Directory-specific documentation:
+Topic documentation:
 
 - [Implementation Status](status.md)
-- [Orchestration](orchestration.md)
-- [Codex](codex.md)
-- [Execution](execution.md)
+- [Utils](utils.md)
 - [Evaluation](evaluation.md)
 - [Specs](specs.md)
 - [Assets](assets.md)
-- [Migrated Mesh Pipeline](mesh.md)
+- [Mesh Pipeline](mesh.md)
 - [Scripts and Suites](scripts.md)
 - [Workspaces](workspaces.md)

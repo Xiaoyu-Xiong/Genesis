@@ -20,8 +20,8 @@ Repository-wide execution rules are defined in [AGENTS.md](../AGENTS.md).
 
 The practical summary for `agent/` work is:
 
-- run Python only inside Apptainer
-- run git only from the host shell
+- run Python through the repository uv environment
+- run git from the repository shell
 - prefer explicit CLI flags over ad hoc config mutation
 
 ## Pipeline-Specific Maintenance Rules

@@ -6,24 +6,22 @@ from typing import Literal
 
 @dataclass(slots=True, frozen=True)
 class CodexConfigs:
-    """Static defaults for Codex-backed planner, worker, reviewer, and debugger calls."""
+    """Static defaults for Codex-backed planner, worker, and critic calls."""
 
     planner_model: str = "gpt-5.5"
     worker_model: str = "gpt-5.5"
-    reviewer_model: str = "gpt-5.5"
-    debugger_model: str = "gpt-5.5"
     critic_model: str = "gpt-5.5"
     reasoning_effort: str = "xhigh"
     prompt_cache_retention: Literal["in_memory", "24h"] = "24h"
     planner_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
-    reviewer_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
-    worker_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
+    critic_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
+    worker_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
     ask_for_approval: Literal["untrusted", "on-request", "never"] = "never"
 
 
 @dataclass(slots=True, frozen=True)
-class OrchestrationConfigs:
-    """Static coordinator limits that should usually not be left to generated code."""
+class HarnessConfigs:
+    """Static harness limits that should usually not be left to generated code."""
 
     max_parallel_workers: int = 2
     max_repair_rounds: int = 12
@@ -31,22 +29,22 @@ class OrchestrationConfigs:
     execution_timeout_sec: float = 1000.0
     default_backend: str = "gpu"
     require_scope_check: bool = True
-    require_static_review: bool = True
 
 
 @dataclass(slots=True, frozen=True)
 class RuntimeConfigs:
-    """Genesis runtime defaults copied from the legacy agent pipeline."""
+    """Genesis runtime defaults for generated simulations."""
 
     sim_dt: float = 0.01
     sim_substeps: int = 1
     render_every_n_steps: int = 3
+    render_fps: int = 33
     render_res: tuple[int, int] = (640, 480)
 
 
 @dataclass(slots=True, frozen=True)
 class DeformableConfigs:
-    """FEM + IPC deformable defaults copied from the legacy agent pipeline."""
+    """FEM + IPC deformable defaults for generated simulations."""
 
     friction: float = 0.3
     tet_resolution: int = 2
@@ -97,7 +95,7 @@ class CriticConfigs:
 
 @dataclass(slots=True, frozen=True)
 class MeshyRequestConfigs:
-    """Meshy request defaults copied from the legacy mesh pipeline."""
+    """Meshy asset request defaults."""
 
     mesh_format: Literal["obj", "glb", "stl"] = "obj"
     ai_model: Literal["latest", "meshy-6", "meshy-5"] = "meshy-5"
@@ -121,7 +119,7 @@ class MeshyRequestConfigs:
 
 @dataclass(slots=True, frozen=True)
 class MeshRepairConfigs:
-    """Mesh repair and texture transfer defaults copied from the legacy mesh pipeline."""
+    """Mesh repair and texture transfer defaults."""
 
     component_count_face_cap: int = 100000
     min_component_faces: int = 100
@@ -149,7 +147,7 @@ class MeshRepairConfigs:
 @dataclass(slots=True, frozen=True)
 class Configs:
     codex: CodexConfigs
-    orchestration: OrchestrationConfigs
+    harness: HarnessConfigs
     runtime: RuntimeConfigs
     deformable: DeformableConfigs
     critic: CriticConfigs
@@ -159,7 +157,7 @@ class Configs:
 
 CONFIGS = Configs(
     codex=CodexConfigs(),
-    orchestration=OrchestrationConfigs(),
+    harness=HarnessConfigs(),
     runtime=RuntimeConfigs(),
     deformable=DeformableConfigs(),
     critic=CriticConfigs(),

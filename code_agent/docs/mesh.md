@@ -1,10 +1,7 @@
-# Migrated Mesh Pipeline
+# Mesh Pipeline
 
-`code_agent/assets/mesh/` contains a copied version of the legacy mesh pipeline from `agent/mesh`, excluding
-`__pycache__`.
-
-It is the mesh asset implementation used by `code_agent` during the first migration phase. The intent is to reuse the
-existing Meshy API, repair, texture transfer, and validation flow rather than rewrite it.
+`code_agent/assets/mesh/` contains the Meshy API, repair, texture transfer, and validation flow used by the code-agent
+asset layer.
 
 ## Responsibilities
 
@@ -29,9 +26,4 @@ through `asset_manifest.json`.
 For generated mesh bodies, use repaired mesh paths under `processed/` as runtime geometry. Treat raw textured OBJ files
 as visual or texture sources, not as runtime collision geometry.
 
-The migrated copy defaults generated mesh outputs to `code_agent/generated_meshes`.
-
-## Legacy Documentation
-
-The original mesh flow is documented in [agent/docs/mesh_texture.md](../../agent/docs/mesh_texture.md). That document
-also points back to this migrated copy.
+Generated mesh outputs default to `code_agent/generated_meshes`.

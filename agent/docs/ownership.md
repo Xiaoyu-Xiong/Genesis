@@ -203,7 +203,7 @@ Typical tasks:
 - adding or updating benchmark suites
 - standardizing output roots, summaries, and failure logs
 - documenting usage patterns and run conventions
-- preparing reproducible `sbatch` or direct-run commands
+- preparing reproducible direct-run GPU commands
 
 Out of scope:
 

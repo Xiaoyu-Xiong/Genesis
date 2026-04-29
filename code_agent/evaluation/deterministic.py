@@ -26,15 +26,15 @@ class DeterministicEvaluationConfig:
     require_render: bool = False
 
 
-def evaluate_run(config: DeterministicEvaluationConfig) -> dict[str, Any]:
-    """Validate execution artifacts and write ``critic_report.json``.
+def evaluate_artifacts(config: DeterministicEvaluationConfig) -> dict[str, Any]:
+    """Validate execution artifacts and write an artifact evaluation report.
 
-    This first-pass evaluator is deterministic: it parses JSON files, checks expected artifact presence, and emits
-    repair-ready issue records without using an LLM or running Genesis.
+    This deterministic evaluator parses JSON files, checks expected artifact presence, and emits repair-ready issue
+    records without using an LLM or running Genesis.
     """
 
     run_dir = config.run_dir.resolve()
-    output_path = (config.output_path or (run_dir / "critic_report.json")).resolve()
+    output_path = (config.output_path or (run_dir / "artifact_evaluation.json")).resolve()
     execution_report_path = (config.execution_report_path or (run_dir / "execution_report.json")).resolve()
 
     checks: list[dict[str, Any]] = []
@@ -57,7 +57,7 @@ def evaluate_run(config: DeterministicEvaluationConfig) -> dict[str, Any]:
 
     passed = all(check["status"] in {"pass", "skip"} for check in checks)
     report = {
-        "evaluator": "deterministic",
+        "evaluator": "artifact_checks",
         "schema_version": 1,
         "run_dir": str(run_dir),
         "execution_report_path": str(execution_report_path),
@@ -209,7 +209,7 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
-    report = evaluate_run(
+    report = evaluate_artifacts(
         DeterministicEvaluationConfig(
             run_dir=args.run_dir,
             execution_report_path=args.execution_report,

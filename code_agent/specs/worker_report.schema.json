@@ -8,7 +8,6 @@
     "status",
     "changed_files",
     "exports",
-    "source_code",
     "assumptions",
     "commands_run",
     "unresolved_risks",
@@ -19,7 +18,6 @@
     "status": { "type": "string", "enum": ["completed", "blocked", "partial"] },
     "changed_files": { "type": "array", "items": { "type": "string" } },
     "exports": { "type": "array", "items": { "type": "string" } },
-    "source_code": { "type": "string", "minLength": 1 },
     "assumptions": { "type": "array", "items": { "type": "string" } },
     "commands_run": {
       "type": "array",

@@ -114,8 +114,8 @@ uv sync
 Then install PyTorch for your platform:
 
 ```bash
-# NVIDIA GPU (CUDA 12.6 as an example)
-uv pip install torch --index-url https://download.pytorch.org/whl/cu126
+# NVIDIA GPU (CUDA 12.8)
+uv pip install torch --index-url https://download.pytorch.org/whl/cu128
 
 # CPU only (Linux/Windows)
 uv pip install torch --index-url https://download.pytorch.org/whl/cpu

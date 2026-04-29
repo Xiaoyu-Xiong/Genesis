@@ -15,7 +15,14 @@
   "properties": {
     "scene_brief": {
       "type": "object",
-      "required": ["user_intent", "required_entities", "interaction_goal", "success_criteria", "assumptions"],
+      "required": [
+        "user_intent",
+        "required_entities",
+        "interaction_goal",
+        "success_criteria",
+        "failure_criteria",
+        "assumptions"
+      ],
       "properties": {
         "user_intent": { "type": "string", "minLength": 1 },
         "required_entities": { "type": "array", "items": { "type": "string" } },
@@ -41,7 +48,15 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name", "asset_type", "purpose", "simulation_role"],
+        "required": [
+          "name",
+          "asset_type",
+          "purpose",
+          "scale",
+          "bbox",
+          "texture_needs",
+          "simulation_role"
+        ],
         "properties": {
           "name": { "type": "string", "minLength": 1 },
           "asset_type": { "type": "string", "minLength": 1 },
@@ -58,7 +73,17 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["owner_role", "target_files", "allowed_write_paths", "required_exports", "forbidden_edits"],
+        "required": [
+          "owner_role",
+          "target_files",
+          "allowed_write_paths",
+          "required_exports",
+          "input_dependencies",
+          "asset_dependencies",
+          "forbidden_edits",
+          "validation_expectation",
+          "final_report_schema"
+        ],
         "properties": {
           "owner_role": { "type": "string", "minLength": 1 },
           "target_files": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
@@ -67,7 +92,7 @@
           "input_dependencies": { "type": "array", "items": { "type": "string" } },
           "asset_dependencies": { "type": "array", "items": { "type": "string" } },
           "forbidden_edits": { "type": "array", "items": { "type": "string" } },
-          "smoke_expectation": { "type": ["string", "null"] },
+          "validation_expectation": { "type": ["string", "null"] },
           "final_report_schema": { "type": "string" }
         },
         "additionalProperties": false
@@ -75,14 +100,14 @@
     },
     "dispatch_graph": {
       "type": "object",
-      "required": ["nodes", "edges"],
+      "required": ["nodes", "edges", "parallel_groups", "wait_for_asset_manifest"],
       "properties": {
         "nodes": { "type": "array", "items": { "type": "string" } },
         "edges": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["from", "to"],
+            "required": ["from", "to", "reason"],
             "properties": {
               "from": { "type": "string" },
               "to": { "type": "string" },
@@ -98,11 +123,13 @@
     },
     "execution_plan": {
       "type": "object",
-      "required": ["mode", "step_budget", "render_budget"],
+      "required": ["mode", "backend", "duration_sec", "step_budget", "render_fps", "render_budget", "notes"],
       "properties": {
-        "mode": { "type": "string", "enum": ["local_apptainer_smoke", "gpu_sbatch", "skip"] },
-        "backend": { "type": ["string", "null"] },
+        "mode": { "type": "string", "enum": ["local_gpu", "local_cpu", "skip"] },
+        "backend": { "type": ["string", "null"], "enum": ["gpu", "cpu", null] },
+        "duration_sec": { "type": "number", "exclusiveMinimum": 0 },
         "step_budget": { "type": "integer", "minimum": 0 },
+        "render_fps": { "type": "integer", "minimum": 1 },
         "render_budget": { "type": "integer", "minimum": 0 },
         "notes": { "type": "array", "items": { "type": "string" } }
       },

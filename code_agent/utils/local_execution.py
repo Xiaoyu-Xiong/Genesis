@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_APPTAINER_IMAGE = "/ocean/projects/cis250078p/xxiong1/containers/genesis.sif"
 DEFAULT_ARTIFACT_DIR_NAMES = ("artifacts", "outputs", "renders", "frames")
 DEFAULT_ARTIFACT_FILE_NAMES = (
     "summary.json",
@@ -26,13 +25,12 @@ DEFAULT_ARTIFACT_FILE_NAMES = (
 
 
 @dataclass(slots=True, frozen=True)
-class ApptainerCpuRunConfig:
-    """Configuration for one generated-code CPU smoke run inside Apptainer."""
+class LocalRunConfig:
+    """Configuration for one generated-code run in the repository uv environment."""
 
     workspace_dir: Path
     main_file: str = "main.py"
     output_dir: Path | None = None
-    apptainer_image: str = DEFAULT_APPTAINER_IMAGE
     timeout_sec: float = 1000.0
     python_executable: str = "python"
     extra_args: tuple[str, ...] = ()
@@ -42,12 +40,8 @@ class ApptainerCpuRunConfig:
     env: dict[str, str] = field(default_factory=dict)
 
 
-def run_apptainer_cpu(config: ApptainerCpuRunConfig) -> dict[str, Any]:
-    """Run generated ``main.py`` in the standard Apptainer image and write an execution report.
-
-    The runner itself must be invoked from an allowed context. It never runs generated Python on the host; the
-    generated script is executed only through ``apptainer exec``.
-    """
+def run_local(config: LocalRunConfig) -> dict[str, Any]:
+    """Run generated ``main.py`` directly and write an execution report."""
 
     workspace_dir = config.workspace_dir.resolve()
     output_dir = (config.output_dir or workspace_dir).resolve()
@@ -58,7 +52,7 @@ def run_apptainer_cpu(config: ApptainerCpuRunConfig) -> dict[str, Any]:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     started_at = time.time()
-    command = _build_command(config, workspace_dir)
+    command = _build_command(config)
     run_env = _build_env(config.env)
 
     if not main_path.is_file():
@@ -126,21 +120,9 @@ def run_apptainer_cpu(config: ApptainerCpuRunConfig) -> dict[str, Any]:
     return report
 
 
-def _build_command(config: ApptainerCpuRunConfig, workspace_dir: Path) -> list[str]:
+def _build_command(config: LocalRunConfig) -> list[str]:
     python_command = shlex.split(config.python_executable)
-    if _inside_apptainer():
-        return [
-            *python_command,
-            config.main_file,
-            *config.extra_args,
-        ]
     return [
-        "apptainer",
-        "exec",
-        "--cleanenv",
-        "--pwd",
-        str(workspace_dir),
-        config.apptainer_image,
         *python_command,
         config.main_file,
         *config.extra_args,
@@ -149,13 +131,18 @@ def _build_command(config: ApptainerCpuRunConfig, workspace_dir: Path) -> list[s
 
 def _build_env(overrides: dict[str, str]) -> dict[str, str]:
     env = os.environ.copy()
+    repo_root = Path(__file__).resolve().parents[2]
+    cuda_home = repo_root / ".venv" / "cuda-12.8"
+    env["LD_LIBRARY_PATH"] = _prepend_existing_paths(
+        env.get("LD_LIBRARY_PATH", ""),
+        ("/usr/lib/wsl/lib", str(cuda_home / "lib")),
+    )
+    env["PATH"] = _prepend_existing_paths(env.get("PATH", ""), (str(cuda_home / "bin"),))
+    if cuda_home.is_dir():
+        env.setdefault("CUDA_HOME", str(cuda_home))
     env.update(
         {
-            "APPTAINERENV_CUDA_VISIBLE_DEVICES": "",
-            "APPTAINERENV_GENESIS_BACKEND": "cpu",
-            "APPTAINERENV_PYTHONUNBUFFERED": "1",
-            "CUDA_VISIBLE_DEVICES": "",
-            "GENESIS_BACKEND": "cpu",
+            "GENESIS_BACKEND": "gpu",
             "PYTHONUNBUFFERED": "1",
         }
     )
@@ -163,8 +150,14 @@ def _build_env(overrides: dict[str, str]) -> dict[str, str]:
     return env
 
 
+def _prepend_existing_paths(current: str, candidates: tuple[str, ...]) -> str:
+    existing = [path for path in candidates if Path(path).exists()]
+    parts = [path for path in current.split(os.pathsep) if path]
+    return os.pathsep.join([*existing, *[path for path in parts if path not in existing]])
+
+
 def _base_report(
-    config: ApptainerCpuRunConfig,
+    config: LocalRunConfig,
     command: list[str],
     workspace_dir: Path,
     main_path: Path,
@@ -173,22 +166,20 @@ def _base_report(
     duration_sec: float,
 ) -> dict[str, Any]:
     return {
-        "runner": "apptainer_cpu",
+        "runner": "local",
         "schema_version": 1,
         "workspace_dir": str(workspace_dir),
         "main_path": str(main_path),
         "output_dir": str(output_dir),
-        "apptainer_image": config.apptainer_image,
-        "inside_apptainer": _inside_apptainer(),
         "command": command,
-        "backend": config.env.get("GENESIS_BACKEND", "cpu"),
+        "backend": config.env.get("GENESIS_BACKEND", "gpu"),
         "timeout_sec": config.timeout_sec,
         "started_at_unix": started_at,
         "duration_sec": duration_sec,
     }
 
 
-def _collect_artifact_paths(config: ApptainerCpuRunConfig, workspace_dir: Path, output_dir: Path) -> list[str]:
+def _collect_artifact_paths(config: LocalRunConfig, workspace_dir: Path, output_dir: Path) -> list[str]:
     candidates: set[Path] = set()
 
     for name in config.artifact_file_names:
@@ -239,10 +230,6 @@ def _status(exit_code: int, timed_out: bool) -> str:
     return "passed" if exit_code == 0 else "failed"
 
 
-def _inside_apptainer() -> bool:
-    return bool(os.environ.get("APPTAINER_CONTAINER") or os.environ.get("SINGULARITY_CONTAINER"))
-
-
 def _decode_timeout_stream(stream: bytes | str | None) -> str:
     if stream is None:
         return ""
@@ -256,13 +243,13 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run generated Genesis main.py inside Apptainer on CPU.")
+    parser = argparse.ArgumentParser(description="Run generated Genesis main.py directly.")
     parser.add_argument("workspace_dir", type=Path)
     parser.add_argument("--main-file", default="main.py")
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--image", default=DEFAULT_APPTAINER_IMAGE)
     parser.add_argument("--timeout-sec", type=float, default=1000.0)
     parser.add_argument("--python-executable", default="python")
+    parser.add_argument("--backend", choices=("cpu", "gpu"), default="gpu")
     parser.add_argument("--artifact", action="append", default=[])
     parser.add_argument("extra_args", nargs=argparse.REMAINDER)
     return parser.parse_args()
@@ -271,16 +258,16 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     extra_args = tuple(arg for arg in args.extra_args if arg != "--")
-    report = run_apptainer_cpu(
-        ApptainerCpuRunConfig(
+    report = run_local(
+        LocalRunConfig(
             workspace_dir=args.workspace_dir,
             main_file=args.main_file,
             output_dir=args.output_dir,
-            apptainer_image=args.image,
             timeout_sec=args.timeout_sec,
             python_executable=args.python_executable,
             extra_args=extra_args,
             extra_artifact_paths=tuple(args.artifact),
+            env={"GENESIS_BACKEND": args.backend},
         )
     )
     return int(report["exit_code"])

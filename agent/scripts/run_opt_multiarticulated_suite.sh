@@ -66,7 +66,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: $0 [--model MODEL] [--critic-model MODEL] [--reasoning-effort EFFORT] [--critic-reasoning-effort EFFORT] [--critic-prompt-variant full|compact] [--max-parallel N] [--gpu|--cpu|--backend cpu|gpu] [--run-root PATH]" >&2
+      echo "Usage: $0 [--model MODEL] [--critic-model MODEL] [--reasoning-effort EFFORT] [--critic-reasoning-effort EFFORT] [--critic-prompt-variant full|compact] [--max-parallel N] [--gpu|--cpu|--backend gpu|cpu] [--run-root PATH]" >&2
       exit 2
       ;;
   esac
@@ -82,18 +82,10 @@ if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
   LOCAL_PYTHON="$ROOT_DIR/.venv/bin/python"
 fi
 
-if [[ -n "${APPTAINER_SIF:-}" ]]; then
-  if [[ -n "$LOCAL_PYTHON" ]]; then
-    PYTHON_CMD=(apptainer exec --nv "$APPTAINER_SIF" "$LOCAL_PYTHON")
-  else
-    PYTHON_CMD=(apptainer exec --nv "$APPTAINER_SIF" uv run python)
-  fi
+if [[ -n "$LOCAL_PYTHON" ]]; then
+  PYTHON_CMD=("$LOCAL_PYTHON")
 else
-  if [[ -n "$LOCAL_PYTHON" ]]; then
-    PYTHON_CMD=("$LOCAL_PYTHON")
-  else
-    PYTHON_CMD=(uv run python)
-  fi
+  PYTHON_CMD=(uv run python)
 fi
 
 run_cmd() {

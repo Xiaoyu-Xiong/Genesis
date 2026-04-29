@@ -10,19 +10,20 @@ from typing import Literal
 
 from code_agent.configs import CONFIGS
 
-CodexSandbox = Literal["read-only", "workspace-write"]
-DEFAULT_CODEX_PATH = "/jet/home/xxiong1/.vscode-server/extensions/openai.chatgpt-26.422.62136-linux-x64/bin/linux-x86_64/codex"
+CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
+DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CODEX_PATH: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
 class CodexExecRequest:
-    """Non-interactive `codex exec` request prepared by orchestration."""
+    """Non-interactive `codex exec` request prepared by a code-agent caller."""
 
     role: str
     prompt: str
     output_jsonl_path: Path
     final_message_path: Path
-    cwd: Path = Path("/jet/home/xxiong1/Genesis")
+    cwd: Path = field(default_factory=lambda: DEFAULT_REPO_ROOT)
     sandbox: CodexSandbox = "read-only"
     model: str | None = None
     output_schema_path: Path | None = None
@@ -58,31 +59,18 @@ class CodexExecResult:
         return asdict(self)
 
 
-@dataclass(slots=True, frozen=True)
-class CodexResult:
-    """Compatibility result for the early logs_dir-based runner shape."""
-
-    role: str
-    returncode: int
-    duration_sec: float
-    jsonl_path: Path
-    final_message_path: Path
-    stdout_path: Path
-    stderr_path: Path
-
-    @property
-    def ok(self) -> bool:
-        return self.returncode == 0 and self.final_message_path.exists()
-
-
 def resolve_codex_binary(codex_bin: str = "codex") -> str | None:
     if Path(codex_bin).exists():
         return codex_bin
-    return shutil.which(codex_bin) or (DEFAULT_CODEX_PATH if Path(DEFAULT_CODEX_PATH).exists() else None)
+    if resolved := shutil.which(codex_bin):
+        return resolved
+    if DEFAULT_CODEX_PATH and Path(DEFAULT_CODEX_PATH).exists():
+        return DEFAULT_CODEX_PATH
+    return None
 
 
 def build_codex_exec_command(request: CodexExecRequest, *, resolved_codex: str | None = None) -> list[str]:
-    if request.sandbox not in ("read-only", "workspace-write"):
+    if request.sandbox not in ("read-only", "workspace-write", "danger-full-access"):
         raise ValueError(f"Unsupported Codex sandbox: {request.sandbox}")
 
     command = [
@@ -105,50 +93,11 @@ def build_codex_exec_command(request: CodexExecRequest, *, resolved_codex: str |
     return command
 
 
-def run_codex_exec(
-    request: CodexExecRequest | None = None,
-    *,
-    role: str | None = None,
-    prompt: str | None = None,
-    workdir: Path | None = None,
-    logs_dir: Path | None = None,
-    sandbox: CodexSandbox | None = None,
-    output_schema: Path | None = None,
-    model: str | None = None,
-    timeout_sec: float | None = None,
-) -> CodexExecResult | CodexResult:
+def run_codex_exec(request: CodexExecRequest) -> CodexExecResult:
     """Run Codex in batch mode and persist stdout JSON events as JSONL.
 
-    Prefer passing `CodexExecRequest`. The keyword-only form is kept for the
-    initial logs_dir-based adapter and returns `CodexResult`.
+    Callers build an explicit request so output paths and execution policy stay visible at the callsite.
     """
-
-    if request is None:
-        if role is None or prompt is None or workdir is None or logs_dir is None:
-            raise TypeError("Either request or role/prompt/workdir/logs_dir must be provided")
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        legacy_request = CodexExecRequest(
-            role=role,
-            prompt=prompt,
-            cwd=workdir,
-            sandbox=sandbox or "read-only",
-            model=model,
-            output_schema_path=output_schema,
-            output_jsonl_path=logs_dir / f"codex_{role}.jsonl",
-            final_message_path=logs_dir / f"codex_{role}.final.md",
-            timeout_sec=timeout_sec,
-        )
-        result = _run_codex_exec_request(legacy_request)
-        return CodexResult(
-            role=result.role,
-            returncode=result.exit_code if result.exit_code is not None else 127,
-            duration_sec=result.duration_sec,
-            jsonl_path=Path(result.output_jsonl_path),
-            final_message_path=Path(result.final_message_path),
-            stdout_path=Path(result.output_jsonl_path),
-            stderr_path=Path(result.stderr_path) if result.stderr_path else logs_dir / f"codex_{role}.stderr",
-        )
-
     return _run_codex_exec_request(request)
 
 

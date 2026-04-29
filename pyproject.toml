@@ -11,6 +11,7 @@ requires-python = ">=3.10,<3.14"
 dependencies = [
     "psutil",
     "pytetwild",
+    "xatlas",
     "scikit_build_core",
     "setuptools_scm",
     "quadrants==0.5.2",

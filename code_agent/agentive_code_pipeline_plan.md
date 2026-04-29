@@ -1,429 +1,119 @@
 # Codex-First Code Agent Pipeline Plan
 
-本文档规划新的 `code_agent/` 管线：不再以 IR 作为主生成路径，而是从 text prompt 直接生成 Genesis 仿真代码。第一版原则是最大化复用 Codex CLI，避免重新实现 agent 框架、代码编辑器、reviewer、debugger 和 repo 浏览能力。
-
-核心判断：
-
-- Codex 负责规划、写代码、review、debug 和 critic reasoning；当前集成入口由 deterministic coordinator 生成。
-- `code_agent` 只负责薄调度、资产桥接、执行控制、artifact 管理和验证闭环。
-- 生成代码是最终权威产物；Scene Brief、Module Contract、Asset Manifest 等只作为协作元数据，不是新的 IR。
-
-当前实施进度见 [Implementation Status](docs/status.md)。截至目前，Scene / Body / Action / Rendering 四个
-Codex writers 已接入第一版 dispatcher；writer 以 JSON `source_code` 返回完整模块源码，由 coordinator 写入文件。
-Asset Bridge、Codex XML worker、static review 和完整 debugger patch plan 仍未接入主循环。
-
-## 1. Design Constraints
-
-### 1.1 Goals
-
-- 从自然语言任务生成可运行的 Genesis Python 仿真工程。
-- 支持复杂场景分解，而不是要求单个模型一次生成完整脚本。
-- 复用迁移后的 [mesh](docs/mesh.md) 和资产 post-processing 能力；MJCF/XML 由 Codex asset worker 生成或从 repo 资产引用。
-- 通过 [configs.py](configs.py) 固化通用默认超参，减少 Codex agents 在常规参数上的决策负担。
-- 保证所有 Python / `uv` / `pytest` / Genesis 执行仍由 Apptainer 或 sbatch 统一控制。
-- 保存可审计 artifact：prompt、planner output、worker logs、代码、执行日志、视频、metrics、critic 报告。
-- 明确区分已实现基础设施、临时 deterministic fallback 和真正的 Codex worker 目标；当前状态见
-  [Implementation Status](docs/status.md)。
-
-### 1.2 Non-Goals
-
-- 不在第一版自建 LLM client。
-- 不自建通用 multi-agent conversation framework。
-- 不让顶层 planner 任意递归启动子 agent。
-- 不让 Codex worker 自行运行 Genesis 仿真。
-- 不重写 mesh repair、texture transfer 等现有 mesh 后处理能力。
-- 不照搬旧 XML agent；MJCF/XML 按 code-native 思路交给 Codex subagent 生成、review 和修复。
-- 不把 Scene Brief / Module Contract 发展成新的可执行 IR。
-
-## 2. Architecture
-
-### 2.1 Layer Split
-
-| Layer | Owner | Responsibility |
-| --- | --- | --- |
-| Control Plane | `code_agent` deterministic coordinator | workspace、schema validation、Codex invocation、write-scope enforcement、asset bridge、Apptainer/sbatch execution、retry budget |
-| Agent Plane | Codex CLI | planning、code generation、review、debug、critic reasoning |
-| Asset Plane | existing mesh code plus Codex XML worker | Meshy、mesh repair、texture transfer、Codex-generated MJCF/XML、repo asset lookup |
-| Evaluation Plane | mixed | artifact completeness、task metrics、video/event critic、suite summaries |
-
-关键边界：Codex 可以写代码和提出修复，但生成代码的执行必须由 Control Plane 统一完成。
-
-### 2.2 Repository Skeleton
-
-The scaffold is intentionally compact. Subdirectory documentation is centralized under [docs](docs/README.md):
-
-| Directory | Documentation |
-| --- | --- |
-| `orchestration/` | [Orchestration](docs/orchestration.md) |
-| `codex/` | [Codex](docs/codex.md) |
-| `execution/` | [Execution](docs/execution.md) |
-| `evaluation/` | [Evaluation](docs/evaluation.md) |
-| `specs/` | [Specs](docs/specs.md) |
-| `assets/` | [Assets](docs/assets.md) |
-| `assets/mesh/` | [Migrated Mesh Pipeline](docs/mesh.md) |
-| `scripts/` | [Scripts and Suites](docs/scripts.md) |
-| `workspaces/` | [Workspaces](docs/workspaces.md) |
-| `docs/` | [Documentation Index](docs/README.md) |
-
-### 2.3 Top-Level Flow
-
-1. `code_agent` CLI 接收用户 prompt、run id、资源选项和输出目录。
-2. Coordinator 创建 run workspace，写入用户任务、仓库规则、能力说明。
-3. Coordinator 调用 read-only Codex Planner，生成结构化 `planner_output.json`。
-4. Coordinator 校验 planner output，拆分 Scene Brief、Asset Requests、Module Contracts。
-5. Coordinator 调用 Asset Bridge 生成或查找所需资产：mesh 走迁移后的 [mesh](docs/mesh.md) pipeline，MJCF/XML 走 Codex XML worker，输出 `asset_manifest.json`。
-6. Coordinator 固定派发 Scene / Body / Action / Rendering 四个 Codex workers 生成主仿真模块和渲染模块。
-7. Coordinator/Integrator 合并入口、导入、函数签名、render hooks 和 artifact 输出。当前实现中 Integrator 是
-   deterministic `src/main.py` writer，不是单独 Codex worker。
-8. Codex Review Agent 或 `codex exec review` 做静态审查。当前尚未接入。
-9. Execution Agent 用 Apptainer 或 sbatch 运行生成代码。
-10. Coordinator 收集 run artifacts、metrics、video、frames、stdout/stderr。
-11. 单层 Critic Agent 结合任务、metrics、event log、Rendering Worker hints 和视频给出 verdict。
-12. 若失败，当前先按 Critic 的 `recommended_owner` 直接调用目标 writer 修复；后续再加入 Debugger 输出
-    owner-routed `patch_plan.json`。
-13. 成功或达到重试上限后写 `summary.json`。
-
-### 2.4 Codex Invocation Policy
-
-Planner / reviewer 默认只读：
-
-```bash
-codex exec \
-  --cd /jet/home/xxiong1/Genesis \
-  --sandbox read-only \
-  --json \
-  --output-last-message code_agent/workspaces/<run_id>/logs/<role>.final.md \
-  --output-schema code_agent/specs/<role_output>.schema.json \
-  "<role prompt>"
-```
-
-当前 writer 策略：Scene / Body / Action / Rendering writers 只读运行，不直接编辑文件。它们必须返回
-`worker_report.schema.json`，其中 `source_code` 是完整 Python 模块源码。Coordinator 校验 JSON 后写入目标文件。
-
-```bash
-codex exec \
-  --cd /jet/home/xxiong1/Genesis \
-  --sandbox read-only \
-  --json \
-  --output-last-message code_agent/workspaces/<run_id>/logs/<role>.final.md \
-  --output-schema code_agent/specs/worker_report.schema.json \
-  "<role prompt>"
-```
-
-每个 writer prompt 必须包含：
-
-- 角色职责
-- 目标文件路径，但明确禁止 Codex 直接写文件
-- 禁止运行 host-side Python / `uv` / `pytest` / simulation
-- 输入 contracts
-- Asset Manifest
-- 期望导出的函数或入口
-- final report schema
-- `source_code` 必须包含完整替换模块
+本文档记录当前 `code_agent/` 的主动规划方向。当前实现不再维护旧的手工串联主循环；单个例子的生命周期
+由 Planner-led episode runtime 驱动。
 
-Coordinator 必须检查 worker report，并且只把通过校验的 `source_code` 写入该 worker 的目标文件。后续仍需增加
-git/workspace diff audit。
+## Current Architecture
 
-### 2.5 Static Configs
-
-[configs.py](configs.py) 保存 `code_agent` 第一版的静态默认超参。它从旧 `agent/configs.py` 迁移了和 IR 无关、通常不需要 agent 动态修改的参数：
-
-- `CodexConfigs`: planner、worker、reviewer、debugger、critic 的默认模型、sandbox 和 approval policy。
-- `OrchestrationConfigs`: coordinator 并发、重试、timeout、backend、scope check 和 static review 开关。
-- `RuntimeConfigs`: Genesis timestep、substeps、render interval 和 resolution。
-- `DeformableConfigs`: FEM+IPC 物理默认值；PBD 暂不进入 code-agent 第一版。
-- `CriticConfigs`: 单层 critic 的 video sampling、frame count 和 frame width 默认值。
-- `MeshyRequestConfigs`: Meshy 请求默认值。
-- `MeshRepairConfigs`: repair、fTetWild、texture transfer 默认值。
+`utils/suite.py` 只负责读取 suite case、创建 workspace、写入输入文件，并为每个 case 启动一个
+`PlannerSession`。之后的 case 级控制权交给 Planner。
 
-这些配置是硬编码默认值，不应从环境变量隐式加载。Run-specific 行为应通过明确 CLI flag 或 run config 覆盖。Codex workers 应优先使用这些默认值，除非用户任务、执行失败或 critic 反馈明确要求调整。
-
-## 3. Contracts
-
-### 3.1 Planner Output
-
-Codex Planner 是第一版的顶层智能体。它只做规划，不改代码，不直接启动子 agent。
-
-输出字段：
-
-- `scene_brief`: 用户意图、必须实体、交互目标、成功/失败标准、默认假设。
-- `scene_plan`: 仿真策略、物理风险、资源级别、渲染需求。
-- `asset_requests`: 资产名称、类型、用途、尺度、bbox、纹理需求、仿真角色。
-- `module_contracts`: worker role、target files、exports、dependencies、forbidden edits。
-- `dispatch_graph`: 可并行 worker、依赖关系、是否等待 asset manifest。
-- `execution_plan`: local Apptainer smoke test 或 GPU sbatch、预计 step/render budget。
-- `risk_register`: 主要失败模式和预防策略。
-
-### 3.2 Module Contract
-
-每个模块 contract 至少包含：
-
-- owner role
-- target files
-- target file path and current write mode: direct Codex edits are disabled; coordinator writes returned `source_code`
-- required exports
-- input dependencies
-- asset dependencies
-- forbidden edits
-- smoke expectation
-- final report schema
-- source-code return contract: 当前实现要求 writer 在 JSON `source_code` 字段中返回完整模块源码
-
-第一版固定使用一条主仿真拆分路径，不再按“简单/复杂”分支。拆分沿用旧 IR 的直觉，但改成代码模块职责，并额外加入专门的渲染 worker：
-
-- `Scene Worker`: 搭建舞台。负责 scene lifecycle、ground、arena、fixed obstacles、fixed props、static supports、global FEM+IPC defaults 和 artifact layout。常规 dt/substeps/material/contact 参数从 [configs.py](configs.py) 读取。固定物体属于 scene，不属于 body。Scene 可以提供基础 camera/light slots，但最终渲染策略不在 Scene 内拍脑袋完成。
-- `Body Worker`: 定义演员。只负责会运动、会被驱动、会被接触推移、会变形或参与任务结果的实体，包括 dynamic rigid bodies、deformables、robots、free-base MJCF/URDF、active tools 和 movable mesh assets。
-- `Action Worker`: 编写剧本。负责 staged control、robot DoF schedule、external forces、scripted policy、event logging、task metric、failure guards 和 final score。它可以声明需要观察的关键事件，但不直接承担相机/灯光/录制实现。
-- `Rendering Worker`: 编写拍摄方案。负责 camera placement、camera motion、lights、render cadence、video/frames output、`render_stats.json`、headless fallback 和 visual validation hints。它消费 Scene / Body / Action 的 exports，不修改实体定义或控制逻辑。
-- `Integrator`: 合并 Scene / Body / Action / Rendering，维护 imports、entrypoint、module wiring 和最终 runnable project。
-
-这个拆分仍然足够粗，避免过多 subagent 协调；同时把渲染从 Action 中分离出来，便于处理 headless rendering、视频质量和可视性问题，也更利于 owner-routed repair。
-
-### 3.3 Rendering Contract
-
-Rendering Worker 必须输出可被 Integrator 和 Critic 消费的 contract：
-
-- camera list: name、pos、lookat、resolution、fov、target entities、expected visibility。
-- light list 或确认 Scene 默认灯光足够。
-- capture policy: step cadence、frame budget、video fps、是否保存 key frames。
-- output paths: `artifacts/render.mp4`、可选 `artifacts/frames/`、可选 `artifacts/render_stats.json`。
-- validation hints: 视频中应能看到的关键事件、主体、接触或形变。
-- fallback strategy: 当 Genesis camera render 在 CPU/headless 环境不可用或过慢时，如何降级为诊断渲染，并明确标注为 diagnostic。
-- repair ownership: render 空白、看不到主体、相机遮挡、视频过短、帧率不合理优先路由给 Rendering Worker；若实体本身缺失或没有动作，再路由给 Body/Action。
-
-### 3.4 Asset Manifest
-
-资产 agent 不直接写主仿真代码，只输出可被代码消费的 manifest。
-
-每个资产记录：
-
-- logical name
-- source type: primitive / generated_mesh / repo_asset / mjcf / urdf
-- runtime path
-- visual path
-- texture path
-- bbox
-- recommended scale
-- physical role: visual only / collision / deformable / rigid / articulated
-- validation status
-- known caveats
-- suggested Genesis construction pattern
-
-主仿真 worker 只能使用 manifest 中标为 runtime-ready 的路径，不能猜测 Meshy 输出目录，也不能把 raw textured OBJ 当作 runtime mesh。
-
-## 4. Asset Bridge
-
-第一版资产层复用迁移后的 mesh 能力，并用 Codex worker 处理 MJCF/XML：
-
-- [mesh](docs/mesh.md): Meshy preview、texture refine、manifold check、repair、texture transfer、validation render。这个路径从旧 `agent/mesh` 迁移到 `assets/mesh`，只在外层增加 request normalization 和 manifest 汇总。
-- Codex XML worker: articulated asset 的 MJCF/XML 由专门的 Codex subagent 从头生成、review、修复，并登记到 Asset Manifest。每个 XML 只允许包含一个 articulated body，不能包含舞台、固定道具、相机、灯光或多个不相关 articulated bodies。
-- repo assets: 现有资产查找和登记。
-
-`code_agent/asset_bridge` 只做：
-
-- 规范化 planner 的 asset requests。
-- 对 mesh 请求调用迁移后的 [mesh](docs/mesh.md) pipeline。
-- 对 MJCF/XML 请求调用 Codex XML worker，而不是旧 XML agent。
-- XML worker 写完并静态检查后，必须请求一次简单 MuJoCo import validation，确认 XML 语法和模型构建有效。
-- XML worker 负责 actuator 设计，并必须在 Asset Manifest 中暴露 actuator/control interface，供 Action Worker 使用。
-- 查找或登记 repo 内已有资产。
-- 汇总 bbox、scale、runtime path、texture path 和 validation status。
-- 将失败压缩成 planner/debugger 可消费的错误摘要。
-
-## 5. Workspace Layout
-
-每个 run 固定使用：
-
-```text
-code_agent/workspaces/<run_id>/
-  inputs/
-    user_prompt.md
-    repo_rules.md
-    capabilities.md
-  contracts/
-    planner_output.json
-    scene_brief.json
-    scene_plan.json
-    module_contracts.json
-    asset_requests.json
-  assets/
-    asset_manifest.json
-  src/
-    scene.py
-    body.py
-    action.py
-    rendering.py
-    main.py
-  logs/
-    codex_planner.jsonl
-    codex_scene.jsonl
-    codex_body.jsonl
-    codex_action.jsonl
-    codex_rendering.jsonl
-    codex_integrator.jsonl
-    codex_review.jsonl
-    execution.stdout
-    execution.stderr
-  artifacts/
-    run_result.json
-    event_log.json
-    metrics.json
-    render_stats.json
-    render.mp4
-    frames/
-  reports/
-    static_review.json
-    execution_report.json
-    critic.json
-    patch_plan.json
-  summary.json
-```
-
-## 6. Required Schemas
-
-MVP schemas:
-
-- `planner_output.schema.json`
-- `asset_manifest.schema.json`
-- `worker_report.schema.json`
-- `review_report.schema.json`
-- `execution_report.schema.json`
-- `patch_plan.schema.json`
-- `critic_report.schema.json`
-
-这些 schema 只约束流程 metadata，不承担仿真语义编译职责。当前 `worker_report.schema.json` 额外要求
-`source_code`，这是 coordinator-controlled write 的实现细节，用来避免 Codex 在受限环境中直接改文件。
-
-## 7. Verification Loop
-
-每轮生成必须通过：
-
-1. Schema validation。
-2. Write-scope check。
-3. Codex static review。
-4. Deterministic policy check：禁止 host Python / `uv` / `pytest` / simulation。
-5. Apptainer smoke execution 或 sbatch execution。
-6. Artifact completeness check。
-7. Task metric check。
-8. Video / event critic。
-
-成功准入：
-
-- 代码运行无异常。
-- 必要 artifact 完整。
-- task metric 通过或有明确合理解释。
-- 视频能观察到目标交互。
-- critic 没有高严重度物理或语义问题。
-- Codex workers 没有越界修改。
-- 执行日志没有违反仓库执行规则。
-
-失败路由：
-
-| Failure | Routed To |
-| --- | --- |
-| syntax/import error | Integrator |
-| Genesis API misuse | owning Scene / Body / Action / Rendering worker plus case library |
-| missing asset/path | Asset Bridge or Scene / Body worker |
-| fixed object or arena issue | Scene worker |
-| movable body placement or geometry issue | Body worker |
-| initial overlap | Scene + Body workers |
-| solver instability | Scene worker, then Body worker if caused by movable geometry |
-| no visible motion | Action worker |
-| render missing/blank/occluded | Rendering worker |
-| render too slow or headless failure | Rendering worker, then Execution if environment-specific |
-| wrong task semantics | Planner plus Action worker |
-| metric/video disagreement | Critic plus Action worker |
-
-Debugger 先输出 `patch_plan.json`，Coordinator 再调用目标 worker 修复。不要默认整场景重写。
-
-## 8. Implementation Phases
-
-### Phase 0: Baseline
-
-- 选 10-20 个 golden tasks，覆盖 rigid、deformable、mesh、MJCF、texture、long-horizon。
-- 保存旧 IR 管线输出作为 parity baseline。
-- 明确 MVP 必须支持和可延期能力。
-
-### Phase 1: Codex CLI Thin MVP
-
-- 实现 coordinator、workspace manager、Codex invoker、schema validator、Execution Agent。
-- 一个 Codex Planner 输出 plan。
-- 固定派发 Scene / Body / Action / Rendering workers，并由 deterministic Integrator 生成 runnable project。
-- Codex reviewer/debugger 支持第一轮修复。
-- 不接入 mesh/MJCF。
-
-成功标准：
-
-- 至少 5 个 primitive 场景自动生成、运行、渲染。
-- 常见 syntax/import/API 错误能自动修复一轮。
-- `code_agent` 自写代码集中在调用、校验、执行和日志。
-
-### Phase 2: Asset Bridge
-
-- 接入现有 mesh pipeline。
-- 接入 MJCF/XML 生成或引用。
-- 生成 Asset Manifest。
-- Scene / Body workers 只消费 manifest。
-
-### Phase 3: Worker Contract Hardening
-
-- 固化 Scene / Body / Action / Rendering / Integrator 的 prompt、schema 和 write scope。
-- 明确 fixed objects 永远归 Scene；Body 只放参与运动或任务交互的实体。
-- 明确渲染实现归 Rendering；Action 只提供需要观察的事件和 metric 信号。
-- Coordinator 校验每个 worker 的 write scope 和 exported symbols。
-
-### Phase 4: Critic and Repair
-
-- 已接入单层 Codex Critic，结合 deterministic report、metrics、event log 和 render stats 给出 verdict。
-- 当前 repair loop 可按 critic `recommended_owner` 直接 rerun 对应 writer。
-- Debugger 输出 owner-routed `patch_plan.json` 仍待实现。
-- 多轮最小修改策略仍待硬化。
-
-### Phase 5: Suite and Cost Tracking
-
-- 批量运行 golden tasks。
-- 记录每个 Codex invocation 的耗时、token、失败类型和资源使用。
-- 比较新 code-native 管线和旧 IR 管线。
-
-## 9. Risks
-
-| Risk | Mitigation |
-| --- | --- |
-| Codex worker 修改越界 | Module Contract + changed-file validation |
-| 顶层 planner 递归失控 | Planner 只输出 dispatch plan，Coordinator 负责派发 |
-| host-side Python 违规 | worker prompt 禁止，Execution Agent 统一执行，日志审计 |
-| Genesis API 幻觉 | helper API、case library、review、execution feedback |
-| 删除 IR 后缺少结构化检查 | 保留非执行型 contracts 和 schemas |
-| 资产尺度/路径不一致 | Asset Manifest 强制 bbox、scale、runtime path |
-| 物理不稳定 | smoke tests、Scene worker、failure cookbook |
-| critic 误判 | metrics + event log + video 多证据 |
-| Codex CLI 行为变化 | 在 `codex/` 中集中封装 Codex invocation，记录 `codex --version` |
-
-## 10. Relationship To Existing `agent/`
-
-短期：
-
-- `code_agent/` 是新实验管线。
-- Codex CLI 是 planner / worker / reviewer / debugger backend。
-- [mesh](docs/mesh.md) 作为 asset service 复用；MJCF/XML 由 Codex XML worker 生成或从 repo 资产引用。
-- `agent/docs` 继续描述旧 IR 管线。
-
-中期：
-
-- 新旧管线共享 mesh/texture 资产层和 suite summaries。
-- 将成功 prompts、schemas、case snippets 沉淀到 `code_agent/case_library`。
-
-长期：
-
-- 新 code-native 管线成为默认自然语言入口。
-- 旧 IR 管线保留为 legacy baseline 或结构化输入 fallback。
-
-## 11. References
-
-设计参考仅保留方向性依据：
-
-- MCP-SIM: multi-agent physics simulation self-correction.
-- GenSim / GenSim2: LLM-generated robotic simulation tasks and task libraries.
-- RoboGen: propose-generate-learn loop for embodied simulation data.
-- Eureka / Code as Policies: executable code generation with feedback.
-- AgentCoder / MetaGPT / ChatDev / AutoGen / SWE-agent: multi-agent software engineering patterns.
+`PlannerSession` 和 Planner 调度层位于 `code_agent/planner/`：
+
+- `planner/agent.py`: Planner prompt 构造、`codex exec` 调用、Planner action 读取。
+- `planner/session.py`: episode 状态机、持久化、summary、writer 状态记录。
+- `planner/actions.py`: 执行 Planner 选择的 harness action。
+
+负责写代码的 subagent 位于 `code_agent/writer/`。`code_agent/utils/` 保留 suite 入口、Codex 调用、本地执行、
+timing resolution 和生成入口文件的 integration helper。
+
+Planner 每一轮只返回一个符合 `planner_action.schema.json` 的结构化 action。Python harness 负责执行这个
+action、更新 `reports/episode_state.json`、追加 action/dispatch JSONL，然后再次调用 Planner，直到 Planner
+选择 `finish` 或预算耗尽。
+
+## Planner Action Library
+
+当前暴露给 Planner 的动作库是固定的、窄接口的：
+
+- `write_plan`: 写入 `planner_output`，由 harness 校验 schema 并解析 duration、steps、fps。
+- `spawn_workers`: 唤醒 Scene、Body、Action、Rendering 中的一个或多个生成 worker。
+- `run_integrator`: 写入稳定的 `src/main.py`。
+- `run_execution`: 使用仓库 uv 环境和本机默认 GPU 运行生成代码。
+- `run_critic`: 运行 deterministic checks 和 Codex Critic。
+- `request_repair`: 把失败上下文发回指定 owner worker。
+- `run_python`: 运行受控 `uv run python ...`。
+- `run_pytest`: 运行受控 `uv run pytest ...`。
+- `finish`: 结束 episode，输出 pass、fail 或 inconclusive。
+
+Planner 不直接编辑文件，也不直接执行 shell 命令。所有文件写入、GPU 使用、命令执行、schema 校验、
+artifact 收集和 retry 预算都由 harness 执行。
+
+## Worker Ownership
+
+当前生成 worker 仍然是四个：
+
+- Scene Worker: 场景、固定物体、全局模拟设置、可供渲染参考的空间锚点。
+- Body Worker: 可动刚体、任务参与物体、actor 字典。
+- Action Worker: step loop、控制、指标、event log、任务结果。
+- Rendering Worker: Genesis camera、相机参数、灯光、帧采样、视频合成、render stats。
+
+worker 在 `workspace-write` sandbox 中运行，但只能编辑自己被分配的目标文件。dispatcher 会检查
+`worker_report.schema.json`、changed files、目标文件存在性和必需 export。
+
+## Timing Policy
+
+时间相关参数由 Planner 通过 `planner_output.execution_plan` 明确给出。`utils.timing` 不再用正则或关键字从
+自然语言里推断时长、step 数或 fps。
+
+CLI 的 `--duration-sec`、`--steps`、`--render-fps` 是显式 override。没有 override 时，harness 使用 Planner
+输出的 duration、step budget 和 render fps。默认运行目标是本机 GPU。
+
+## Execution And Evaluation
+
+utils execution 层只做本地 uv 执行和 artifact 收集。它不判断任务质量，也不生成代码。
+
+当前 runner 写入：
+
+- `reports/execution_report.json`
+- `reports/stdout.txt`
+- `reports/stderr.txt`
+- 发现到的 artifact 路径
+
+evaluation 层先做 deterministic checks，再调用 Codex Critic。Critic 是只读调用，读取 execution report、
+metrics、event log、render stats 等证据，返回结构化 verdict、score、recommended owner 和 repair summary。
+
+## Artifacts
+
+每个 case workspace 的核心输出是：
+
+- `contracts/planner_output.json`
+- `contracts/timing.json`
+- `contracts/episode_plan.json`
+- `src/scene.py`
+- `src/body.py`
+- `src/action.py`
+- `src/rendering.py`
+- `src/main.py`
+- `reports/episode_state.json`
+- `reports/planner_actions.jsonl`
+- `reports/dispatch_history.jsonl`
+- `reports/execution_report.json`
+- `reports/artifact_evaluation.json`
+- `reports/critic_report.json`
+- `reports/codex_critic_report.json`
+- `artifacts/run_result.json`
+- `artifacts/event_log.json`
+- `artifacts/metrics.json`
+- `artifacts/render_stats.json`
+- `artifacts/render.mp4`
+- `summary.json`
+
+## Current Defaults
+
+- 使用仓库 uv 环境直接运行。
+- GPU 是默认执行目标。
+- CPU 只用于显式 CPU 请求、GPU 不可用或明确 CPU-only 的任务。
+- Planner 和 Critic 使用 read-only sandbox。
+- 生成 worker 使用 workspace-write sandbox。
+- 不使用 Apptainer 或 Slurm。
+
+## Near-Term Work
+
+后续结构性工作应围绕当前 Planner action library 扩展，而不是恢复旧手工 pipeline：
+
+- 增加 episode resume。
+- 增加 worker 写入范围的 diff audit。
+- 接入 Asset Bridge。
+- 接入 mesh asset request。
+- 接入 Codex XML/MJCF worker。
+- 扩大 rigid primitive suite 覆盖并验证重复运行稳定性。

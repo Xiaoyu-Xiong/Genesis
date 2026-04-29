@@ -240,7 +240,7 @@ This step does not save tokens directly. It makes token-saving changes measurabl
 
 After each implementation step:
 
-1. run small local smoke tests for the modified component
+1. run small local GPU smoke tests for the modified component
 2. keep output schemas backward-compatible where possible
 3. confirm round artifacts still write successfully
 
@@ -252,7 +252,7 @@ Primary suite:
 
 Validation target:
 
-- one H100-80 GPU
+- dedicated local GPU
 - full suite run
 - per-case, per-round token accounting for all OpenAI-facing components
 

@@ -188,18 +188,10 @@ if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
   LOCAL_PYTHON="$ROOT_DIR/.venv/bin/python"
 fi
 
-if [[ -n "${APPTAINER_SIF:-}" ]]; then
-  if [[ -n "$LOCAL_PYTHON" ]]; then
-    PYTHON_CMD=(apptainer exec --nv "$APPTAINER_SIF" "$LOCAL_PYTHON")
-  else
-    PYTHON_CMD=(apptainer exec --nv "$APPTAINER_SIF" uv run python)
-  fi
+if [[ -n "$LOCAL_PYTHON" ]]; then
+  PYTHON_CMD=("$LOCAL_PYTHON")
 else
-  if [[ -n "$LOCAL_PYTHON" ]]; then
-    PYTHON_CMD=("$LOCAL_PYTHON")
-  else
-    PYTHON_CMD=(uv run python)
-  fi
+  PYTHON_CMD=(uv run python)
 fi
 
 run_cmd() {
