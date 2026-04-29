@@ -23,7 +23,7 @@ class CodexConfigs:
 class HarnessConfigs:
     """Static harness limits that should usually not be left to generated code."""
 
-    max_parallel_workers: int = 2
+    max_parallel_workers: int = 4
     max_repair_rounds: int = 12
     max_worker_attempts: int = 20
     execution_timeout_sec: float = 1000.0

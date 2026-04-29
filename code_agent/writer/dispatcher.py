@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import textwrap
 from pathlib import Path
@@ -80,9 +81,10 @@ def dispatch_worker_roles(
     logs_dir.mkdir(parents=True, exist_ok=True)
     _seed_worker_files(case_dir)
 
-    results: list[WorkerDispatchResult] = []
-    for role in roles:
-        results.append(
+    ordered_roles = tuple(roles)
+    max_workers = max(1, min(len(ordered_roles), CONFIGS.harness.max_parallel_workers))
+    if max_workers == 1:
+        return [
             _run_worker(
                 case_dir=case_dir,
                 task=task,
@@ -90,8 +92,22 @@ def dispatch_worker_roles(
                 spec=WORKERS[role],
                 repair_context=repair_context,
             )
-        )
-    return results
+            for role in ordered_roles
+        ]
+
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="writer") as executor:
+        futures = [
+            executor.submit(
+                _run_worker,
+                case_dir=case_dir,
+                task=task,
+                planner_output=planner_output,
+                spec=WORKERS[role],
+                repair_context=repair_context,
+            )
+            for role in ordered_roles
+        ]
+        return [future.result() for future in futures]
 
 
 def repair_worker(*, case_dir: Path, task: str, owner: str, failure_context: str) -> WorkerDispatchResult | None:
@@ -108,7 +124,13 @@ def repair_worker(*, case_dir: Path, task: str, owner: str, failure_context: str
 
 
 def write_worker_dispatch_report(case_dir: Path, results: list[WorkerDispatchResult]) -> None:
+    active_parallelism = min(len(results), CONFIGS.harness.max_parallel_workers)
     report = {
+        "dispatch": {
+            "num_workers": len(results),
+            "max_parallel_workers": CONFIGS.harness.max_parallel_workers,
+            "parallel": active_parallelism > 1,
+        },
         "workers": [
             {
                 "role": item.role,

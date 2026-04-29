@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from code_agent.configs import CONFIGS
 from code_agent.evaluation.runner import evaluate_generated_run
 from code_agent.io_utils import dump_json
 from code_agent.utils.execution import run_generated_simulation
@@ -114,10 +115,13 @@ class EpisodeActionExecutor:
             self.session.state["control"]["needs_integration"] = True
             self.session.state["control"]["needs_execution"] = False
             self.session.state["control"]["needs_critic"] = False
+        active_parallelism = min(len(roles), CONFIGS.harness.max_parallel_workers)
         return {
             "ok": all(item.ok for item in results),
             "status": "workers_dispatched",
             "roles": list(roles),
+            "parallel": active_parallelism > 1,
+            "max_parallel_workers": active_parallelism,
             "all_workers_ok": all_ok,
         }
 

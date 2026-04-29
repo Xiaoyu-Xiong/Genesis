@@ -24,6 +24,9 @@ the pipeline structure changes.
 - `writer/dispatcher.py` dispatches those writers in `workspace-write` sandbox mode, parses
   `worker_report.schema.json`, validates each target module, records `worker_dispatch.json`, and can rerun a single
   owning worker during repair.
+- Writer dispatch supports Planner-selected parallel batches. Roles included in one `spawn_workers` action run
+  concurrently up to `CONFIGS.harness.max_parallel_workers`; dependent work remains serial by having Planner split it
+  across separate turns.
 - The current worker protocol is direct-edit based: Codex workers edit only their assigned generated module and return
   structured report metadata.
 - `utils/integrator.py` writes the stable `src/main.py` that imports and wires Scene, Body, Action, and
@@ -53,8 +56,9 @@ the pipeline structure changes.
 - Planner first writes a structured `planner_output` through the `write_plan` action. The harness validates that output,
   resolves duration, step budget, render fps, and target frame count, then writes `contracts/planner_output.json` and
   `contracts/timing.json`.
-- Planner chooses subsequent actions from the harness action library. The harness performs the real Codex worker calls,
-  integration, local GPU execution, critic calls, controlled Python/Pytest commands, and finish handling.
+- Planner chooses subsequent actions from the harness action library. The harness performs the real Codex writer calls,
+  including parallel writer batches when Planner selects multiple independent roles, plus integration, local GPU
+  execution, critic calls, controlled Python/Pytest commands, and finish handling.
 - The generated render path uses Genesis camera rendering hooks owned by the Rendering Worker. It adds cameras before
   `scene.build()`, captures Genesis RGB frames during stepping, and writes video/stat artifacts after execution.
 - `evaluation/runner.py` is the top-level evaluator wrapper. It combines artifact checks with the single-pass Codex

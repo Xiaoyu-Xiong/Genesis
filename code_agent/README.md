@@ -35,6 +35,9 @@ running integration, executing generated code, invoking Critic, requesting owner
 Python/Pytest commands, or finishing the episode. Shell execution, GPU use, schema validation, write-scope enforcement,
 artifact collection, and retry limits stay inside the Python harness.
 
+When Planner includes multiple independent writer roles in one `spawn_workers` action, the harness dispatches those
+writers concurrently. Planner keeps dependent work serial by splitting it across multiple turns.
+
 ## Directory Map
 
 | Directory | Purpose |

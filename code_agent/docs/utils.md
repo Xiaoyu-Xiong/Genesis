@@ -24,3 +24,7 @@ runtime mechanics.
 
 Planner and Writer may request execution through the harness, but generated workers should not call `uv`, `pytest`, or
 Genesis directly. All generated-code execution should go through `utils.execution`.
+
+Writer batches requested by Planner may run concurrently. The harness caps concurrency with
+`CONFIGS.harness.max_parallel_workers`; Planner controls dependencies by choosing which writer roles appear in the same
+`spawn_workers` action.

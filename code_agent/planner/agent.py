@@ -80,6 +80,9 @@ class EpisodePlanner:
               scene=`create_scene`; body=`create_bodies`; action=`run_actions`; rendering=`setup_rendering`,
               `capture_frame`, and `finalize_rendering`.
             - spawn_workers: start one or more generation workers. Use `roles` from scene, body, action, rendering.
+              Roles in a single spawn_workers action are dispatched concurrently by the harness. Put roles in the same
+              action only when they can safely work from the same current planner_output without waiting for each other.
+              Split dependent work across multiple Planner turns.
             - run_integrator: wire generated modules into src/main.py.
             - run_execution: run generated code through the harness on the local GPU.
             - run_critic: ask the read-only critic to evaluate execution artifacts.
@@ -91,6 +94,8 @@ class EpisodePlanner:
             Action policy:
             - If `planner_output_path` is null, choose write_plan.
             - If any generation worker is missing or failed, choose spawn_workers or request_repair for the relevant owner.
+            - To improve speed, group independent writer roles into one spawn_workers action. Keep dependencies serial
+              by dispatching the prerequisite role first, then waiting for the next Planner turn.
             - Only choose run_integrator after scene/body/action/rendering are all ok.
             - Only choose run_execution after integration is current.
             - Only choose run_critic after execution is current.

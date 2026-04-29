@@ -24,7 +24,8 @@ Planner-led runtime uses compact schemas for the case controller:
   repair queue, budgets, stop condition, command records, and summary pointers.
 - `planner_action.schema.json`: one structured action emitted by Planner per turn. Actions include `write_plan`,
   `spawn_workers`, `run_integrator`, `run_execution`, `run_critic`, `request_repair`, `run_python`, `run_pytest`, and
-  `finish`.
+  `finish`. Multiple roles in one `spawn_workers` action form one Planner-selected writer batch and may run in
+  parallel.
 
 These schemas should describe episode state and tool requests only. They should not become a new simulation IR.
 
