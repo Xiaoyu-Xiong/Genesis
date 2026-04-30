@@ -446,7 +446,7 @@ class EpisodeActionExecutor:
             return {"ok": False, "status": "invalid_action", "message": f"{label} requires {arg_key} string array."}
         cwd_choice = action.get("cwd") or "repo"
         cwd = Path.cwd() if cwd_choice == "repo" else self.session.case_dir
-        timeout_sec = float(action.get("timeout_sec") or min(self.session.config.timeout_sec, 300.0))
+        timeout_sec = float(action.get("timeout_sec") or min(self.session.config.timeout_sec, CONFIGS.harness.command_timeout_sec))
         command = [*executable, *raw_args]
         stdout_path = self.session.command_dir / f"turn_{turn:03d}_{label}.stdout.txt"
         stderr_path = self.session.command_dir / f"turn_{turn:03d}_{label}.stderr.txt"

@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from code_agent.configs import CONFIGS
+
 
 DEFAULT_ARTIFACT_DIR_NAMES = ("artifacts", "outputs", "renders", "frames")
 DEFAULT_ARTIFACT_FILE_NAMES = (
@@ -31,7 +33,7 @@ class LocalRunConfig:
     workspace_dir: Path
     main_file: str = "main.py"
     output_dir: Path | None = None
-    timeout_sec: float = 1000.0
+    timeout_sec: float = CONFIGS.harness.execution_timeout_sec
     python_executable: str = "python"
     extra_args: tuple[str, ...] = ()
     artifact_dir_names: tuple[str, ...] = DEFAULT_ARTIFACT_DIR_NAMES
@@ -142,7 +144,7 @@ def _build_env(overrides: dict[str, str]) -> dict[str, str]:
         env.setdefault("CUDA_HOME", str(cuda_home))
     env.update(
         {
-            "GENESIS_BACKEND": "gpu",
+            "GENESIS_BACKEND": CONFIGS.harness.default_backend,
             "PYTHONUNBUFFERED": "1",
         }
     )
@@ -172,7 +174,7 @@ def _base_report(
         "main_path": str(main_path),
         "output_dir": str(output_dir),
         "command": command,
-        "backend": config.env.get("GENESIS_BACKEND", "gpu"),
+        "backend": config.env.get("GENESIS_BACKEND", CONFIGS.harness.default_backend),
         "timeout_sec": config.timeout_sec,
         "started_at_unix": started_at,
         "duration_sec": duration_sec,
@@ -247,9 +249,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("workspace_dir", type=Path)
     parser.add_argument("--main-file", default="main.py")
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--timeout-sec", type=float, default=1000.0)
+    parser.add_argument("--timeout-sec", type=float, default=CONFIGS.harness.execution_timeout_sec)
     parser.add_argument("--python-executable", default="python")
-    parser.add_argument("--backend", choices=("cpu", "gpu"), default="gpu")
+    parser.add_argument("--backend", choices=("cpu", "gpu"), default=CONFIGS.harness.default_backend)
     parser.add_argument("--artifact", action="append", default=[])
     parser.add_argument("extra_args", nargs=argparse.REMAINDER)
     return parser.parse_args()

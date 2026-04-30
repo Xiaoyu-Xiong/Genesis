@@ -25,7 +25,7 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
             image_paths=image_paths,
             output_jsonl_path=logs_dir / "codex_critic.jsonl",
             final_message_path=logs_dir / "codex_critic.final.json",
-            timeout_sec=900.0,
+            timeout_sec=CONFIGS.codex.critic_timeout_sec,
         )
     )
     report = _load_json(Path(result.final_message_path))

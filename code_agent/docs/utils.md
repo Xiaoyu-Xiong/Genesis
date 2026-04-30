@@ -4,8 +4,9 @@
 
 ## Modules
 
-- `codex.py`: standardizes non-interactive `codex exec` calls. It builds the command, applies sandbox/model/schema
-  settings, writes JSONL event logs, captures the final message and stderr, and returns `CodexExecResult`.
+- `codex.py`: standardizes non-interactive `codex exec` calls. It builds the command, applies sandbox/model/reasoning
+  effort/schema settings, writes JSONL event logs, captures the final message and stderr, and returns
+  `CodexExecResult`.
 - `local_execution.py`: runs a generated Python entrypoint in a workspace, captures stdout/stderr, writes
   `execution_report.json`, and discovers artifacts.
 - `execution.py`: adapts generated simulation projects to `local_execution.py`; it passes backend, render, timing, and
@@ -15,7 +16,8 @@
 - `timing.py`: resolves Planner `execution_plan` values and explicit CLI overrides into steps, duration, fps, and target
   video frames.
 - `integrator.py`: writes the stable `src/main.py` entrypoint that imports generated Scene, Body, Action, and Rendering
-  modules.
+  modules. The entrypoint carries `CONFIGS.runtime` defaults into generated code for simulation dt, substeps, render
+  cadence, fps, and camera resolution.
 
 ## Boundaries
 

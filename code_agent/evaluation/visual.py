@@ -9,6 +9,8 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageDraw
 
+from code_agent.configs import CONFIGS
+
 
 def evaluate_visual_artifacts(*, run_dir: Path, output_path: Path | None = None) -> dict[str, Any]:
     """Create lightweight visual evidence for the critic without making pass/fail decisions."""
@@ -17,10 +19,12 @@ def evaluate_visual_artifacts(*, run_dir: Path, output_path: Path | None = None)
     reports_dir = run_dir / "reports"
     output_path = output_path or (reports_dir / "visual_evaluation.json")
     contact_sheet_path = reports_dir / "visual_contact_sheet.jpg"
-    frame_paths = _sample_frame_paths(run_dir / "artifacts" / "frames")
+    render_stats = _read_json(run_dir / "artifacts" / "render_stats.json")
+    frames_dir = run_dir / "artifacts" / "frames"
+    frame_paths = _sample_frame_paths(frames_dir, render_stats=render_stats)
     frame_summaries = [_summarize_image(path) for path in frame_paths]
     if frame_paths:
-        _write_contact_sheet(frame_paths, contact_sheet_path)
+        _write_contact_sheet(frame_paths, contact_sheet_path, max_width=CONFIGS.critic.max_width)
 
     texture_summaries = _texture_summaries(run_dir / "assets" / "asset_manifest.json")
     texture_presence = [
@@ -38,6 +42,11 @@ def evaluate_visual_artifacts(*, run_dir: Path, output_path: Path | None = None)
         "schema_version": 1,
         "run_dir": str(run_dir),
         "sampled_frames": [str(path) for path in frame_paths],
+        "sampling": {
+            "sample_every_sec": CONFIGS.critic.sample_every_sec,
+            "max_frames": CONFIGS.critic.max_frames,
+            "source_fps": _infer_fps(render_stats, _reported_frame_count(render_stats, frames_dir)),
+        },
         "contact_sheet_path": str(contact_sheet_path) if frame_paths else None,
         "frame_summaries": frame_summaries,
         "texture_summaries": texture_summaries,
@@ -50,14 +59,91 @@ def evaluate_visual_artifacts(*, run_dir: Path, output_path: Path | None = None)
     return report
 
 
-def _sample_frame_paths(frames_dir: Path, *, count: int = 30) -> list[Path]:
+def _sample_frame_paths(
+    frames_dir: Path,
+    *,
+    render_stats: dict[str, Any] | None = None,
+    sample_every_sec: float | None = None,
+    max_frames: int | None = None,
+) -> list[Path]:
     if not frames_dir.is_dir():
         return []
     frames = sorted(path for path in frames_dir.glob("frame_*.png") if path.is_file())
+    if not frames:
+        return []
+
+    sample_every_sec = CONFIGS.critic.sample_every_sec if sample_every_sec is None else float(sample_every_sec)
+    max_frames = CONFIGS.critic.max_frames if max_frames is None else int(max_frames)
+    max_frames = max(1, max_frames)
+
+    fps = _infer_fps(render_stats, len(frames))
+    if fps is None or sample_every_sec <= 0:
+        return _uniform_sample_frames(frames, max_frames)
+
+    interval = max(1, int(round(sample_every_sec * fps)))
+    sampled = frames[::interval]
+    if sampled[-1] != frames[-1]:
+        sampled.append(frames[-1])
+    if len(sampled) <= max_frames:
+        return sampled
+    return _uniform_sample_frames(frames, max_frames)
+
+
+def _uniform_sample_frames(frames: list[Path], count: int) -> list[Path]:
+    count = max(1, int(count))
     if len(frames) <= count:
         return frames
+    if count == 1:
+        return [frames[0]]
     indices = sorted({round(i * (len(frames) - 1) / (count - 1)) for i in range(count)})
     return [frames[index] for index in indices]
+
+
+def _infer_fps(render_stats: dict[str, Any] | None, frame_count: int) -> float | None:
+    if not isinstance(render_stats, dict):
+        return None
+    fps = _positive_float(render_stats.get("fps"))
+    if fps is not None:
+        return fps
+    duration = _positive_float(render_stats.get("video_duration_sec"))
+    if duration is None:
+        duration = _positive_float(render_stats.get("duration_sec"))
+    if duration is None or frame_count <= 1:
+        return None
+    return frame_count / duration
+
+
+def _reported_frame_count(render_stats: dict[str, Any] | None, frames_dir: Path) -> int:
+    if isinstance(render_stats, dict):
+        try:
+            count = int(render_stats.get("num_frames"))
+        except (TypeError, ValueError):
+            count = 0
+        if count > 0:
+            return count
+    if not frames_dir.is_dir():
+        return 0
+    return sum(1 for path in frames_dir.glob("frame_*.png") if path.is_file())
+
+
+def _positive_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number <= 0:
+        return None
+    return number
+
+
+def _read_json(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _summarize_image(path: Path) -> dict[str, Any]:
@@ -75,21 +161,24 @@ def _summarize_image(path: Path) -> dict[str, Any]:
     }
 
 
-def _write_contact_sheet(frame_paths: list[Path], output_path: Path) -> None:
+def _write_contact_sheet(frame_paths: list[Path], output_path: Path, *, max_width: int) -> None:
+    thumb_width = max(1, int(max_width // 2))
+    thumb_height = max(1, int(round(thumb_width * 9 / 16)))
+    label_height = 25
     thumbs: list[Image.Image] = []
     for path in frame_paths:
         image = Image.open(path).convert("RGB")
-        image.thumbnail((320, 180))
-        canvas = Image.new("RGB", (320, 205), (20, 20, 20))
-        canvas.paste(image, ((320 - image.width) // 2, 0))
+        image.thumbnail((thumb_width, thumb_height))
+        canvas = Image.new("RGB", (thumb_width, thumb_height + label_height), (20, 20, 20))
+        canvas.paste(image, ((thumb_width - image.width) // 2, 0))
         draw = ImageDraw.Draw(canvas)
-        draw.text((8, 184), path.name, fill=(230, 230, 230))
+        draw.text((8, thumb_height + 4), path.name, fill=(230, 230, 230))
         thumbs.append(canvas)
     cols = min(3, max(1, len(thumbs)))
     rows = math.ceil(len(thumbs) / cols)
-    sheet = Image.new("RGB", (cols * 320, rows * 205), (12, 12, 12))
+    sheet = Image.new("RGB", (cols * thumb_width, rows * (thumb_height + label_height)), (12, 12, 12))
     for idx, thumb in enumerate(thumbs):
-        sheet.paste(thumb, ((idx % cols) * 320, (idx // cols) * 205))
+        sheet.paste(thumb, ((idx % cols) * thumb_width, (idx // cols) * (thumb_height + label_height)))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(output_path, quality=92)
 

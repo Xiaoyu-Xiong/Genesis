@@ -6,6 +6,8 @@ import sys
 
 import trimesh
 
+from code_agent.configs import CONFIGS
+
 from ..models import MeshManifoldCheckResult
 from .components import connected_face_component_count, strip_texture_visuals
 
@@ -111,7 +113,7 @@ print('TETGEN_OK')
         [sys.executable, "-c", probe, str(mesh_path)],
         text=True,
         capture_output=True,
-        timeout=120.0,
+        timeout=CONFIGS.mesh_repair.tetgen_sanity_timeout_sec,
     )
     combined = "\n".join(part for part in (result.stdout, result.stderr) if part)
     lowered = combined.lower()

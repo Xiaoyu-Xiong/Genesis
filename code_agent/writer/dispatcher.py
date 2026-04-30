@@ -22,7 +22,7 @@ PLACEHOLDER_MODULES: dict[WorkerRole, str] = {
     "scene": '''from __future__ import annotations
 
 
-def create_scene(backend: str):
+def create_scene(backend: str, *, sim_dt: float, sim_substeps: int):
     raise NotImplementedError("scene worker did not replace this placeholder")
 ''',
     "body": '''from __future__ import annotations
@@ -53,6 +53,8 @@ def setup_rendering(
     fps: int,
     duration_sec: float | None = None,
     target_video_frames: int | None = None,
+    render_every_n_steps: int = 1,
+    render_res: tuple[int, int] = (640, 480),
 ):
     raise NotImplementedError("rendering worker did not replace this placeholder")
 
@@ -201,7 +203,7 @@ def _run_worker(
             output_schema_path=schema_path,
             output_jsonl_path=logs_dir / f"codex_{invocation_role}.jsonl",
             final_message_path=logs_dir / f"codex_{invocation_role}.final.json",
-            timeout_sec=600.0,
+            timeout_sec=CONFIGS.codex.worker_timeout_sec,
         )
     )
     worker_report, error_message = _parse_worker_report(Path(result.final_message_path))

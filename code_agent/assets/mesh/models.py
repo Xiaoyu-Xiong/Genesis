@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from code_agent.configs import CONFIGS
+
 
 MESH_FORMAT_VALUES = ("obj", "glb", "stl")
 MESHY_AI_MODEL_VALUES = ("meshy-5", "meshy-6", "latest")
@@ -23,7 +25,7 @@ class MeshyApiConfig:
     api_key: str
     base_url: str = "https://api.meshy.ai"
     text_to_3d_path: str = "/openapi/v2/text-to-3d"
-    timeout_sec: float = 120.0
+    timeout_sec: float = CONFIGS.meshy_request.timeout_sec
 
     @classmethod
     def from_env(
@@ -31,7 +33,7 @@ class MeshyApiConfig:
         *,
         api_key_env: str = "MESHY_API_KEY",
         base_url_env: str = "MESHY_API_BASE_URL",
-        timeout_sec: float = 120.0,
+        timeout_sec: float | None = None,
     ) -> "MeshyApiConfig":
         api_key = os.getenv(api_key_env)
         if not api_key:
@@ -40,7 +42,11 @@ class MeshyApiConfig:
                 "Generate an API key in Meshy and export it before running the mesh generator."
             )
         base_url = os.getenv(base_url_env, "https://api.meshy.ai").rstrip("/")
-        return cls(api_key=api_key, base_url=base_url, timeout_sec=timeout_sec)
+        return cls(
+            api_key=api_key,
+            base_url=base_url,
+            timeout_sec=CONFIGS.meshy_request.timeout_sec if timeout_sec is None else timeout_sec,
+        )
 
     def auth_headers(self) -> dict[str, str]:
         return {
@@ -58,19 +64,19 @@ class MeshyApiConfig:
 class MeshyGenerationConfig:
     prompt: str
     output_dir: Path
-    mesh_format: str = "obj"
-    ai_model: str = "latest"
-    art_style: str = "realistic"
-    should_remesh: bool = False
-    topology: str = "triangle"
-    target_polycount: int | None = None
-    symmetry_mode: str = "auto"
-    moderation: bool = False
-    negative_prompt: str | None = None
-    auto_size: bool = False
-    origin_at: str | None = None
-    poll_interval_sec: float = 2.0
-    max_wait_sec: float = 300.0
+    mesh_format: str = CONFIGS.meshy_request.mesh_format
+    ai_model: str = CONFIGS.meshy_request.ai_model
+    art_style: str = CONFIGS.meshy_request.art_style
+    should_remesh: bool = CONFIGS.meshy_request.should_remesh
+    topology: str = CONFIGS.meshy_request.topology
+    target_polycount: int | None = CONFIGS.meshy_request.target_polycount
+    symmetry_mode: str = CONFIGS.meshy_request.symmetry_mode
+    moderation: bool = CONFIGS.meshy_request.moderation
+    negative_prompt: str | None = CONFIGS.meshy_request.negative_prompt
+    auto_size: bool = CONFIGS.meshy_request.auto_size
+    origin_at: str | None = CONFIGS.meshy_request.origin_at
+    poll_interval_sec: float = CONFIGS.meshy_request.poll_interval_sec
+    max_wait_sec: float = CONFIGS.meshy_request.max_wait_sec
     extra_payload: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -102,11 +108,11 @@ class MeshyGenerationConfig:
 
 @dataclass(slots=True)
 class MeshyTextureConfig:
-    enabled: bool = False
+    enabled: bool = CONFIGS.meshy_request.texture_enabled
     texture_prompt: str | None = None
-    ai_model: str | None = None
-    enable_pbr: bool = False
-    remove_lighting: bool = True
+    ai_model: str | None = CONFIGS.meshy_request.texture_ai_model
+    enable_pbr: bool = CONFIGS.meshy_request.texture_enable_pbr
+    remove_lighting: bool = CONFIGS.meshy_request.texture_remove_lighting
 
     def __post_init__(self) -> None:
         if self.ai_model is not None and self.ai_model not in MESHY_AI_MODEL_VALUES:
@@ -119,25 +125,25 @@ class MeshyTextureConfig:
 
 @dataclass(slots=True)
 class MeshRepairConfig:
-    component_count_face_cap: int = 100000
-    min_component_faces: int = 100
-    max_repair_attempts: int = 4
-    merge_vertices: bool = True
-    merge_digits_vertex: int | None = 6
-    fix_normals: bool = True
-    process_validate: bool = True
-    keep_largest_component: bool = True
-    ftetwild_edge_length_fac: float = 0.05
-    ftetwild_edge_length_abs: float | None = None
-    ftetwild_optimize: bool = True
-    ftetwild_simplify: bool = True
-    ftetwild_epsilon: float = 1e-3
-    ftetwild_stop_energy: float = 10.0
-    ftetwild_coarsen: bool = False
-    ftetwild_num_threads: int = 0
-    ftetwild_num_opt_iter: int = 80
-    ftetwild_quiet: bool = True
-    ftetwild_disable_filtering: bool = False
+    component_count_face_cap: int = CONFIGS.mesh_repair.component_count_face_cap
+    min_component_faces: int = CONFIGS.mesh_repair.min_component_faces
+    max_repair_attempts: int = CONFIGS.mesh_repair.max_repair_attempts
+    merge_vertices: bool = CONFIGS.mesh_repair.merge_vertices
+    merge_digits_vertex: int | None = CONFIGS.mesh_repair.merge_digits_vertex
+    fix_normals: bool = CONFIGS.mesh_repair.fix_normals
+    process_validate: bool = CONFIGS.mesh_repair.process_validate
+    keep_largest_component: bool = CONFIGS.mesh_repair.keep_largest_component
+    ftetwild_edge_length_fac: float = CONFIGS.mesh_repair.ftetwild_edge_length_fac
+    ftetwild_edge_length_abs: float | None = CONFIGS.mesh_repair.ftetwild_edge_length_abs
+    ftetwild_optimize: bool = CONFIGS.mesh_repair.ftetwild_optimize
+    ftetwild_simplify: bool = CONFIGS.mesh_repair.ftetwild_simplify
+    ftetwild_epsilon: float = CONFIGS.mesh_repair.ftetwild_epsilon
+    ftetwild_stop_energy: float = CONFIGS.mesh_repair.ftetwild_stop_energy
+    ftetwild_coarsen: bool = CONFIGS.mesh_repair.ftetwild_coarsen
+    ftetwild_num_threads: int = CONFIGS.mesh_repair.ftetwild_num_threads
+    ftetwild_num_opt_iter: int = CONFIGS.mesh_repair.ftetwild_num_opt_iter
+    ftetwild_quiet: bool = CONFIGS.mesh_repair.ftetwild_quiet
+    ftetwild_disable_filtering: bool = CONFIGS.mesh_repair.ftetwild_disable_filtering
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -422,7 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser_render.add_argument(
         "--backend",
         choices=("gpu", "cpu"),
-        default="gpu",
+        default=CONFIGS.harness.default_backend,
         help="Genesis backend for preview rendering. Defaults to the local GPU.",
     )
     parser_render.add_argument(

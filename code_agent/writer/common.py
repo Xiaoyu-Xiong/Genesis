@@ -47,7 +47,8 @@ Genesis rigid primitive API constraints:
 - Import Genesis as `import genesis as gs`.
 - Initialize with `gs.init(backend=gs.cpu if backend == "cpu" else gs.gpu, precision="32",
   performance_mode=True, logging_level="warning")`.
-- Create a scene with `gs.Scene(..., show_viewer=False, show_FPS=False)`.
+- Create a scene with `gs.Scene(sim_options=gs.options.SimOptions(dt=sim_dt, substeps=sim_substeps), ...,
+  show_viewer=False, show_FPS=False)` using the `sim_dt` and `sim_substeps` arguments passed into `create_scene`.
 - Add a ground plane with `scene.add_entity(gs.morphs.Plane())`.
 - Use primitive morphs such as `gs.morphs.Box(size=(...), pos=(...), fixed=True/False)`,
   `gs.morphs.Sphere(radius=..., pos=(...))`, and `gs.morphs.Cylinder(radius=..., height=..., pos=(...))`.

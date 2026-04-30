@@ -51,12 +51,13 @@ owns execution, validation, sandboxing, artifact collection, and persistence.
 - Mesh Asset Bridge owns `start_mesh_assets`, `wait_mesh_assets`, `generate_mesh_assets`,
   `asset_manifest.schema.json` validation, canonical generated mesh runtime paths, Genesis-ready scale factors,
   coordinate metadata, and texture paths for code writers.
-- Scene owns fixed objects, stage setup, global FEM+IPC defaults, artifact layout, and optional camera/light anchors for
-  Rendering to refine.
+- Scene owns fixed objects, stage setup, global FEM+IPC defaults, configured simulation dt/substeps, artifact layout,
+  and optional camera/light anchors for Rendering to refine.
 - Body owns movable or task-participating actors.
 - Action owns behavior, controls, metrics, event logging, and final score.
-- Rendering owns camera placement, lighting refinements, capture cadence, render output paths, and visual validation
-  hints. It may consume Scene/Body/Action exports but should not change task controls or body definitions.
+- Rendering owns camera placement, lighting refinements, configured capture cadence/resolution, render output paths, and
+  visual validation hints. It may consume Scene/Body/Action exports but should not change task controls or body
+  definitions.
 - Integrator owns final runnable project wiring.
 
 ## Rendering Worker Output Requirements

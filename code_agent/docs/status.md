@@ -23,8 +23,8 @@ the pipeline structure changes.
   `request_repair`, `run_python`, `run_pytest`, and `finish`.
 - `episode_state.schema.json` records the persisted case state shape. Runtime state is written to
   `reports/episode_state.json`; planner actions and worker dispatches are appended to JSONL history files.
-- `utils/codex.py` uses explicit `CodexExecRequest` objects, saves JSONL logs and final messages, records stderr, and
-  returns structured invocation results.
+- `utils/codex.py` uses explicit `CodexExecRequest` objects, applies the configured model reasoning effort, saves JSONL
+  logs and final messages, records stderr, and returns structured invocation results.
 - Scene, Body, Action, and Rendering writer specs are split across four files:
   `writer/scene.py`, `body.py`, `action.py`, and `rendering.py`.
 - `writer/dispatcher.py` dispatches those writers in `workspace-write` sandbox mode, parses
@@ -49,7 +49,8 @@ the pipeline structure changes.
 - The current worker protocol is direct-edit based: Codex workers edit only their assigned generated module and return
   structured report metadata.
 - `utils/integrator.py` writes the stable `src/main.py` that imports and wires Scene, Body, Action, and
-  Rendering modules.
+  Rendering modules. It passes configured simulation dt/substeps and render cadence/resolution defaults into the
+  generated module interfaces.
 - `utils/timing.py` consumes the planner's structured `execution_plan` plus explicit CLI overrides. It does
   not parse task text itself.
 - Local GPU execution is routed through `utils/execution.py` and `utils/local_execution.py`. Generated Genesis code is

@@ -19,6 +19,8 @@ SPEC = WorkerSpec(
           fps: int,
           duration_sec: float | None = None,
           target_video_frames: int | None = None,
+          render_every_n_steps: int = 1,
+          render_res: tuple[int, int] = (640, 480),
       ) -> dict`
     - `capture_frame(render_state: dict, step: int) -> None`
     - `finalize_rendering(render_state: dict, *, event_log_path: Path | None = None, metrics_path: Path | None = None) -> dict`
@@ -27,13 +29,16 @@ SPEC = WorkerSpec(
     `setup_rendering` runs before `scene.build()` and must:
     - honor the supplied `steps`, `fps`, `duration_sec`, and `target_video_frames`; do not replace them with local
       magic defaults
-    - design camera parameters for the task, including camera position, lookat, fov, resolution, and fps
+    - design camera parameters for the task, including camera position, lookat, fov, and fps
+    - use the supplied `render_res` as the camera resolution unless there is a strong task-specific reason to override
+      it, and record the final resolution in `render_stats.json`
     - call `scene.add_camera(...)` with `GUI=False`
     - optionally add Genesis lights only when the current renderer supports `scene.add_light(...)`; never fail if lights
       are unsupported
     - clear stale `frame_*.png` files from the output frames directory before saving new frames
     - compute a capture cadence across simulation steps. If `target_video_frames` is provided, capture exactly that many
-      frames spread from step 0 through `steps` whenever possible; otherwise capture at a reasonable cadence.
+      frames spread from step 0 through `steps` whenever possible; otherwise capture every `render_every_n_steps`
+      simulation steps, including step 0 and the final step when possible.
     - return a render_state dict containing the Genesis camera, output paths, fps, duration, target frame count, capture
       step set, frame list, and `capture_frame` callable
 

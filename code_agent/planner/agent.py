@@ -26,7 +26,7 @@ class EpisodePlanner:
                 output_schema_path=Path("code_agent/specs/planner_action.schema.json"),
                 output_jsonl_path=self.session.logs_dir / f"codex_planner_turn_{turn:03d}.jsonl",
                 final_message_path=self.session.logs_dir / f"codex_planner_turn_{turn:03d}.final.json",
-                timeout_sec=900.0,
+                timeout_sec=CONFIGS.codex.planner_timeout_sec,
             )
         )
         planner_invocations = self.session.state.setdefault("planner_invocations", [])
@@ -59,7 +59,10 @@ class EpisodePlanner:
 
     def _planner_prompt(self) -> str:
         sim_dt = CONFIGS.runtime.sim_dt
+        sim_substeps = CONFIGS.runtime.sim_substeps
+        render_every_n_steps = CONFIGS.runtime.render_every_n_steps
         render_fps = CONFIGS.runtime.render_fps
+        render_res = CONFIGS.runtime.render_res
         state_text = json.dumps(self._prompt_state(), indent=2)
         genesis_context = self.session.genesis_context_prompt()
         return textwrap.dedent(
@@ -83,8 +86,9 @@ class EpisodePlanner:
 
             Available actions:
             - write_plan: create planner_output for this case. Include a complete `planner_output` object matching
-              planner_output.schema.json. Infer duration from the task yourself. Use sim_dt={sim_dt};
-              use render_fps={render_fps} unless the task explicitly asks for another fps. Use mode local_gpu and
+              planner_output.schema.json. Infer duration from the task yourself. Use sim_dt={sim_dt},
+              sim_substeps={sim_substeps}, render_fps={render_fps}, render_every_n_steps={render_every_n_steps}, and
+              render_res={render_res} unless the task explicitly requires different values. Use mode local_gpu and
               backend gpu by default.
               Make the plan detailed enough that each writer can implement its part without guessing: describe desired
               layout, entity identities, physical roles, timing, camera/render expectations, asset orientation/texture
@@ -102,8 +106,10 @@ class EpisodePlanner:
               contain enough shared layout/entity/timing detail; add serial edges only for concrete dependencies that
               truly require seeing another worker's generated source or report.
               Module contract required exports must match the current implementation interfaces exactly:
-              scene=`create_scene`; body=`create_bodies`; action=`run_actions`; rendering=`setup_rendering`,
-              `capture_frame`, and `finalize_rendering`.
+              scene=`create_scene(backend, *, sim_dt, sim_substeps)`; body=`create_bodies(scene, task)`;
+              action=`run_actions(scene, actors, *, out_dir, steps, render_state=None)`;
+              rendering=`setup_rendering(..., render_every_n_steps, render_res)`, `capture_frame`, and
+              `finalize_rendering`.
             - start_mesh_assets: start Planner-requested generated mesh assets in the background and return
               immediately. Use `asset_names` to restrict generation to specific asset request names, or null/[] to
               generate all generated_mesh requests. Prefer this over blocking generation when any writer can make

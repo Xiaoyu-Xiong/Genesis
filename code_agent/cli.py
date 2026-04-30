@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_suite_parser = sub.add_parser("run-suite", help="Run a code-agent prompt suite.")
     run_suite_parser.add_argument("--tasks-file", type=Path, required=True)
     run_suite_parser.add_argument("--out-dir", type=Path, required=True)
-    run_suite_parser.add_argument("--backend", choices=("cpu", "gpu"), default="gpu")
+    run_suite_parser.add_argument("--backend", choices=("cpu", "gpu"), default=CONFIGS.harness.default_backend)
     run_suite_parser.add_argument("--cpu", action="store_const", const="cpu", dest="backend")
     run_suite_parser.add_argument("--gpu", action="store_const", const="gpu", dest="backend")
     run_suite_parser.add_argument("--max-cases", type=int, default=None)
@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_suite_parser.add_argument("--steps", type=int, default=None)
     run_suite_parser.add_argument("--duration-sec", type=float, default=None)
     run_suite_parser.add_argument("--render-fps", type=int, default=None)
-    run_suite_parser.add_argument("--repair-rounds", type=int, default=1)
+    run_suite_parser.add_argument("--repair-rounds", type=int, default=CONFIGS.harness.max_repair_rounds)
     run_suite_parser.set_defaults(func=_cmd_run_suite)
 
     context_parser = sub.add_parser("build-genesis-context", help="Fetch/cache Genesis docs context for subagents.")

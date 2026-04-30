@@ -12,11 +12,13 @@ class CodexConfigs:
     worker_model: str = "gpt-5.5"
     critic_model: str = "gpt-5.5"
     reasoning_effort: str = "xhigh"
-    prompt_cache_retention: Literal["in_memory", "24h"] = "24h"
     planner_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     critic_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     worker_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
     ask_for_approval: Literal["untrusted", "on-request", "never"] = "never"
+    planner_timeout_sec: float = 900.0
+    worker_timeout_sec: float = 600.0
+    critic_timeout_sec: float = 900.0
 
 
 @dataclass(slots=True, frozen=True)
@@ -25,10 +27,9 @@ class HarnessConfigs:
 
     max_parallel_workers: int | None = None
     max_repair_rounds: int = 12
-    max_worker_attempts: int = 20
     execution_timeout_sec: float = 1000.0
+    command_timeout_sec: float = 300.0
     default_backend: str = "gpu"
-    require_scope_check: bool = True
 
 
 @dataclass(slots=True, frozen=True)
@@ -89,7 +90,7 @@ class CriticConfigs:
     """Single-pass critic video sampling defaults."""
 
     sample_every_sec: float = 0.5
-    max_frames: int = 24
+    max_frames: int = 30
     max_width: int = 640
 
 
@@ -142,6 +143,7 @@ class MeshRepairConfigs:
     ftetwild_num_opt_iter: int = 80
     ftetwild_quiet: bool = True
     ftetwild_disable_filtering: bool = False
+    tetgen_sanity_timeout_sec: float = 120.0
     texture_transfer_max_resolution: int = 1024
     texture_transfer_chunk_size: int = 200000
 

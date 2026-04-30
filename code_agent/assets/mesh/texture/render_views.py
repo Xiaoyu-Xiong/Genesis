@@ -9,6 +9,8 @@ import trimesh
 import genesis as gs
 from genesis.utils.tools import save_img_arr
 
+from code_agent.configs import CONFIGS
+
 
 def render_textured_mesh_views(
     *,
@@ -16,7 +18,7 @@ def render_textured_mesh_views(
     out_dir: str | Path,
     texture_path: str | Path | None = None,
     file_meshes_are_zup: bool = False,
-    backend: str = "gpu",
+    backend: str = CONFIGS.harness.default_backend,
     res: tuple[int, int] = (768, 768),
     fov: float = 35.0,
 ) -> dict[str, str]:

@@ -30,6 +30,7 @@ class CodexExecRequest:
     image_paths: tuple[Path, ...] = ()
     codex_bin: str = "codex"
     ask_for_approval: str = CONFIGS.codex.ask_for_approval
+    reasoning_effort: str | None = CONFIGS.codex.reasoning_effort
     timeout_sec: float | None = None
     extra_args: tuple[str, ...] = ()
 
@@ -87,6 +88,8 @@ def build_codex_exec_command(request: CodexExecRequest, *, resolved_codex: str |
     ]
     if request.model:
         command.extend(["--model", request.model])
+    if request.reasoning_effort:
+        command.extend(["-c", f'model_reasoning_effort="{request.reasoning_effort}"'])
     if request.output_schema_path is not None:
         command.extend(["--output-schema", str(request.output_schema_path)])
     for image_path in request.image_paths:
