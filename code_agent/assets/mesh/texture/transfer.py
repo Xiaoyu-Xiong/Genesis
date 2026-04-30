@@ -9,7 +9,7 @@ import trimesh
 from ....io_utils import dump_json
 from ..models import MeshTextureTransferResult
 from .bake import bake_texture_from_source_mesh, read_bake_texture_size
-from .obj_io import copy_with_vertex_translation, rewrite_obj_mtllib, write_base_color_mtl
+from .obj_io import copy_with_vertex_translation, flip_obj_texture_v_for_genesis, rewrite_obj_mtllib, write_base_color_mtl
 from .parameterization import parameterize_target_mesh_xatlas
 
 
@@ -26,8 +26,8 @@ def transfer_texture_to_repaired_mesh(
     diagnostics_dir = processed_dir / "repaired_texture_diagnostics"
     diagnostics_dir.mkdir(parents=True, exist_ok=True)
 
-    output_mesh_path = target_mesh_path
-    output_mtl_path = processed_dir / "repaired.mtl"
+    output_mesh_path = processed_dir / "repaired_textured.obj"
+    output_mtl_path = processed_dir / "repaired_textured.mtl"
     output_texture_path = processed_dir / "base_color.png"
     aligned_target_path = diagnostics_dir / "repaired_aligned.obj"
     exported_target_path = diagnostics_dir / "repaired_textured_export.obj"
@@ -40,6 +40,7 @@ def transfer_texture_to_repaired_mesh(
 
     try:
         for stale_path in (
+            output_mesh_path,
             output_mtl_path,
             output_texture_path,
             aligned_target_path,
@@ -97,7 +98,8 @@ def transfer_texture_to_repaired_mesh(
         if not output_texture_path.exists():
             raise RuntimeError(f"Expected baked texture was not created: {output_texture_path}")
         write_base_color_mtl(output_mtl_path, texture_name=output_texture_path.name)
-        rewrite_obj_mtllib(output_mesh_path, mtl_name=output_mtl_path.name)
+        rewrite_obj_mtllib(output_mesh_path, mtl_name=output_mtl_path.name, material_name="material_0")
+        flip_obj_texture_v_for_genesis(output_mesh_path)
         stage_durations_sec["canonicalize_outputs"] = time.monotonic() - stage_start
 
         diagnostics_payload = {

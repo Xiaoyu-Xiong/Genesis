@@ -7,6 +7,7 @@ import sys
 import trimesh
 
 from ..models import MeshManifoldCheckResult
+from .components import connected_face_component_count, strip_texture_visuals
 
 
 def run_mesh_manifold_check(mesh_path: Path, *, face_cap_for_full_check: int = 100000) -> MeshManifoldCheckResult:
@@ -71,13 +72,11 @@ def _load_mesh(mesh_path: Path) -> trimesh.Trimesh:
     mesh = trimesh.load_mesh(str(mesh_path), force="mesh", skip_texture=True, process=False)
     if not isinstance(mesh, trimesh.Trimesh):
         raise TypeError(f"Expected Trimesh, got {type(mesh).__name__}")
-    return mesh
+    return strip_texture_visuals(mesh)
 
 
 def _component_count(mesh: trimesh.Trimesh) -> int:
-    if len(mesh.faces) > 100000:
-        return -1
-    return max(1, len(mesh.split(only_watertight=False)))
+    return connected_face_component_count(mesh)
 
 
 def _quick_mesh_stats(mesh_path: Path) -> dict[str, int] | None:

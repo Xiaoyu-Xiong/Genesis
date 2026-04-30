@@ -586,6 +586,17 @@ class FileMorph(Morph):
                 gs.raise_exception(f"File not found in either current directory or assets directory: '{file}'.")
             data["file"] = abs_file
 
+        visual_file = data.get("visual_file")
+        if isinstance(visual_file, str) and visual_file:
+            abs_visual_file = os.path.abspath(visual_file)
+            if not os.path.exists(abs_visual_file):
+                abs_visual_file = os.path.join(gs.utils.get_assets_dir(), visual_file)
+            if not os.path.exists(abs_visual_file):
+                gs.raise_exception(
+                    f"Visual file not found in either current directory or assets directory: '{visual_file}'."
+                )
+            data["visual_file"] = abs_visual_file
+
         return data
 
     def __init__(
@@ -717,6 +728,13 @@ class Mesh(FileMorph, TetGenMixin):
     group_by_material : bool, optional
         Whether to group submeshes by their visual material type defined in the asset file. Defaults to False.
         **This is only used for RigidEntity.**
+    visual_file : str, optional
+        Optional mesh file used only for RigidEntity visualization. When provided, `file` remains the collision and
+        simulation mesh, while `visual_file` is loaded as visual geometry attached to the same rigid link. This is
+        useful for pairing a strict manifold collision mesh with a seam-aware textured render mesh.
+    visual_file_meshes_are_zup : bool, optional
+        Coordinate convention for `visual_file`. Defaults to `file_meshes_are_zup`. GLTF/GLB visual files are treated
+        as Y-up, matching the regular mesh loading path.
     align : bool, optional
         Whether to reframe the mesh so that its link origin coincides with the center of mass and its axes are
         aligned with the principal axes of inertia. This makes the inertia tensor diagonal, which improves
@@ -753,6 +771,8 @@ class Mesh(FileMorph, TetGenMixin):
     conaffinity: StrictInt = Field(default=0xFFFF, ge=0, le=0xFFFFFFFF)
     group_by_material: StrictBool = False
     merge_submeshes_for_collision: StrictBool = False
+    visual_file: Any | None = None
+    visual_file_meshes_are_zup: StrictBool | None = None
 
     @model_validator(mode="after")
     def _resolve_zup(self) -> Self:
@@ -781,6 +801,21 @@ class Mesh(FileMorph, TetGenMixin):
             self.file_meshes_are_zup = False
         elif self.file_meshes_are_zup is None:
             self.file_meshes_are_zup = True
+
+        visual_file = self.visual_file
+        if visual_file is not None:
+            is_visual_gltf = isinstance(visual_file, (str, os.PathLike)) and str(visual_file).lower().endswith(
+                GLTF_FORMATS
+            )
+            if is_visual_gltf:
+                if self.visual_file_meshes_are_zup:
+                    gs.logger.warning(
+                        "Specifying 'visual_file_meshes_are_zup' for GLTF/GLB visual files is not supported. "
+                        "The visual file will be loaded as Y-up."
+                    )
+                self.visual_file_meshes_are_zup = False
+            elif self.visual_file_meshes_are_zup is None:
+                self.visual_file_meshes_are_zup = self.file_meshes_are_zup
 
         return self
 

@@ -23,7 +23,7 @@ class CodexConfigs:
 class HarnessConfigs:
     """Static harness limits that should usually not be left to generated code."""
 
-    max_parallel_workers: int = 4
+    max_parallel_workers: int | None = None
     max_repair_rounds: int = 12
     max_worker_attempts: int = 20
     execution_timeout_sec: float = 1000.0
@@ -97,6 +97,8 @@ class CriticConfigs:
 class MeshyRequestConfigs:
     """Meshy asset request defaults."""
 
+    max_parallel_api_requests: int | None = None
+    max_parallel_local_processing: int = 1
     mesh_format: Literal["obj", "glb", "stl"] = "obj"
     ai_model: Literal["latest", "meshy-6", "meshy-5"] = "meshy-5"
     art_style: Literal["realistic", "sculpture"] = "realistic"

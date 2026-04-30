@@ -20,12 +20,12 @@ not a replacement for the old IR and must not become a simulation compiler targe
 
 Planner-led runtime uses compact schemas for the case controller:
 
-- `episode_state.schema.json`: persisted case state, including timing, worker status, latest artifacts, critic verdict,
-  repair queue, budgets, stop condition, command records, and summary pointers.
+- `episode_state.schema.json`: persisted case state, including timing, asset manifest status, worker status, latest
+  artifacts, critic verdict, repair queue, budgets, stop condition, command records, and summary pointers.
 - `planner_action.schema.json`: one structured action emitted by Planner per turn. Actions include `write_plan`,
-  `spawn_workers`, `run_integrator`, `run_execution`, `run_critic`, `request_repair`, `run_python`, `run_pytest`, and
-  `finish`. Multiple roles in one `spawn_workers` action form one Planner-selected writer batch and may run in
-  parallel.
+  `start_mesh_assets`, `generate_mesh_assets`, `wait_mesh_assets`, `spawn_workers`, `run_integrator`, `run_execution`,
+  `run_critic`, `request_repair`, `run_python`, `run_pytest`, and `finish`. Multiple roles in one `spawn_workers`
+  action form one Planner-selected writer batch and run in parallel by default.
 
 These schemas should describe episode state and tool requests only. They should not become a new simulation IR.
 
@@ -48,6 +48,9 @@ Planner owns the natural-language interpretation step for timing. It must emit `
 In the Planner-led episode runtime, Planner also owns worker wake-up decisions and repair routing. The harness still
 owns execution, validation, sandboxing, artifact collection, and persistence.
 
+- Mesh Asset Bridge owns `start_mesh_assets`, `wait_mesh_assets`, `generate_mesh_assets`,
+  `asset_manifest.schema.json` validation, canonical generated mesh runtime paths, Genesis-ready scale factors,
+  coordinate metadata, and texture paths for code writers.
 - Scene owns fixed objects, stage setup, global FEM+IPC defaults, artifact layout, and optional camera/light anchors for
   Rendering to refine.
 - Body owns movable or task-participating actors.

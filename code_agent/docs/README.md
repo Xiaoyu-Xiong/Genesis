@@ -10,6 +10,7 @@ Top-level documents that intentionally remain in the `code_agent/` root:
 Topic documentation:
 
 - [Implementation Status](status.md)
+- [Genesis Context](context.md)
 - [Utils](utils.md)
 - [Evaluation](evaluation.md)
 - [Specs](specs.md)

@@ -77,6 +77,16 @@ class PlannerSession:
                 }
                 for role in WORKER_ROLES
             },
+            "assets": {
+                "status": "not_requested",
+                "ok": False,
+                "asset_manifest_path": None,
+                "asset_generation_report_path": None,
+                "selected_asset_names": [],
+                "skipped_asset_names": [],
+                "num_assets": 0,
+                "schema_errors": [],
+            },
             "integration": None,
             "execution": None,
             "critic": None,
@@ -171,6 +181,8 @@ class PlannerSession:
             return f"roles={result['roles']}, all_workers_ok={result.get('all_workers_ok')}"
         if "owner" in result:
             return f"owner={result['owner']}, all_workers_ok={result.get('all_workers_ok')}"
+        if "asset_manifest_path" in result:
+            return f"assets={result.get('num_assets')}, manifest={result.get('asset_manifest_path')}"
         if "verdict" in result:
             return f"verdict={result['verdict']}"
         return str(result.get("status"))
@@ -189,6 +201,7 @@ class PlannerSession:
             "repair_attempts": self.state["budgets"]["repair_attempts"],
             "case_dir": str(self.case_dir),
             "timing": self.state.get("timing"),
+            "asset_manifest_path": self.state.get("assets", {}).get("asset_manifest_path"),
             "episode_state_path": str(self.state_path),
             "planner_actions_path": str(self.action_history_path),
             "dispatch_history_path": str(self.dispatch_history_path),
@@ -218,6 +231,13 @@ class PlannerSession:
     def all_workers_ok(self) -> bool:
         return all(bool(self.state["workers"][role].get("ok")) for role in WORKER_ROLES)
 
+    def asset_manifest_ready(self) -> bool:
+        assets = self.state.get("assets")
+        if not isinstance(assets, dict) or not assets.get("ok"):
+            return False
+        manifest_path = assets.get("asset_manifest_path")
+        return isinstance(manifest_path, str) and Path(manifest_path).exists()
+
     def recommended_owner(self) -> str:
         critic = self.state.get("critic")
         if isinstance(critic, dict):
@@ -228,48 +248,15 @@ class PlannerSession:
         parts = [
             "Planner repair brief was empty; using current failure context.",
             "Critic report:",
-            json.dumps(self.state.get("critic"), indent=2)[:8000],
+            json.dumps(self.state.get("critic"), indent=2),
             "Execution report:",
-            json.dumps(self.state.get("execution"), indent=2)[:4000],
+            json.dumps(self.state.get("execution"), indent=2),
             "stderr:",
-            self.read_text(self.reports_dir / "stderr.txt", limit=4000),
+            self.read_text(self.reports_dir / "stderr.txt"),
             "stdout:",
-            self.read_text(self.reports_dir / "stdout.txt", limit=4000),
+            self.read_text(self.reports_dir / "stdout.txt"),
         ]
         return "\n\n".join(parts)
-
-    def critic_excerpt(self, critic: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "verdict": critic.get("verdict"),
-            "recommended_owner": critic.get("recommended_owner"),
-            "summary": critic.get("summary"),
-            "missing_artifacts": critic.get("missing_artifacts"),
-            "codex_critic_verdict": (
-                critic.get("codex_critic_report", {}).get("verdict")
-                if isinstance(critic.get("codex_critic_report"), dict)
-                else None
-            ),
-        }
-
-    def execution_excerpt(self, execution: dict[str, Any]) -> dict[str, Any]:
-        artifacts = execution.get("artifacts")
-        artifact_map = artifacts if isinstance(artifacts, dict) else {}
-        frame_count = sum(1 for key in artifact_map if str(key).startswith("frame_"))
-        important_artifacts = {
-            key: artifact_map.get(key)
-            for key in ("event_log", "metrics", "render", "render_stats", "run_result", "summary")
-            if artifact_map.get(key)
-        }
-        return {
-            "command": execution.get("command"),
-            "returncode": execution.get("returncode"),
-            "duration_sec": execution.get("duration_sec"),
-            "stdout_path": execution.get("stdout_path"),
-            "stderr_path": execution.get("stderr_path"),
-            "ok": execution.get("ok"),
-            "frame_count": frame_count,
-            "artifacts": important_artifacts,
-        }
 
     def persist_state(self) -> None:
         dump_json(self.json_safe(self.state), self.state_path)
@@ -292,10 +279,31 @@ class PlannerSession:
         validator = Draft202012Validator(schema)
         return [error.message for error in sorted(validator.iter_errors(payload), key=lambda item: item.path)]
 
-    def read_text(self, path: Path, *, limit: int) -> str:
+    def read_text(self, path: Path) -> str:
         if not path.exists():
             return f"<missing {path}>"
-        return path.read_text(encoding="utf-8", errors="replace")[:limit]
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    def genesis_context_prompt(self) -> str:
+        context_md = self.contracts_dir / "genesis_context.md"
+        context_json = self.contracts_dir / "genesis_context.json"
+        context = self.load_json(context_json) or {}
+        docs_dir = context.get("docs_dir")
+        catalog_path = context.get("catalog_path")
+        return "\n".join(
+            [
+                "Genesis official-doc and local-source context is available on disk for on-demand reading.",
+                "Do not assume the context pack is preloaded; inspect only the pieces relevant to this turn.",
+                f"- Context index: {context_md}",
+                f"- Machine-readable context JSON: {context_json}",
+                f"- Cached official docs directory: {docs_dir or '<see context JSON>'}",
+                f"- Selected official-doc catalog: {catalog_path or '<see context JSON>'}",
+                "- Active non-rigid scope: FEM+IPC only.",
+                "- Rigid bodies, articulated MJCF/URDF robots, generated meshes, textures, and rendering are in scope "
+                "only as FEM+IPC support or as explicitly requested rigid/mesh scenes.",
+                "- Prefer local Genesis source and examples over online docs if they disagree.",
+            ]
+        )
 
     def append_jsonl(self, path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

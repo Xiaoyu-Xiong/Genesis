@@ -25,6 +25,13 @@ Useful options forwarded to `code_agent.cli run-suite`:
 - `--timeout-sec N`: timeout for each generated simulation.
 
 The planner and all four writer modules run for every suite case.
+Suite startup also fetches or reuses the selected official Genesis documentation context for FEM+IPC scenes. To build
+that context without running a suite:
+
+```bash
+uv run python -m code_agent.cli build-genesis-context \
+  --out-dir code_agent/workspaces/context_smoke
+```
 
 ## Categories
 
@@ -80,8 +87,11 @@ Cases:
 - `tests/test_deformable_physics.py`
 - `tests/test_fem.py`
 - `examples/fem_hard_and_soft_constraint.py`
-- `examples/sap_coupling/fem_sphere_and_cube.py`
 - `examples/IPC_Solver/ipc_objects_falling.py`
+- `examples/IPC_Solver/ipc_robot_grasp_cube.py`
+
+The active non-rigid target for new code-agent work is FEM+IPC. Other Genesis non-rigid families are not included in
+the context pack unless they are explicitly reintroduced later.
 
 ### `scripts/deformable_mesh/`
 
@@ -102,3 +112,7 @@ Future scripts that invoke Python, `uv`, `pytest`, or Genesis should run through
 the dedicated local GPU by default. Use CPU only for explicit CPU checks or when GPU execution is unavailable.
 
 The scripts call `uv run python -m code_agent.cli run-suite` directly.
+
+For mesh suites, make sure `MESHY_API_KEY` is exported in the same non-interactive shell that launches the script.
+This repository's usual `~/.bashrc` may return before later API-key exports when sourced by non-interactive commands,
+so `source ~/.bashrc` alone is not a reliable check. Load or export the key explicitly without echoing its value.

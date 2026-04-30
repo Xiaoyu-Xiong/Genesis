@@ -8,8 +8,9 @@ Rendering writers in `workspace-write` sandbox mode. Planner chooses structured 
 case: writing the plan, waking generation workers, requesting integration and local GPU execution, asking Critic for
 evaluation, sending focused repair briefs, and finishing the episode.
 
-Mesh and articulated prompts currently run through primitive stand-ins until the dedicated mesh/XML workers are wired
-into generation.
+Mesh prompts can now be routed through Planner-callable mesh asset actions, including a background mode that can
+overlap with non-asset-dependent code writers. Articulated MJCF/XML prompts still use primitive stand-ins until the XML
+worker is added.
 
 Implementation status is tracked in [Implementation Status](docs/status.md). That document distinguishes completed
 infrastructure, partially validated agent-written generation, and unimplemented asset work.
@@ -35,8 +36,14 @@ running integration, executing generated code, invoking Critic, requesting owner
 Python/Pytest commands, or finishing the episode. Shell execution, GPU use, schema validation, write-scope enforcement,
 artifact collection, and retry limits stay inside the Python harness.
 
+When Planner emits `start_mesh_assets`, the harness starts the Meshy/repair/texture asset flow in the background for
+selected `generated_mesh` asset requests. Planner can dispatch writer roles that do not depend on the manifest while
+assets are still running, then call `wait_mesh_assets` before manifest-dependent writers or integration.
+
 When Planner includes multiple independent writer roles in one `spawn_workers` action, the harness dispatches those
-writers concurrently. Planner keeps dependent work serial by splitting it across multiple turns.
+writers concurrently. By default there is no artificial writer cap, so Planner can spawn all Scene, Body, Action, and
+Rendering writers in one turn when the shared plan/manifest is sufficient. Planner keeps dependent work serial by
+splitting it across multiple turns only when a concrete dependency requires it.
 
 ## Directory Map
 
@@ -44,7 +51,7 @@ writers concurrently. Planner keeps dependent work serial by splitting it across
 | --- | --- |
 | `planner/` | Planner agent prompt construction, Planner-turn invocation, and per-case episode harness. |
 | `writer/` | Scene, Body, Action, and Rendering code-writing subagents plus writer dispatch. |
-| `utils/` | Codex invocation, local execution, suite loading, timing, and integration helpers. See [Utils](docs/utils.md). |
+| `utils/` | Codex invocation, local execution, suite loading, timing, and integration helpers. |
 | `evaluation/` | Deterministic checks and single-pass critic runner. See [Evaluation](docs/evaluation.md). |
 | `specs/` | JSON schemas for planner, worker, critic, execution, and repair reports. See [Specs](docs/specs.md). |
 | `assets/` | Asset routing and asset implementations. See [Assets](docs/assets.md). |

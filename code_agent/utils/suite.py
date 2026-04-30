@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from code_agent.context.genesis import build_genesis_context_pack, install_genesis_context_pack
 from code_agent.io_utils import dump_json
 from code_agent.planner.session import PlannerSession, PlannerSessionConfig
 
@@ -31,7 +32,9 @@ def _write_case_inputs(case_dir: Path, case: Case) -> None:
     inputs.mkdir(parents=True, exist_ok=True)
     (inputs / "user_prompt.md").write_text(case.task + "\n", encoding="utf-8")
     (inputs / "capabilities.md").write_text(
-        "Rigid local GPU code generation. Planner controls worker dispatch, execution, critic, and repair actions.\n",
+        "Genesis local GPU code generation for rigid, articulated, FEM+IPC deformable, mesh, texture, rendering, "
+        "critic, and repair workflows. Other non-rigid families are out of scope. Planner controls worker dispatch, "
+        "execution, critic, and repair actions.\n",
         encoding="utf-8",
     )
 
@@ -54,11 +57,13 @@ def run_suite(
     if max_cases is not None:
         cases = cases[:max_cases]
 
+    genesis_context = build_genesis_context_pack(out_dir)
     results: list[dict[str, object]] = []
     for case in cases:
         case_dir = out_dir / case.case_id
         case_dir.mkdir(parents=True, exist_ok=True)
         _write_case_inputs(case_dir, case)
+        install_genesis_context_pack(case_dir, genesis_context)
         session = PlannerSession(
             PlannerSessionConfig(
                 case_id=case.case_id,
@@ -83,6 +88,9 @@ def run_suite(
         "steps": steps,
         "duration_sec": duration_sec,
         "render_fps": render_fps,
+        "genesis_context_path": str(genesis_context.markdown_path),
+        "genesis_context_json_path": str(genesis_context.json_path),
+        "genesis_docs_dir": str(genesis_context.docs_dir),
         "num_cases": len(results),
         "num_passed": sum(1 for item in results if item["verdict"] == "pass"),
         "results": results,

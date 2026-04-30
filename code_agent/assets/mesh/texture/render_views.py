@@ -14,6 +14,8 @@ def render_textured_mesh_views(
     *,
     mesh_path: str | Path,
     out_dir: str | Path,
+    texture_path: str | Path | None = None,
+    file_meshes_are_zup: bool = False,
     backend: str = "gpu",
     res: tuple[int, int] = (768, 768),
     fov: float = 35.0,
@@ -26,7 +28,7 @@ def render_textured_mesh_views(
     if not isinstance(mesh, trimesh.Trimesh):
         raise TypeError(f"Expected textured mesh path to load as Trimesh, got {type(mesh).__name__}")
 
-    bounds = mesh.bounds.astype(np.float64, copy=False)
+    bounds = _bounds_in_genesis_frame(mesh.bounds.astype(np.float64, copy=False), file_meshes_are_zup)
     bbox_min = bounds[0]
     bbox_max = bounds[1]
     extents = np.maximum(bbox_max - bbox_min, 1e-6)
@@ -61,13 +63,23 @@ def render_textured_mesh_views(
         morph=gs.morphs.Plane(pos=(0.0, 0.0, -0.002)),
         surface=gs.surfaces.Rough(color=(0.92, 0.92, 0.92, 1.0)),
     )
-    scene.add_entity(
-        morph=gs.morphs.Mesh(
-            file=str(mesh_path),
-            scale=1.0,
-            pos=translation,
-        )
+    mesh_morph = gs.morphs.Mesh(
+        file=str(mesh_path),
+        scale=1.0,
+        pos=translation,
+        file_meshes_are_zup=file_meshes_are_zup,
+        collision=False,
     )
+    texture_path = Path(texture_path) if texture_path is not None else None
+    if texture_path is not None and texture_path.is_file():
+        scene.add_entity(
+            morph=mesh_morph,
+            surface=gs.surfaces.Rough(
+                diffuse_texture=gs.textures.ImageTexture(image_path=str(texture_path)),
+            ),
+        )
+    else:
+        scene.add_entity(morph=mesh_morph)
     camera = scene.add_camera(
         res=res,
         pos=(distance, -distance, distance),
@@ -109,6 +121,20 @@ def render_textured_mesh_views(
         outputs[view_name] = str(out_path)
 
     return outputs
+
+
+def _bounds_in_genesis_frame(bounds: np.ndarray, file_meshes_are_zup: bool) -> np.ndarray:
+    if file_meshes_are_zup:
+        return bounds
+    bbox_min = bounds[0]
+    bbox_max = bounds[1]
+    return np.array(
+        (
+            (bbox_min[0], -bbox_max[2], bbox_min[1]),
+            (bbox_max[0], -bbox_min[2], bbox_max[1]),
+        ),
+        dtype=np.float64,
+    )
 
 
 def _camera_distance(*, diagonal: float, fov: float) -> float:

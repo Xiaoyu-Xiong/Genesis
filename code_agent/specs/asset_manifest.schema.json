@@ -20,6 +20,7 @@
           "visual_path": { "type": ["string", "null"] },
           "scale": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
           "bbox": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+          "file_meshes_are_zup": { "type": ["boolean", "null"] },
           "texture_path": { "type": ["string", "null"] },
           "simulation_role": { "type": "string", "minLength": 1 },
           "status": { "type": "string", "enum": ["ready", "pending", "failed"] },

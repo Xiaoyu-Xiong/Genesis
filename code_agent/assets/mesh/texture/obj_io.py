@@ -15,6 +15,9 @@ class ObjUvMesh:
     face_texcoord_indices: np.ndarray
 
 
+GENESIS_TEXTURE_V_FLIP_MARKER = "# code_agent: genesis_texture_v_flipped"
+
+
 def parse_obj_with_uv(obj_path: Path) -> ObjUvMesh:
     vertices: list[list[float]] = []
     texcoords: list[list[float]] = []
@@ -63,16 +66,33 @@ def parse_obj_with_uv(obj_path: Path) -> ObjUvMesh:
     )
 
 
-def write_parameterized_obj(*, obj_path: Path, vertices: np.ndarray, faces: np.ndarray, uvs: np.ndarray) -> None:
+def write_parameterized_obj(
+    *,
+    obj_path: Path,
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    uvs: np.ndarray,
+    face_vertex_indices: np.ndarray | None = None,
+) -> None:
     obj_path.parent.mkdir(parents=True, exist_ok=True)
+    uv_faces = np.asarray(faces, dtype=np.int64)
+    if uv_faces.ndim == 1:
+        uv_faces = uv_faces.reshape((-1, 3))
+    geometry_faces = uv_faces if face_vertex_indices is None else np.asarray(face_vertex_indices, dtype=np.int64)
+    if geometry_faces.shape != uv_faces.shape:
+        raise ValueError(f"Geometry face shape {geometry_faces.shape} does not match UV face shape {uv_faces.shape}")
+
     lines: list[str] = []
     for vertex in np.asarray(vertices, dtype=np.float64):
         lines.append(f"v {float(vertex[0]):.9f} {float(vertex[1]):.9f} {float(vertex[2]):.9f}")
     for uv in np.asarray(uvs, dtype=np.float64):
         lines.append(f"vt {float(uv[0]):.9f} {float(uv[1]):.9f}")
-    for face in np.asarray(faces, dtype=np.int64):
-        a, b, c = int(face[0]) + 1, int(face[1]) + 1, int(face[2]) + 1
-        lines.append(f"f {a}/{a} {b}/{b} {c}/{c}")
+    for geometry_face, uv_face in zip(geometry_faces, uv_faces, strict=True):
+        tokens = [
+            f"{int(geometry_index) + 1}/{int(uv_index) + 1}"
+            for geometry_index, uv_index in zip(geometry_face, uv_face, strict=True)
+        ]
+        lines.append(f"f {' '.join(tokens)}")
     obj_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -119,18 +139,52 @@ def copy_with_vertex_affine(
     dst_path.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
 
 
-def rewrite_obj_mtllib(obj_path: Path, *, mtl_name: str) -> None:
+def rewrite_obj_mtllib(obj_path: Path, *, mtl_name: str, material_name: str | None = None) -> None:
     lines = obj_path.read_text(encoding="utf-8", errors="ignore").splitlines()
     rewritten_lines: list[str] = []
-    replaced = False
+    replaced_mtllib = False
+    inserted_usemtl = False
     for line in lines:
         if line.startswith("mtllib "):
             rewritten_lines.append(f"mtllib {mtl_name}")
-            replaced = True
+            replaced_mtllib = True
+            continue
+        if material_name is not None and line.startswith("usemtl "):
+            rewritten_lines.append(f"usemtl {material_name}")
+            inserted_usemtl = True
+            continue
+        if material_name is not None and not inserted_usemtl and line.startswith("f "):
+            rewritten_lines.append(f"usemtl {material_name}")
+            inserted_usemtl = True
+            rewritten_lines.append(line)
         else:
             rewritten_lines.append(line)
-    if not replaced:
+    if not replaced_mtllib:
         rewritten_lines.insert(0, f"mtllib {mtl_name}")
+    obj_path.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
+
+
+def flip_obj_texture_v_for_genesis(obj_path: Path) -> None:
+    lines = obj_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    if any(line.strip() == GENESIS_TEXTURE_V_FLIP_MARKER for line in lines):
+        return
+
+    rewritten_lines: list[str] = [GENESIS_TEXTURE_V_FLIP_MARKER]
+    for line in lines:
+        if not line.startswith("vt "):
+            rewritten_lines.append(line)
+            continue
+
+        parts = line.split()
+        if len(parts) < 3:
+            rewritten_lines.append(line)
+            continue
+
+        u = float(parts[1])
+        v = 1.0 - float(parts[2])
+        tail = f" {' '.join(parts[3:])}" if len(parts) > 3 else ""
+        rewritten_lines.append(f"vt {u:.9f} {v:.9f}{tail}")
+
     obj_path.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
 
 

@@ -6,6 +6,7 @@ from typing import Any
 
 from .codex_critic import run_codex_critic
 from .deterministic import DeterministicEvaluationConfig, evaluate_artifacts
+from .visual import evaluate_visual_artifacts
 
 
 def evaluate_generated_run(
@@ -30,6 +31,8 @@ def evaluate_generated_run(
             require_render=require_render,
         )
     )
+    visual_report = evaluate_visual_artifacts(run_dir=run_dir, output_path=reports_dir / "visual_evaluation.json")
+    artifact_report["visual_report"] = visual_report
     codex_report = (
         run_codex_critic(run_dir=run_dir, task=task, artifact_report=artifact_report) if use_codex_critic else None
     )

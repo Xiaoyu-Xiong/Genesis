@@ -27,6 +27,7 @@ class CodexExecRequest:
     sandbox: CodexSandbox = "read-only"
     model: str | None = None
     output_schema_path: Path | None = None
+    image_paths: tuple[Path, ...] = ()
     codex_bin: str = "codex"
     ask_for_approval: str = CONFIGS.codex.ask_for_approval
     timeout_sec: float | None = None
@@ -88,7 +89,11 @@ def build_codex_exec_command(request: CodexExecRequest, *, resolved_codex: str |
         command.extend(["--model", request.model])
     if request.output_schema_path is not None:
         command.extend(["--output-schema", str(request.output_schema_path)])
+    for image_path in request.image_paths:
+        command.extend(["--image", str(image_path)])
     command.extend(request.extra_args)
+    if request.image_paths:
+        command.append("--")
     command.append(request.prompt)
     return command
 

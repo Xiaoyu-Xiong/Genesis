@@ -7,6 +7,7 @@
     "action",
     "rationale",
     "planner_output",
+    "asset_names",
     "roles",
     "owner",
     "repair_brief",
@@ -25,6 +26,9 @@
       "type": "string",
       "enum": [
         "write_plan",
+        "start_mesh_assets",
+        "generate_mesh_assets",
+        "wait_mesh_assets",
         "spawn_workers",
         "run_integrator",
         "run_execution",
@@ -174,6 +178,7 @@
       },
       "additionalProperties": false
     },
+    "asset_names": { "type": ["array", "null"], "items": { "type": "string" } },
     "roles": {
       "type": ["array", "null"],
       "items": { "type": "string", "enum": ["scene", "body", "action", "rendering"] }

@@ -7,6 +7,7 @@ import trimesh
 from trimesh import repair as trimesh_repair
 
 from ..models import MeshRepairConfig, MeshRepairResult
+from .components import connected_face_component_count, strip_texture_visuals
 
 
 def repair_mesh_with_ftetwild(
@@ -150,6 +151,20 @@ def _repair_mesh_with_ftetwild_attempt(
         operations.append("export_repaired_mesh")
         stage_durations["export_repaired_mesh"] = _now() - stage_start
 
+        stage_start = _now()
+        if _repair_non_manifold_artifacts(output_mesh_path):
+            operations.append("repair_non_manifold_edges_and_close_holes")
+        stage_durations["repair_non_manifold_edges_and_close_holes"] = _now() - stage_start
+
+        stage_start = _now()
+        repaired_mesh = _load_mesh(output_mesh_path)
+        if repaired_mesh.is_watertight and repaired_mesh.volume < 0:
+            repaired_mesh.invert()
+            repaired_mesh.export(str(output_mesh_path))
+            repaired_mesh = _load_mesh(output_mesh_path)
+            operations.append("orient_positive_volume")
+        stage_durations["orient_positive_volume"] = _now() - stage_start
+
         after_vertices = int(len(repaired_mesh.vertices))
         after_faces = int(len(repaired_mesh.faces))
         after_components = _component_count(repaired_mesh, face_cap=config.component_count_face_cap)
@@ -215,13 +230,34 @@ def _load_mesh(mesh_path: Path) -> trimesh.Trimesh:
     mesh = trimesh.load_mesh(str(mesh_path), force="mesh", skip_texture=True, process=False)
     if not isinstance(mesh, trimesh.Trimesh):
         raise TypeError(f"Expected Trimesh, got {type(mesh).__name__}")
-    return mesh
+    return strip_texture_visuals(mesh)
 
 
 def _component_count(mesh: trimesh.Trimesh, face_cap: int) -> int:
-    if len(mesh.faces) > face_cap:
-        return -1
-    return max(1, len(mesh.split(only_watertight=False)))
+    return connected_face_component_count(mesh, face_cap=face_cap)
+
+
+def _repair_non_manifold_artifacts(mesh_path: Path) -> bool:
+    try:
+        import pymeshlab  # type: ignore
+    except Exception:
+        return False
+
+    mesh_set = pymeshlab.MeshSet()
+    mesh_set.load_new_mesh(str(mesh_path))
+    for filter_name, kwargs in (
+        ("meshing_remove_duplicate_faces", {}),
+        ("meshing_remove_duplicate_vertices", {}),
+        ("meshing_remove_null_faces", {}),
+        ("meshing_remove_folded_faces", {}),
+        ("meshing_repair_non_manifold_edges", {}),
+        ("meshing_repair_non_manifold_vertices", {}),
+        ("meshing_close_holes", {"maxholesize": 100}),
+        ("meshing_remove_unreferenced_vertices", {}),
+    ):
+        getattr(mesh_set, filter_name)(**kwargs)
+    mesh_set.save_current_mesh(str(mesh_path))
+    return True
 
 
 def _extract_boundary_faces(tet_elems: np.ndarray) -> np.ndarray:

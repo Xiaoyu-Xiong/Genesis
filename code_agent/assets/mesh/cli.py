@@ -106,6 +106,8 @@ def _cmd_render_textured_views(args: argparse.Namespace) -> None:
     outputs = render_textured_mesh_views(
         mesh_path=args.mesh,
         out_dir=args.out_dir,
+        texture_path=args.texture,
+        file_meshes_are_zup=args.file_meshes_are_zup,
         backend=args.backend,
         res=tuple(args.res),
         fov=args.fov,
@@ -116,6 +118,8 @@ def _cmd_render_textured_views(args: argparse.Namespace) -> None:
         "backend": args.backend,
         "res": list(args.res),
         "fov": args.fov,
+        "texture_path": str(args.texture) if args.texture is not None else None,
+        "file_meshes_are_zup": args.file_meshes_are_zup,
         "views": outputs,
     }
     dump_json(payload, args.out)
@@ -403,6 +407,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser_render.add_argument("--mesh", type=Path, required=True, help="Path to the textured OBJ file.")
     parser_render.add_argument("--out-dir", type=Path, required=True, help="Directory for rendered PNG views.")
+    parser_render.add_argument(
+        "--texture",
+        type=Path,
+        default=None,
+        help="Optional fallback base-color texture. Omit this to let Genesis load the OBJ's own MTL binding.",
+    )
+    parser_render.add_argument(
+        "--file-meshes-are-zup",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Whether mesh vertices are already Z-up. Meshy OBJ assets are Y-up, so the default is false.",
+    )
     parser_render.add_argument(
         "--backend",
         choices=("gpu", "cpu"),

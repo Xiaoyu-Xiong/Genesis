@@ -82,7 +82,7 @@ def dispatch_worker_roles(
     _seed_worker_files(case_dir)
 
     ordered_roles = tuple(roles)
-    max_workers = max(1, min(len(ordered_roles), CONFIGS.harness.max_parallel_workers))
+    max_workers = resolve_writer_parallelism(len(ordered_roles))
     if max_workers == 1:
         return [
             _run_worker(
@@ -124,11 +124,12 @@ def repair_worker(*, case_dir: Path, task: str, owner: str, failure_context: str
 
 
 def write_worker_dispatch_report(case_dir: Path, results: list[WorkerDispatchResult]) -> None:
-    active_parallelism = min(len(results), CONFIGS.harness.max_parallel_workers)
+    active_parallelism = resolve_writer_parallelism(len(results))
     report = {
         "dispatch": {
             "num_workers": len(results),
-            "max_parallel_workers": CONFIGS.harness.max_parallel_workers,
+            "configured_max_parallel_workers": CONFIGS.harness.max_parallel_workers,
+            "max_parallel_workers": active_parallelism,
             "parallel": active_parallelism > 1,
         },
         "workers": [
@@ -149,6 +150,15 @@ def write_worker_dispatch_report(case_dir: Path, results: list[WorkerDispatchRes
     path = case_dir / "reports" / "worker_dispatch.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+
+def resolve_writer_parallelism(num_roles: int) -> int:
+    if num_roles <= 0:
+        return 0
+    configured = CONFIGS.harness.max_parallel_workers
+    if configured is None or configured <= 0:
+        return num_roles
+    return max(1, min(num_roles, configured))
 
 
 def _seed_worker_files(case_dir: Path) -> None:
@@ -175,6 +185,8 @@ def _run_worker(
         case_dir=case_dir,
         task=task,
         planner_output=planner_output,
+        asset_manifest=_load_asset_manifest(case_dir),
+        genesis_context=_load_genesis_context(case_dir),
         spec=spec,
         repair_context=repair_context,
     )
@@ -219,6 +231,8 @@ def _worker_prompt(
     case_dir: Path,
     task: str,
     planner_output: dict[str, object],
+    asset_manifest: dict[str, object],
+    genesis_context: str,
     spec: WorkerSpec,
     repair_context: str | None,
 ) -> str:
@@ -232,6 +246,21 @@ def _worker_prompt(
 
         Planner output:
         {json.dumps(planner_output, indent=2)}
+
+        Asset manifest:
+        {json.dumps(asset_manifest, indent=2)}
+
+        Genesis documentation and local-code context:
+        {genesis_context}
+
+        Context roots:
+        - Repository root: {Path.cwd()}
+        - Case workspace root: {case_dir}
+        - Generated source directory: {case_dir / "src"}
+        - Contracts directory: {case_dir / "contracts"}
+        - Assets directory: {case_dir / "assets"}
+        - Reports directory: {case_dir / "reports"}
+        - Artifacts directory: {case_dir / "artifacts"}
 
         Role: {spec.role} worker
         Responsibility: {spec.responsibility}
@@ -265,6 +294,44 @@ def _load_planner_output(case_dir: Path) -> dict[str, object]:
     except json.JSONDecodeError:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _load_asset_manifest(case_dir: Path) -> dict[str, object]:
+    path = case_dir / "assets" / "asset_manifest.json"
+    if not path.exists():
+        return {"assets": [], "assumptions": [], "unresolved_risks": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"assets": [], "assumptions": [], "unresolved_risks": [f"Invalid asset manifest JSON: {path}"]}
+    return payload if isinstance(payload, dict) else {"assets": [], "assumptions": [], "unresolved_risks": []}
+
+
+def _load_genesis_context(case_dir: Path) -> str:
+    context_md = case_dir / "contracts" / "genesis_context.md"
+    context_json = case_dir / "contracts" / "genesis_context.json"
+    docs_dir = "<see context JSON>"
+    catalog_path = "<see context JSON>"
+    if context_json.exists():
+        try:
+            payload = json.loads(context_json.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            payload = {}
+        if isinstance(payload, dict):
+            docs_dir = str(payload.get("docs_dir") or docs_dir)
+            catalog_path = str(payload.get("catalog_path") or catalog_path)
+    return "\n".join(
+        [
+            "Genesis official-doc and local-source context is available on disk for on-demand reading.",
+            "Read only the relevant docs/source for your module; do not treat the full pack as preloaded.",
+            f"- Context index: {context_md}",
+            f"- Machine-readable context JSON: {context_json}",
+            f"- Cached official docs directory: {docs_dir}",
+            f"- Selected official-doc catalog: {catalog_path}",
+            "- Active non-rigid scope: FEM+IPC only. For rigid/mesh cases, use rigid/mesh/rendering docs as needed.",
+            "- Prefer local Genesis source and examples over online docs if they disagree.",
+        ]
+    )
 
 
 def _parse_worker_report(path: Path) -> tuple[dict[str, object] | None, str | None]:

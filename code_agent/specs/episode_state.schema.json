@@ -43,6 +43,7 @@
       "additionalProperties": true
     },
     "workers": { "type": "object" },
+    "assets": { "type": "object" },
     "integration": { "type": ["object", "null"] },
     "execution": { "type": ["object", "null"] },
     "critic": { "type": ["object", "null"] },

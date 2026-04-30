@@ -379,7 +379,18 @@ class KinematicEntity(Entity):
 
     def _load_mesh(self, morph, surface, load_geom_only_for_heterogeneous=False):
         # Load meshes
-        meshes = gs.Mesh.from_morph_surface(morph, surface)
+        collision_meshes = gs.Mesh.from_morph_surface(morph, surface)
+        visual_meshes = collision_meshes
+        if getattr(morph, "visual_file", None) is not None:
+            visual_morph = morph.model_copy(
+                update=dict(
+                    file=morph.visual_file,
+                    file_meshes_are_zup=morph.visual_file_meshes_are_zup,
+                    visual_file=None,
+                    visual_file_meshes_are_zup=None,
+                )
+            )
+            visual_meshes = gs.Mesh.from_morph_surface(visual_morph, surface)
 
         link_pos, link_quat = map(np.array, (morph.pos, morph.quat))
 
@@ -396,7 +407,7 @@ class KinematicEntity(Entity):
 
         g_infos = []
         if morph.visualization:
-            for mesh in meshes:
+            for mesh in visual_meshes:
                 g_infos.append(
                     dict(
                         contype=0,
@@ -408,12 +419,12 @@ class KinematicEntity(Entity):
                 )
         if morph.collision:
             # Merge them as a single one if requested
-            if morph.merge_submeshes_for_collision and len(meshes) > 1:
-                tmesh = trimesh.util.concatenate([mesh.trimesh for mesh in meshes])
+            if morph.merge_submeshes_for_collision and len(collision_meshes) > 1:
+                tmesh = trimesh.util.concatenate([mesh.trimesh for mesh in collision_meshes])
                 mesh = gs.Mesh.from_trimesh(mesh=tmesh, surface=gs.surfaces.Collision())
-                meshes = (mesh,)
+                collision_meshes = (mesh,)
 
-            for mesh in meshes:
+            for mesh in collision_meshes:
                 g_infos.append(
                     dict(
                         contype=morph.contype,

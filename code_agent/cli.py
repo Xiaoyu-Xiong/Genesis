@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from code_agent.configs import CONFIGS
+from code_agent.context.genesis import build_genesis_context_pack
 from code_agent.utils.suite import run_suite
 
 
@@ -20,7 +21,14 @@ def _cmd_run_suite(args: argparse.Namespace) -> None:
         duration_sec=args.duration_sec,
         render_fps=args.render_fps,
     )
-    print(f"Done. {summary['num_passed']}/{summary['num_cases']} cases passed. Summary: {args.out_dir / 'summary.json'}")
+    summary_path = args.out_dir / "summary.json"
+    print(f"Done. {summary['num_passed']}/{summary['num_cases']} cases passed. Summary: {summary_path}")
+
+
+def _cmd_build_genesis_context(args: argparse.Namespace) -> None:
+    pack = build_genesis_context_pack(args.out_dir, refresh=args.refresh)
+    print(f"Genesis context: {pack.markdown_path}")
+    print(f"Official docs cache: {pack.docs_dir}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,6 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_suite_parser.add_argument("--render-fps", type=int, default=None)
     run_suite_parser.add_argument("--repair-rounds", type=int, default=1)
     run_suite_parser.set_defaults(func=_cmd_run_suite)
+
+    context_parser = sub.add_parser("build-genesis-context", help="Fetch/cache Genesis docs context for subagents.")
+    context_parser.add_argument("--out-dir", type=Path, required=True)
+    context_parser.add_argument("--refresh", action="store_true")
+    context_parser.set_defaults(func=_cmd_build_genesis_context)
     return parser
 
 

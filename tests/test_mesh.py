@@ -495,6 +495,31 @@ def test_urdf_mesh_processing(tmp_path, show_viewer):
     assert len(tmesh.vertices) != len(tmesh_obj_vis.vertices)
 
 
+@pytest.mark.required
+def test_rigid_mesh_visual_file_uses_distinct_visual_geom(tmp_path, show_viewer):
+    collision_path = tmp_path / "collision.obj"
+    visual_path = tmp_path / "visual.obj"
+    trimesh.creation.box(extents=(0.5, 0.5, 0.5)).export(collision_path)
+    trimesh.creation.icosphere(subdivisions=2, radius=0.35).export(visual_path)
+
+    scene = gs.Scene(show_viewer=show_viewer, show_FPS=False)
+    obj = scene.add_entity(
+        gs.morphs.Mesh(
+            file=str(collision_path),
+            visual_file=str(visual_path),
+            fixed=True,
+            decimate=False,
+            convexify=False,
+        ),
+    )
+
+    assert obj.n_geoms == 1
+    assert obj.n_vgeoms == 1
+    assert obj.geoms[0].mesh.metadata["mesh_path"] == str(collision_path)
+    assert obj.vgeoms[0].vmesh.metadata["mesh_path"] == str(visual_path)
+    assert len(obj.geoms[0].mesh.trimesh.vertices) != len(obj.vgeoms[0].vmesh.trimesh.vertices)
+
+
 # ==================== Material/Texture Parsing Tests ====================
 
 

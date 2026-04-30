@@ -269,9 +269,8 @@ def extract_task_id(payload: dict[str, object]) -> str:
 def augment_meshy_geometry_prompt(prompt: str) -> str:
     base_prompt = prompt.strip()
     manifold_requirement = (
-        "The mesh should be a single closed watertight manifold surface with no open boundaries, no missing patches, "
-        "no self-intersections, no non-manifold edges or vertices, and no large unrecoverable holes. Avoid thin open "
-        "shells, floating fragments, and underresolved gaps; prioritize simulation-ready geometric integrity over fine detail."
+        "Make it one closed watertight manifold object with no open boundaries, loose fragments, thin shells, or "
+        "self-intersections. Prioritize simulation-ready geometry over fine detail."
     )
     lowered = base_prompt.lower()
     manifold_markers = (
