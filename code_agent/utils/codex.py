@@ -92,9 +92,7 @@ def build_codex_exec_command(request: CodexExecRequest, *, resolved_codex: str |
     for image_path in request.image_paths:
         command.extend(["--image", str(image_path)])
     command.extend(request.extra_args)
-    if request.image_paths:
-        command.append("--")
-    command.append(request.prompt)
+    command.append("-")
     return command
 
 
@@ -116,6 +114,7 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     final_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    final_path.unlink(missing_ok=True)
 
     if resolved_codex is None:
         message = f"Codex executable not found on PATH: {request.codex_bin}"
@@ -146,10 +145,11 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
                 cwd=request.cwd,
                 stdout=subprocess.PIPE,
                 stderr=stderr_file,
+                stdin=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
             )
-            stdout, _ = process.communicate(timeout=request.timeout_sec)
+            stdout, _ = process.communicate(input=request.prompt, timeout=request.timeout_sec)
             jsonl_file.write(stdout)
             exit_code = process.returncode
         except subprocess.TimeoutExpired:
@@ -174,6 +174,8 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
     if exit_code != 0 and error_type is None:
         error_type = "codex_exec_failed"
         error_message = f"Codex exited with status {exit_code}"
+        if not final_path.exists():
+            final_path.write_text(f"{error_type}: {error_message}\n", encoding="utf-8")
 
     return _result(
         request,

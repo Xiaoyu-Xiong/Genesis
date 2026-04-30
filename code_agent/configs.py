@@ -111,8 +111,8 @@ class MeshyRequestConfigs:
     auto_size: bool = False
     origin_at: Literal["bottom", "center"] | None = None
     poll_interval_sec: float = 2.0
-    max_wait_sec: float = 500.0
-    timeout_sec: float = 200.0
+    max_wait_sec: float = 1200.0
+    timeout_sec: float = 300.0
     texture_enabled: bool = True
     texture_ai_model: Literal["latest", "meshy-6", "meshy-5"] | None = None
     texture_enable_pbr: bool = False

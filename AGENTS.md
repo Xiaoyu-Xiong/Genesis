@@ -6,7 +6,7 @@ Guide for AI coding assistants working with the Genesis physics simulation codeb
 
 These rules are mandatory for this repository.
 
-- **Use the repository uv environment directly.** Run `python`, `python -m ...`, `uv run ...`, `uv sync`, `uv pip ...`, `pytest`, and Genesis commands from the repository shell unless the user asks for a different environment.
+- **Use the repository uv environment to run python script.** Do not dircectly run `python`, `python -m ...`, `pytest`, but run `uv run ...`, `uv sync`, `uv pip ...`, `uv pytest` instead.
 - **Be careful when mutating `.venv`.** Do not recreate or bulk repair the environment unless the user asks for environment work.
 - **Use the host shell for git.** Use ordinary `git status`, `git diff`, `git checkout`, `git commit`, `git restore`, and similar repository operations.
 - **If execution context is unclear, stop and clarify before running commands that mutate environments or launch expensive simulations.**

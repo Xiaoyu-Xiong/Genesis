@@ -26,7 +26,7 @@ class EpisodePlanner:
                 output_schema_path=Path("code_agent/specs/planner_action.schema.json"),
                 output_jsonl_path=self.session.logs_dir / f"codex_planner_turn_{turn:03d}.jsonl",
                 final_message_path=self.session.logs_dir / f"codex_planner_turn_{turn:03d}.final.json",
-                timeout_sec=300.0,
+                timeout_sec=900.0,
             )
         )
         planner_invocations = self.session.state.setdefault("planner_invocations", [])

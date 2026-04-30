@@ -25,7 +25,7 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
             image_paths=image_paths,
             output_jsonl_path=logs_dir / "codex_critic.jsonl",
             final_message_path=logs_dir / "codex_critic.final.json",
-            timeout_sec=300.0,
+            timeout_sec=900.0,
         )
     )
     report = _load_json(Path(result.final_message_path))
@@ -51,8 +51,8 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
 
 
 def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any]) -> str:
+    evidence_index = _write_critic_evidence_index(run_dir=run_dir, artifact_report=artifact_report)
     metrics = _read_text(run_dir / "artifacts" / "metrics.json")
-    event_log = _read_text(run_dir / "artifacts" / "event_log.json")
     render_stats = _read_text(run_dir / "artifacts" / "render_stats.json")
     visual_evaluation = _read_text(run_dir / "reports" / "visual_evaluation.json")
     execution_report = _read_text(run_dir / "reports" / "execution_report.json")
@@ -78,8 +78,12 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         Case workspace:
         {run_dir}
 
-        Artifact evaluation report:
-        {json.dumps(artifact_report, indent=2)}
+        Evidence index:
+        {json.dumps(evidence_index, indent=2)}
+
+        The complete evidence files listed above are available on disk. Read the full files directly when needed,
+        especially the event log and full artifact report. The event log may be too large to inline in one Codex turn;
+        do not treat non-inlined evidence as missing.
 
         Execution report:
         {execution_report}
@@ -88,7 +92,7 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         {metrics}
 
         Event log:
-        {event_log}
+        Full event log is available at {run_dir / "artifacts" / "event_log.json"}.
 
         Render stats:
         {render_stats}
@@ -144,6 +148,60 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         Use `needs_repair` when there is a clear owner-routed fix.
         """
     ).strip()
+
+
+def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, Any]) -> dict[str, Any]:
+    reports_dir = run_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    full_artifact_report_path = reports_dir / "critic_artifact_report.json"
+    full_artifact_report_path.write_text(json.dumps(artifact_report, indent=2) + "\n", encoding="utf-8")
+
+    paths = {
+        "artifact_report": full_artifact_report_path,
+        "execution_report": reports_dir / "execution_report.json",
+        "visual_evaluation": reports_dir / "visual_evaluation.json",
+        "metrics": run_dir / "artifacts" / "metrics.json",
+        "event_log": run_dir / "artifacts" / "event_log.json",
+        "render_stats": run_dir / "artifacts" / "render_stats.json",
+        "summary": run_dir / "artifacts" / "summary.json",
+        "run_result": run_dir / "artifacts" / "run_result.json",
+        "planner_output": run_dir / "contracts" / "planner_output.json",
+        "timing_contract": run_dir / "contracts" / "timing.json",
+        "asset_manifest": run_dir / "assets" / "asset_manifest.json",
+        "stdout": reports_dir / "stdout.txt",
+        "stderr": reports_dir / "stderr.txt",
+        "source_scene": run_dir / "src" / "scene.py",
+        "source_body": run_dir / "src" / "body.py",
+        "source_action": run_dir / "src" / "action.py",
+        "source_rendering": run_dir / "src" / "rendering.py",
+        "source_main": run_dir / "src" / "main.py",
+    }
+    visual_report = _load_json(paths["visual_evaluation"])
+    contact_sheet_path = None
+    sampled_frames: list[str] = []
+    if isinstance(visual_report, dict):
+        if isinstance(visual_report.get("contact_sheet_path"), str):
+            contact_sheet_path = visual_report["contact_sheet_path"]
+        if isinstance(visual_report.get("sampled_frames"), list):
+            sampled_frames = [str(path) for path in visual_report["sampled_frames"] if isinstance(path, str)]
+
+    index: dict[str, Any] = {
+        "schema_version": 1,
+        "case_workspace": str(run_dir),
+        "paths": {name: str(path) for name, path in paths.items()},
+        "sizes_bytes": {name: _file_size(path) for name, path in paths.items()},
+        "contact_sheet_path": contact_sheet_path,
+        "sampled_frames": sampled_frames,
+        "notes": [
+            "Generated source is also inlined in the critic prompt for source-aware review.",
+            "Large evidence files are referenced by path so the critic can inspect them without exceeding input limits.",
+            "The event log is complete on disk and should be sampled or searched as needed.",
+        ],
+    }
+    index_path = reports_dir / "critic_evidence_index.json"
+    index["index_path"] = str(index_path)
+    index_path.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+    return index
 
 
 def _critic_image_paths(run_dir: Path) -> tuple[Path, ...]:
@@ -217,6 +275,13 @@ def _read_text(path: Path) -> str:
         return f"<missing: {path}>"
     text = path.read_text(encoding="utf-8", errors="replace")
     return text
+
+
+def _file_size(path: Path) -> int | None:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:
