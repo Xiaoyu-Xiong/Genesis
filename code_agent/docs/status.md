@@ -35,9 +35,9 @@ the pipeline structure changes.
 - Writer dispatch supports Planner-selected parallel batches. Roles included in one `spawn_workers` action run
   concurrently. The default `CONFIGS.harness.max_parallel_workers=None` applies no artificial cap, so all requested
   writer subagents can run at once. Dependent work remains serial only when Planner splits it across separate turns.
-- The mesh asset bridge is connected to the Planner action loop through `start_mesh_assets`, `wait_mesh_assets`, and
-  the compatibility `generate_mesh_assets`. It consumes selected `generated_mesh` asset requests, calls the
-  Meshy/repair/texture pipeline, writes `assets/asset_manifest.json`, and records
+- The top-level asset bridge is connected to the Planner action loop through `start_mesh_assets`, `wait_mesh_assets`,
+  and the compatibility `generate_mesh_assets`. It delegates selected `generated_mesh` requests to the mesh episode
+  runner, which calls the Meshy/repair/texture pipeline, writes `assets/asset_manifest.json`, and records
   `reports/asset_generation_report.json`.
 - Mesh asset generation can also run as a background Planner action through `start_mesh_assets`; Planner may dispatch
   non-asset-dependent writer roles while assets are still running, then call `wait_mesh_assets` before any manifest-
@@ -107,8 +107,8 @@ the pipeline structure changes.
 - Planner output is schema-constrained, but strict expansion into per-worker contract files is not yet implemented.
 - Worker write-scope validation currently checks the reported target module and required export; git/workspace diff
   audits and richer static ownership checks are not yet implemented.
-- Mesh-heavy rigid cases now run through the Planner-callable asset bridge, but repeated-run stability and broader
-  asset coverage still need validation.
+- Mesh-heavy rigid cases now run through the Planner-callable asset bridge and mesh episode runner, but repeated-run
+  stability and broader asset coverage still need validation.
 - Codex XML/MJCF generation is not implemented in the main run loop.
 - Generated articulated assets are not yet MuJoCo-import validated.
 - The current repair loop uses critic `recommended_owner` directly.

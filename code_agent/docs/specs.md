@@ -48,9 +48,9 @@ Planner owns the natural-language interpretation step for timing. It must emit `
 In the Planner-led episode runtime, Planner also owns worker wake-up decisions and repair routing. The harness still
 owns execution, validation, sandboxing, artifact collection, and persistence.
 
-- Mesh Asset Bridge owns `start_mesh_assets`, `wait_mesh_assets`, `generate_mesh_assets`,
-  `asset_manifest.schema.json` validation, canonical generated mesh runtime paths, Genesis-ready scale factors,
-  coordinate metadata, and texture paths for code writers.
+- The asset bridge owns Planner-facing `start_mesh_assets`, `wait_mesh_assets`, and `generate_mesh_assets` actions.
+  The mesh episode/manifest modules own `asset_manifest.schema.json` validation inputs, canonical generated mesh runtime
+  paths, Genesis-ready scale factors, coordinate metadata, and texture paths for code writers.
 - Scene owns fixed objects, stage setup, global FEM+IPC defaults, configured simulation dt/substeps, artifact layout,
   and optional camera/light anchors for Rendering to refine.
 - Body owns movable or task-participating actors.

@@ -11,8 +11,9 @@ library.
 Mesh requests are routed to [Mesh Pipeline](mesh.md). Planner writes `asset_requests` with
 `asset_type="generated_mesh"` and then starts or waits on the mesh asset flow according to the dependency state.
 
-The asset bridge normalizes selected requests, calls Meshy generation, runs repair/manifold checks and optional texture
-transfer, and writes:
+The top-level asset bridge is intentionally thin. It keeps the Planner-facing import path stable and delegates concrete
+mesh work to `code_agent/assets/mesh/episode.py`, which normalizes selected requests, calls Meshy generation, runs
+repair/manifold checks and optional texture transfer, and writes:
 
 - `assets/asset_manifest.json`
 - `reports/asset_generation_report.json`
@@ -32,10 +33,10 @@ Scene and Body workers receive the manifest in their prompts. They should use re
 instead of guessing paths or searching the filesystem.
 
 Generated Meshy OBJ assets are treated as provider Y-up unless the manifest says otherwise. Planner asset `scale` and
-`bbox` fields are positive XYZ dimensions in meters, never positions or signed bounds. The bridge converts raw mesh
-bounds into Genesis coordinates, emits Genesis scale factors rather than raw target dimensions, and records
-`file_meshes_are_zup=false` for those assets. Writers must pass both `scale` and `file_meshes_are_zup` through to
-`gs.morphs.Mesh`.
+`bbox` fields are positive XYZ dimensions in meters, never positions or signed bounds. The mesh manifest adapter
+converts raw mesh bounds into Genesis coordinates, emits Genesis scale factors rather than raw target dimensions, and
+records `file_meshes_are_zup=false` for those assets. Writers must pass both `scale` and `file_meshes_are_zup` through
+to `gs.morphs.Mesh`.
 
 When `visual_path` and `texture_path` are present, `runtime_path` remains the strict-manifold simulation/collision mesh
 and `visual_path` points to the seam-aware textured render mesh for the same logical asset. Rigid generated code should

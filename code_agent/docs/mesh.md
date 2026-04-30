@@ -14,6 +14,12 @@ asset layer.
 
 ## Submodules
 
+- `assets/mesh/episode.py`: episode-level mesh asset execution for Planner actions, including progress reports,
+  Meshy API parallelism, local post-processing sequencing, and resume/reuse of prior successful artifacts.
+- `assets/mesh/request_adapter.py`: Planner asset request to Meshy prompt/config conversion, including request type
+  recognition and requested-size parsing.
+- `assets/mesh/manifest.py`: conversion from processed mesh bundles into episode asset manifest entries, including
+  runtime/visual/texture path selection and Genesis scale/orientation metadata.
 - `assets/mesh/workflow/`: Meshy API calls, stage helpers, and summaries.
 - `assets/mesh/repair/`: manifold checks and repair.
 - `assets/mesh/texture/`: UV generation, texture baking, OBJ/MTL rewriting, and validation renders.
@@ -29,11 +35,12 @@ Planner can pass `asset_names` to generate a subset of requests, or leave it nul
 the manifest while assets are still running. `wait_mesh_assets` blocks only when the next useful step requires canonical
 mesh paths. `generate_mesh_assets` remains as a compatibility action that starts and waits in one turn.
 
-The asset bridge splits Meshy work into two phases. Meshy API submission, polling, and asset downloads are parallel by
-default for every selected asset (`CONFIGS.meshy_request.max_parallel_api_requests=None` means no cap within that
-episode). Local processing then runs conservatively with `CONFIGS.meshy_request.max_parallel_local_processing=1`,
-because manifold checks, fTetWild repair, UV parameterization, and texture baking can each allocate large transient
-buffers and concurrent textured mesh post-processing can destabilize WSL. The bridge writes
+The mesh episode runner splits Meshy work into two phases. Meshy API submission, polling, and asset downloads are
+parallel by default for every selected asset (`CONFIGS.meshy_request.max_parallel_api_requests=None` means no cap within
+that episode). Local processing then runs conservatively with
+`CONFIGS.meshy_request.max_parallel_local_processing=1`, because manifold checks, fTetWild repair, UV parameterization,
+and texture baking can each allocate large transient buffers and concurrent textured mesh post-processing can
+destabilize WSL. The runner writes
 `reports/asset_generation_report.json` before starting and updates it after API completions and each locally processed
 asset, so interrupted runs leave a useful progress record.
 
@@ -47,13 +54,13 @@ the later API-key export line, so plain `source ~/.bashrc` from scripts or Codex
 
 ## Integration Contract
 
-Scene and Body workers must not guess mesh output paths. The asset bridge must expose canonical runtime-ready paths
-through `asset_manifest.json`.
+Scene and Body workers must not guess mesh output paths. The mesh episode/manifest layer must expose canonical
+runtime-ready paths through `asset_manifest.json`.
 
 For generated mesh bodies, use repaired mesh paths under `processed/` as runtime geometry. Treat raw textured OBJ files
 as visual or texture sources, not as runtime collision geometry.
 
-Meshy OBJ outputs are provider Y-up in the current pipeline. The bridge records this with
+Meshy OBJ outputs are provider Y-up in the current pipeline. The mesh manifest adapter records this with
 `file_meshes_are_zup=false` and precomputes Genesis scale factors from the requested bounding box after the Y-up to
 Genesis Z-up conversion. Generated code should pass both fields directly into `gs.morphs.Mesh` instead of deriving
 another orientation or scale.

@@ -67,17 +67,6 @@ def load_mesh_asset_summary(mesh_path: str | Path) -> dict[str, Any]:
     return summary
 
 
-def estimate_scaled_bbox_size(
-    bbox_size: list[float] | tuple[float, float, float] | None,
-    scale: float | int | None,
-) -> list[float] | None:
-    if bbox_size is None:
-        return None
-    if not isinstance(scale, int | float) or isinstance(scale, bool):
-        return None
-    return [float(component) * float(scale) for component in bbox_size]
-
-
 def _asset_root_from_mesh_path(mesh_path: Path) -> Path:
     if mesh_path.parent.name in {"downloads", "processed", "textured"}:
         return mesh_path.parent.parent

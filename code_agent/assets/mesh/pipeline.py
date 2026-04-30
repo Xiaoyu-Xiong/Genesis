@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +24,6 @@ from .workflow.steps import (
     run_repair_pipeline,
     run_texture_pipeline,
     select_pipeline_source_mesh,
-    slugify_prompt,
     time_stage,
 )
 
@@ -139,32 +136,6 @@ class DownloadedMeshyAsset:
             "pipeline_source_kind": self.pipeline_source_kind,
             "profile_sec": self.profile_sec,
         }
-
-
-def default_mesh_output_dir(prompt: str, *, root: Path = Path("code_agent/generated_meshes")) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    slug = slugify_prompt(prompt)
-    return root / timestamp / slug
-
-
-def generate_meshy_mesh_from_text(
-    *,
-    prompt: str,
-    api_config: MeshyApiConfig,
-    generation_config: MeshyGenerationConfig,
-    texture_config: MeshyTextureConfig | None = None,
-    repair_config: MeshRepairConfig | None = None,
-) -> TextToMeshBundle:
-    downloaded = download_meshy_mesh_from_text(
-        prompt=prompt,
-        api_config=api_config,
-        generation_config=generation_config,
-        texture_config=texture_config,
-    )
-    return process_downloaded_meshy_mesh(
-        downloaded=downloaded,
-        repair_config=repair_config,
-    )
 
 
 def download_meshy_mesh_from_text(
@@ -352,25 +323,6 @@ def process_downloaded_meshy_mesh(
         manifold=final_manifold_result,
         profile_sec=profile_sec,
     )
-
-
-def parse_extra_payload(value: str | None) -> dict[str, Any]:
-    if value is None:
-        return {}
-    candidate = value.strip()
-    if not candidate:
-        return {}
-    if candidate.startswith("{"):
-        parsed = json.loads(candidate)
-    else:
-        path = Path(candidate)
-        if path.exists():
-            parsed = json.loads(path.read_text(encoding="utf-8"))
-        else:
-            parsed = json.loads(candidate)
-    if not isinstance(parsed, dict):
-        raise ValueError("Extra payload must be a JSON object.")
-    return parsed
 
 
 def _optional_path(value: object) -> Path | None:
