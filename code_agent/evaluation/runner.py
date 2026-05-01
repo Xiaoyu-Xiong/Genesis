@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .codex_critic import run_codex_critic
+from .agent import run_codex_critic
 from .deterministic import DeterministicEvaluationConfig, evaluate_artifacts
 from .visual import evaluate_visual_artifacts
 
@@ -37,7 +37,16 @@ def evaluate_generated_run(
         run_codex_critic(run_dir=run_dir, task=task, artifact_report=artifact_report) if use_codex_critic else None
     )
     codex_passed = codex_report is None or codex_report.get("verdict") == "pass"
-    verdict = "pass" if execution_ok and artifact_report["passed"] and codex_passed else "fail"
+    codex_usage_blocked = bool(
+        isinstance(codex_report, dict)
+        and codex_report.get("verdict") == "inconclusive"
+        and isinstance(codex_report.get("codex_result"), dict)
+        and codex_report["codex_result"].get("error_type") == "codex_usage_limit"
+    )
+    if execution_ok and artifact_report["passed"] and codex_usage_blocked:
+        verdict = "inconclusive"
+    else:
+        verdict = "pass" if execution_ok and artifact_report["passed"] and codex_passed else "fail"
     missing = [
         check["name"]
         for check in artifact_report["checks"]
@@ -53,7 +62,7 @@ def evaluate_generated_run(
 
     report: dict[str, Any] = {
         "verdict": verdict,
-        "confidence": 0.75 if verdict == "pass" else 0.35,
+        "confidence": 0.75 if verdict == "pass" else 0.0 if verdict == "inconclusive" else 0.35,
         "task": task,
         "execution_ok": execution_ok,
         "metric_ok": "metrics.missing" not in failure_classes,

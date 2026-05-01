@@ -20,6 +20,12 @@ SPEC = WorkerSpec(
     mesh assets keep strict-manifold simulation geometry in `runtime_path`; `visual_path` is a seam-aware textured
     render mesh attached through `gs.morphs.Mesh(..., visual_file=entry["visual_path"], ...)`, not an independent
     simulation body.
+    For generated XML/MJCF articulated assets from `assets/asset_manifest.json`, load the canonical XML/MJCF path and
+    expose a stable control contract for action.py: include actuator names, joint names, semantic DOF groups, control
+    handles, and any required sign/axis notes that can be discovered from the manifest or source XML. If actuator or
+    joint discovery must occur after `scene.build()`, expose enough semantic names and helper metadata for action.py to
+    resolve them deterministically, and fail clearly if the requested mechanism cannot be controlled through the
+    XML-designed actuators/DOFs.
     Do not split one generated object into separate simulation and visual mesh entities.
     Keep local GPU validation runs small: 3 to 8 dynamic bodies total.
     Include at least one projectile or mover with nonzero initial velocity for impact/scatter tasks.

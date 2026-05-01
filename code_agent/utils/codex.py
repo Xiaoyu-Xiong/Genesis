@@ -13,6 +13,11 @@ from code_agent.configs import CONFIGS
 CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CODEX_PATH: str | None = None
+USAGE_LIMIT_MARKERS = (
+    "usage limit",
+    "purchase more credits",
+    "try again",
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -31,6 +36,7 @@ class CodexExecRequest:
     codex_bin: str = "codex"
     ask_for_approval: str = CONFIGS.codex.ask_for_approval
     reasoning_effort: str | None = CONFIGS.codex.reasoning_effort
+    service_tier: Literal["fast", "standard"] | None = CONFIGS.codex.service_tier
     timeout_sec: float | None = None
     extra_args: tuple[str, ...] = ()
 
@@ -90,6 +96,10 @@ def build_codex_exec_command(request: CodexExecRequest, *, resolved_codex: str |
         command.extend(["--model", request.model])
     if request.reasoning_effort:
         command.extend(["-c", f'model_reasoning_effort="{request.reasoning_effort}"'])
+    if request.service_tier:
+        command.extend(["-c", f'service_tier="{request.service_tier}"'])
+    if request.service_tier == "fast":
+        command.extend(["-c", "features.fast_mode=true"])
     if request.output_schema_path is not None:
         command.extend(["--output-schema", str(request.output_schema_path)])
     for image_path in request.image_paths:
@@ -175,8 +185,9 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
 
     ended = time.time()
     if exit_code != 0 and error_type is None:
-        error_type = "codex_exec_failed"
-        error_message = f"Codex exited with status {exit_code}"
+        classified_type, classified_message = _classify_codex_failure(jsonl_path=jsonl_path, stderr_path=stderr_path)
+        error_type = classified_type or "codex_exec_failed"
+        error_message = classified_message or f"Codex exited with status {exit_code}"
         if not final_path.exists():
             final_path.write_text(f"{error_type}: {error_message}\n", encoding="utf-8")
 
@@ -263,3 +274,53 @@ def _append_jsonl_error(jsonl_file, role: str, error_type: str, message: str) ->
         "message": message,
     }
     jsonl_file.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+
+def _classify_codex_failure(*, jsonl_path: Path, stderr_path: Path) -> tuple[str | None, str | None]:
+    messages: list[str] = []
+    for path in (jsonl_path, stderr_path):
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            message = _json_event_message(line) or line
+            messages.append(message)
+            lower = message.lower()
+            if all(marker in lower for marker in ("usage limit", "try again")) or any(
+                marker in lower for marker in USAGE_LIMIT_MARKERS[:2]
+            ):
+                return "codex_usage_limit", message
+    combined = "\n".join(messages).lower()
+    if all(marker in combined for marker in ("usage limit", "try again")) or any(
+        marker in combined for marker in USAGE_LIMIT_MARKERS[:2]
+    ):
+        return "codex_usage_limit", _first_nonempty(messages)
+    return None, None
+
+
+def _json_event_message(line: str) -> str | None:
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(event, dict):
+        return None
+    message = event.get("message")
+    if isinstance(message, str) and message.strip():
+        return message.strip()
+    error = event.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    return None
+
+
+def _first_nonempty(messages: list[str]) -> str | None:
+    for message in messages:
+        if message.strip():
+            return message.strip()
+    return None

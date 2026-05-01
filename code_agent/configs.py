@@ -12,6 +12,7 @@ class CodexConfigs:
     worker_model: str = "gpt-5.5"
     critic_model: str = "gpt-5.5"
     reasoning_effort: str = "xhigh"
+    service_tier: Literal["fast", "standard"] | None = "fast"
     planner_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     critic_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     worker_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
@@ -25,6 +26,7 @@ class CodexConfigs:
 class HarnessConfigs:
     """Static harness limits that should usually not be left to generated code."""
 
+    max_parallel_cases: int | None = None
     max_parallel_workers: int | None = None
     max_repair_rounds: int = 12
     execution_timeout_sec: float = 1000.0
@@ -149,6 +151,16 @@ class MeshRepairConfigs:
 
 
 @dataclass(slots=True, frozen=True)
+class XMLAssetConfigs:
+    """Codex MJCF/XML asset generation and validation defaults."""
+
+    max_generation_attempts: int = 3
+    max_parallel_workers: int | None = None
+    preview_res: tuple[int, int] = (512, 512)
+    preview_distance_scale: float = 2.5
+
+
+@dataclass(slots=True, frozen=True)
 class Configs:
     codex: CodexConfigs
     harness: HarnessConfigs
@@ -157,6 +169,7 @@ class Configs:
     critic: CriticConfigs
     meshy_request: MeshyRequestConfigs
     mesh_repair: MeshRepairConfigs
+    xml_asset: XMLAssetConfigs
 
 
 CONFIGS = Configs(
@@ -167,4 +180,5 @@ CONFIGS = Configs(
     critic=CriticConfigs(),
     meshy_request=MeshyRequestConfigs(),
     mesh_repair=MeshRepairConfigs(),
+    xml_asset=XMLAssetConfigs(),
 )

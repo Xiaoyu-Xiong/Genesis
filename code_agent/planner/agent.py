@@ -5,8 +5,14 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-from code_agent.utils.codex import CodexExecRequest, run_codex_exec
 from code_agent.configs import CONFIGS
+from code_agent.utils.codex import CodexExecRequest, run_codex_exec
+from code_agent.utils.general_prompts import (
+    GENERATED_RESULT_QUALITY_GUIDE,
+    PHYSICAL_CAUSALITY_CONTRACT,
+    PLANNER_GENERAL_RULES,
+    SOURCE_AWARE_REPAIR_GUIDE,
+)
 
 
 class EpisodePlanner:
@@ -38,9 +44,42 @@ class EpisodePlanner:
                 "duration_sec": result.duration_sec,
                 "final_message_path": result.final_message_path,
                 "stderr_path": result.stderr_path,
+                "error_type": result.error_type,
+                "error_message": result.error_message,
             }
         )
         if not result.success:
+            if result.error_type == "codex_usage_limit":
+                control = self.session.state.get("control")
+                pending = [
+                    name
+                    for name, active in (control.items() if isinstance(control, dict) else [])
+                    if bool(active)
+                ]
+                blocked = {
+                    "type": "codex_usage_limit",
+                    "message": result.error_message,
+                    "turn": turn,
+                    "output_jsonl_path": result.output_jsonl_path,
+                    "stderr_path": result.stderr_path,
+                    "pending_work": pending,
+                    "latest_artifacts_may_be_stale": bool(pending),
+                }
+                self.session.state["blocked_reason"] = blocked
+                stale_note = (
+                    f" Pending work: {', '.join(pending)}. Latest artifacts may be stale relative to source."
+                    if pending
+                    else ""
+                )
+                return {
+                    "action": "finish",
+                    "rationale": "Planner is blocked by Codex usage limits, not by generated-code execution.",
+                    "verdict": "inconclusive",
+                    "summary": (
+                        "Planner blocked by Codex usage limit; retry after quota resets or credits are available."
+                        f"{stale_note} See {result.output_jsonl_path}."
+                    ),
+                }
             return {
                 "action": "finish",
                 "rationale": f"Planner invocation failed with exit code {result.exit_code}.",
@@ -67,16 +106,7 @@ class EpisodePlanner:
         genesis_context = self.session.genesis_context_prompt()
         return textwrap.dedent(
             f"""
-            You are the Planner Agent for one Genesis code-generation episode.
-            The full repository and current case workspace are available for context. You may inspect files, source,
-            reports, logs, assets, and generated artifacts when deciding the next action. You may run lightweight
-            read-only inspection commands when useful, but do not mutate files or run expensive simulations yourself.
-            Return one JSON action only, matching planner_action.schema.json. The Python harness will execute the action
-            and call you again with updated state.
-            Do not overly compress planning details to save tokens; detailed instructions are preferred when they help
-            downstream workers make correct source-level decisions.
-            Include every schema field in every response. Use null for irrelevant scalar/object fields and [] for
-            irrelevant array fields.
+            {PLANNER_GENERAL_RULES}
 
             Task:
             {self.session.config.task}
@@ -97,6 +127,22 @@ class EpisodePlanner:
               asset_type=`generated_mesh` and set dispatch_graph.wait_for_asset_manifest=true when writers should wait
               for generated mesh paths before writing code. In each asset request, `scale` and `bbox` are positive XYZ
               dimensions in meters only; do not use them for position, lower bounds, centers, or signed extents.
+              For articulated robots, grippers, gates, latches, actuated mechanisms, or any task object that is best
+              represented as one self-contained primitive MJCF body tree with joints and actuators, add an XML/MJCF
+              asset request with asset_type=`generated_xml` or `mjcf`. Describe the required joints, actuator semantics,
+              base behavior, approximate dimensions, and control affordances in purpose/simulation_role. XML/MJCF asset
+              requests are primitive-geom only; do not use them for textured decorative mesh objects.
+              When the plan uses XML/MJCF actuators, make the body/action contracts explicit: body must expose stable
+              actuator names, joint names, DOF groups, or control handles in `actors`, and action must drive those
+              handles with Genesis actuator/DOF/force control APIs after initialization. Do not ask action to create
+              motion for an XML articulated asset by overwriting root pose, qpos, or velocities during the simulation.
+              If the actuator contract is missing, the generated code should fail clearly so critic can assign a
+              source-aware body/action repair.
+              Across all task types, direct state writes such as setting entity pose, root qpos, DOF position, or DOF
+              velocity are initialization-only. After stepping begins, motion should be expressed through physically
+              meaningful controls: actuator commands, DOF controllers, motors, external forces/torques, or initial
+              velocities set before the first step.
+              {PHYSICAL_CAUSALITY_CONTRACT}
               Any object whose requested appearance depends on texture, patterned surface detail, decorative material
               variation, image-like surface content, or nontrivial visual ornamentation must be represented by a
               Meshy-generated asset request, even when the task does not explicitly say "mesh". Do not ask writers to
@@ -118,23 +164,28 @@ class EpisodePlanner:
               turn. Use it only when you deliberately want to serialize asset generation before all writers.
             - wait_mesh_assets: wait for a previously started background mesh asset job to finish and validate
               assets/asset_manifest.json.
+            - start_xml_assets: start Planner-requested XML/MJCF assets in the background and return immediately. Use
+              `asset_names` to restrict generation to specific XML/MJCF asset request names, or null/[] to generate all
+              XML/MJCF requests. XML asset workers are parallel-capable by default, and this asset job may overlap with
+              mesh asset jobs and code-writing workers that do not need the manifest yet.
+            - generate_xml_assets: compatibility action that starts XML/MJCF assets and waits for completion in the same
+              turn. Use it only when you deliberately want to serialize XML generation before all writers.
+            - wait_xml_assets: wait for a previously started background XML/MJCF asset job to finish and merge its
+              partial manifest into assets/asset_manifest.json.
             - spawn_workers: start one or more generation workers. Use `roles` from scene, body, action, rendering.
               Roles in a single spawn_workers action are dispatched concurrently by the harness with no default cap
               beyond the number of requested roles. Prefer maximal safe parallelism: after required assets are ready,
               usually spawn every missing writer role together, because each worker can read planner_output,
               asset_manifest, repository code, and the case workspace. Split dependent work across multiple Planner
               turns only when you can identify a concrete dependency that would make parallel writing likely incorrect.
-              If mesh assets are still running, you may still spawn writer roles whose module_contracts do not list
-              asset_dependencies or asset_manifest input dependencies. Wait for mesh assets only before spawning roles
-              that need canonical generated mesh paths.
+              If mesh or XML assets are still running, you may still spawn writer roles whose module_contracts do not
+              list asset_dependencies or asset_manifest input dependencies. Wait for the relevant asset jobs only before
+              spawning roles that need canonical generated mesh or XML paths.
             - run_integrator: wire generated modules into src/main.py.
             - run_execution: run generated code through the harness on the local GPU.
             - run_critic: ask the read-only critic to evaluate execution artifacts.
             - request_repair: send `repair_brief` to the owning worker when critic/execution evidence shows a fix.
-              Repair briefs must be detailed, source-aware, and actionable: compare the original text prompt, the latest
-              execution/visual output, metrics/event logs, and relevant generated source. Tell the target worker exactly
-              what behavior is wrong, what evidence proves it, which module boundary owns it, and what a convincing fix
-              should accomplish. Avoid vague instructions like "improve the trajectory" when concrete evidence exists.
+              {SOURCE_AWARE_REPAIR_GUIDE}
             - run_python: optional controlled `uv run python ...` command. Use `python_args` and cwd repo/case.
             - run_pytest: optional controlled `uv run pytest ...` command. Use `pytest_args` and cwd repo/case.
             - finish: end the episode with verdict pass, fail, or inconclusive.
@@ -142,10 +193,13 @@ class EpisodePlanner:
             Action policy:
             - If `planner_output_path` is null, choose write_plan.
             - If planner_output dispatch_graph.wait_for_asset_manifest is true and assets.status is not_requested,
-              prefer start_mesh_assets first. On the following turn, spawn any missing writer roles that do not require
-              the asset manifest while the asset job continues in the background.
+              start all required asset families. Use start_mesh_assets for generated_mesh requests and start_xml_assets
+              for generated_xml/mjcf requests. You can start one family in one Planner turn and the other in the next
+              while the first continues in the background.
+            - If one asset family is already running but another required family is absent from assets.jobs, start the
+              absent family before waiting, so independent mesh and XML work can overlap.
             - If assets.status is running, choose spawn_workers for non-asset-dependent missing roles, or
-              wait_mesh_assets when the next useful writer/integration step requires the manifest.
+              wait_mesh_assets / wait_xml_assets when the next useful writer/integration step requires the manifest.
             - If any generation worker is missing or failed, choose spawn_workers or request_repair for the relevant
               owner.
             - To improve speed, prefer grouping all currently missing writer roles into one spawn_workers action.
@@ -155,10 +209,11 @@ class EpisodePlanner:
             - Only choose run_execution after integration is current.
             - Only choose run_critic after execution is current.
             - Only choose finish pass after the latest critic verdict is pass.
+            - If the latest critic verdict is inconclusive because `codex_result.error_type` is `codex_usage_limit`,
+              choose finish with verdict inconclusive; do not request code repair from a missing/blocked critic review.
             - If critic fails and repair budget remains, choose request_repair for the most relevant generation owner.
             - Prefer run_execution over generic run_python for generated simulations.
-            - The final simulation should not merely satisfy numeric proxies. It should match the input text prompt and
-              look physically and visually reasonable, coherent, and logically staged.
+            - {GENERATED_RESULT_QUALITY_GUIDE}
 
             Current episode state:
             {state_text}
@@ -179,27 +234,37 @@ class EpisodePlanner:
         if state.get("planner_output_path") is None:
             guide.append("planner_output missing: next valid action is write_plan.")
             return guide
+        usage_blockers = self._codex_usage_limit_blockers()
+        if usage_blockers:
+            guide.append(
+                "Codex usage limit blocked one or more agent calls: "
+                f"{', '.join(usage_blockers)}. Choose finish with verdict inconclusive; do not route this as a code "
+                "repair failure."
+            )
+            return guide
         planner_output = self.session.current_planner_output()
         if self._planner_waits_for_asset_manifest(planner_output) and not self.session.asset_manifest_ready():
             assets = state.get("assets") if isinstance(state.get("assets"), dict) else {}
             asset_status = assets.get("status")
             if asset_status == "not_requested":
                 guide.append(
-                    "planner_output requests generated assets: prefer start_mesh_assets, then use later turns for "
-                    "non-asset-dependent writers while the background asset job runs."
+                    "planner_output requests generated assets: start the required mesh and/or XML asset jobs, then use "
+                    "later turns for non-asset-dependent writers while background asset jobs run."
                 )
                 return guide
             if asset_status == "running":
                 guide.append(
-                    "mesh assets are running in the background: spawn non-asset-dependent missing writers now, or "
-                    "choose wait_mesh_assets before a manifest-dependent role/integration."
+                    "asset jobs are running in the background: spawn non-asset-dependent missing writers now, or "
+                    "choose wait_mesh_assets / wait_xml_assets before a manifest-dependent role/integration."
                 )
             elif asset_status == "failed":
-                guide.append("mesh asset generation failed: restart assets, repair the plan, or finish fail.")
+                guide.append(
+                    "asset generation failed: restart the failed asset family, repair the plan, or finish fail."
+                )
                 return guide
             else:
                 guide.append(
-                    "asset manifest is not ready: choose start_mesh_assets or wait_mesh_assets as appropriate."
+                    "asset manifest is not ready: choose start/wait actions for the required mesh or XML asset family."
                 )
                 return guide
         missing = [role for role, data in state["workers"].items() if not data.get("ok")]
@@ -224,6 +289,24 @@ class EpisodePlanner:
             elif isinstance(critic, dict):
                 guide.append("critic did not pass: repair if budget remains, otherwise finish fail.")
         return guide
+
+    def _codex_usage_limit_blockers(self) -> list[str]:
+        blockers: list[str] = []
+        critic = self.session.state.get("critic")
+        if isinstance(critic, dict):
+            codex_report = critic.get("codex_critic_report")
+            codex_result = codex_report.get("codex_result") if isinstance(codex_report, dict) else None
+            if isinstance(codex_result, dict) and codex_result.get("error_type") == "codex_usage_limit":
+                blockers.append("critic")
+        workers = self.session.state.get("workers")
+        if isinstance(workers, dict):
+            for role, data in workers.items():
+                if not isinstance(data, dict) or data.get("ok"):
+                    continue
+                codex = data.get("codex")
+                if isinstance(codex, dict) and codex.get("error_type") == "codex_usage_limit":
+                    blockers.append(f"{role}_worker")
+        return blockers
 
     def _load_json(self, path: Path) -> dict[str, Any] | None:
         if not path.exists():

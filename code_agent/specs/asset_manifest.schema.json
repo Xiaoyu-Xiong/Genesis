@@ -22,6 +22,11 @@
           "bbox": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
           "file_meshes_are_zup": { "type": ["boolean", "null"] },
           "texture_path": { "type": ["string", "null"] },
+          "joints": { "type": "array", "items": { "type": "object" } },
+          "actuators": { "type": "array", "items": { "type": "object" } },
+          "control_interface": { "type": "object" },
+          "base": { "type": "object" },
+          "validation": { "type": "object" },
           "simulation_role": { "type": "string", "minLength": 1 },
           "status": { "type": "string", "enum": ["ready", "pending", "failed"] },
           "notes": { "type": "array", "items": { "type": "string" } }

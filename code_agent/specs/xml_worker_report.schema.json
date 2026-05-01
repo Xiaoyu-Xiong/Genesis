@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "xml_worker_report.schema.json",
+  "title": "XML Worker Report",
+  "type": "object",
+  "required": [
+    "status",
+    "xml_path",
+    "changed_files",
+    "summary",
+    "actuator_contract",
+    "assumptions",
+    "unresolved_risks"
+  ],
+  "properties": {
+    "status": { "type": "string", "enum": ["completed", "failed"] },
+    "xml_path": { "type": "string", "minLength": 1 },
+    "changed_files": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "summary": { "type": "string" },
+    "actuator_contract": {
+      "type": "object",
+      "required": ["base", "actuators", "suggested_commands", "coupling", "notes"],
+      "properties": {
+        "base": { "type": "string" },
+        "actuators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type", "target", "command_range", "neutral_command", "schedule_hint"],
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "type": "string" },
+              "target": { "type": "string" },
+              "command_range": { "type": "string" },
+              "neutral_command": { "type": "string" },
+              "schedule_hint": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "suggested_commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "schedule"],
+            "properties": {
+              "name": { "type": "string" },
+              "schedule": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "coupling": { "type": "array", "items": { "type": "string" } },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "unresolved_risks": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

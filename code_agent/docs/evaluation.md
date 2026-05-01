@@ -25,12 +25,14 @@ generated mesh texture metadata from `assets/asset_manifest.json`, and reports w
 underrepresented in sampled frames. It does not make semantic pass/fail decisions by itself; it gives the critic visual
 evidence to combine with task metrics and execution logs.
 
-`codex_critic.py` calls a read-only Codex Critic with task text, deterministic results, complete generated source,
+`agent.py` calls a read-only Codex Critic with task text, deterministic results, complete generated source,
 Genesis context, planner output, timing contracts, asset manifests, execution reports, metrics, event logs, render
 stats, stdout/stderr, and `visual_evaluation.json`. When a contact sheet exists, it is attached to the Codex call as an
 image so the critic can inspect rendered appearance directly. The critic is instructed to compare the prompt, source,
 numeric evidence, and visual result, then return detailed source-aware repair guidance in JSON matching
-`critic_report.schema.json`.
+`critic_report.schema.json`. It also audits physical causality: passive task objects should not reach goals through
+hidden state writes, proxy constraints, or outcome-directed external forces that bypass modeled contacts, joints,
+actuators, or explicitly requested physical effects.
 
 `runner.py` is the active top-level evaluator. It combines artifact checks with the single-pass Codex Critic and writes
 the merged `reports/critic_report.json`.

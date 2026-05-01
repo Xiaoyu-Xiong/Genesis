@@ -6,13 +6,16 @@ Guide for AI coding assistants working with the Genesis physics simulation codeb
 
 These rules are mandatory for this repository.
 
-- **Use the repository uv environment to run python script.** Do not dircectly run `python`, `python -m ...`, `pytest`, but run `uv run ...`, `uv sync`, `uv pip ...`, `uv pytest` instead.
+- **Use the repository uv environment to run python script.** Do not dircectly run `python`, `python -m ...`, `pytest`, but run `uv run ...`, `uv sync`, `uv pip ...` instead.
 - **Be careful when mutating `.venv`.** Do not recreate or bulk repair the environment unless the user asks for environment work.
 - **Use the host shell for git.** Use ordinary `git status`, `git diff`, `git checkout`, `git commit`, `git restore`, and similar repository operations.
 - **If execution context is unclear, stop and clarify before running commands that mutate environments or launch expensive simulations.**
 - **Use the dedicated local GPU by default.** Run GPU-capable Genesis simulation, rendering, profiling, optimization, tests, and examples directly on the local GPU. Use CPU only when the user asks, the GPU is unavailable, or the task is explicitly CPU-only.
 - **For commands which require OpenAI API request**, the API response will take time based on OpenAI server loads, so do not assume immediate execution.
 - **When the user asks for a command, prefer the shortest correct command.** Do not wrap a simple rerun in an unnecessarily complex script.
+- **Put memory caps on long WSL runs.** Launch overnight suites, mesh/XML asset batches, and other memory-heavy background
+  jobs under a process-tree memory limit. Prefer `systemd-run --user` with `MemoryMax=...`; fall back to `ulimit` only
+  when cgroups are unavailable. Record the run root, log path, service/unit or PID, and memory cap in the response.
 
 ## Quick Start
 

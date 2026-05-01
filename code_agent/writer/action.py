@@ -29,6 +29,16 @@ SPEC = WorkerSpec(
 	    - for physical realism, direct state writes such as setting positions, qpos, dof positions, or dof velocities are
 	      initialization-only; after stepping begins, express motion through physics controls such as external forces/torques
 	      on rigid links or actuator force commands, not by teleporting bodies or overwriting velocities mid-simulation
+	    - do not use external forces as hidden object-following proxies for passive task objects; a manipulated object
+	      should move through modeled contacts, joints, actuators, collisions, friction, or an explicitly requested
+	      physical effect, and all force paths must be logged in metrics
+	    - for XML/MJCF articulated assets, drive the mechanism through the actuator, DOF, or control handles exposed by
+	      `body.py` in `actors`; do not bypass the XML-designed actuators by overwriting root poses or link velocities
+	      during the simulation. If the required actuator/DOF groups cannot be found, fail with a clear error and write
+	      diagnostics naming the missing control contract so the planner/critic can route a repair to body or action.
+	    - when controlling XML/MJCF robots or mechanisms, log the chosen control path, actuator names when available,
+	      commanded values, and key pose/heading/target-distance samples so the critic can compare the source, metrics,
+	      video, and original text prompt.
     - step the scene exactly `steps` times
     - if `render_state` is not None, call its capture hook before stepping for the initial frame and after each
       `scene.step()`; `render_state` is normally a dict, so use

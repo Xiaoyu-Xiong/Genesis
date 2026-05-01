@@ -9,7 +9,9 @@ from code_agent.utils.codex import CodexExecRequest, run_codex_exec
 from code_agent.configs import CONFIGS
 
 from . import action, body, rendering, scene
-from .common import COMMON_RULES, RIGID_API_GUIDE, WorkerDispatchResult, WorkerRole, WorkerSpec
+from code_agent.utils.general_prompts import RIGID_API_GUIDE, WORKER_COMMON_RULES
+
+from .common import WorkerDispatchResult, WorkerRole, WorkerSpec
 
 WORKERS: dict[WorkerRole, WorkerSpec] = {
     "scene": scene.SPEC,
@@ -241,7 +243,7 @@ def _worker_prompt(
     mode = "repair the existing module source" if repair_context else "author the module source"
     return textwrap.dedent(
         f"""
-        {COMMON_RULES}
+        {WORKER_COMMON_RULES}
 
         Task prompt:
         {task}

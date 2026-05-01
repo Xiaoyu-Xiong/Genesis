@@ -17,6 +17,7 @@ def _cmd_run_suite(args: argparse.Namespace) -> None:
         timeout_sec=args.timeout_sec,
         render=args.render,
         repair_rounds=args.repair_rounds,
+        max_parallel_cases=args.max_parallel_cases,
         steps=args.steps,
         duration_sec=args.duration_sec,
         render_fps=args.render_fps,
@@ -42,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_suite_parser.add_argument("--cpu", action="store_const", const="cpu", dest="backend")
     run_suite_parser.add_argument("--gpu", action="store_const", const="gpu", dest="backend")
     run_suite_parser.add_argument("--max-cases", type=int, default=None)
+    run_suite_parser.add_argument("--max-parallel-cases", type=int, default=CONFIGS.harness.max_parallel_cases)
     run_suite_parser.add_argument("--timeout-sec", type=float, default=CONFIGS.harness.execution_timeout_sec)
     run_suite_parser.add_argument("--render", action="store_true", default=True)
     run_suite_parser.add_argument("--no-render", action="store_false", dest="render")

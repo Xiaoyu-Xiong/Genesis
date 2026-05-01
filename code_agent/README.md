@@ -8,9 +8,10 @@ Rendering writers in `workspace-write` sandbox mode. Planner chooses structured 
 case: writing the plan, waking generation workers, requesting integration and local GPU execution, asking Critic for
 evaluation, sending focused repair briefs, and finishing the episode.
 
-Mesh prompts can now be routed through Planner-callable mesh asset actions, including a background mode that can
-overlap with non-asset-dependent code writers. Articulated MJCF/XML prompts still use primitive stand-ins until the XML
-worker is added.
+Mesh prompts and articulated MJCF/XML prompts can now be routed through Planner-callable asset actions, including
+background modes that can overlap with non-asset-dependent code writers. XML asset workers generate primitive MJCF
+body trees with MuJoCo import validation, preview rendering, and actuator response checks before their manifest entries
+are merged into the case asset manifest.
 
 Implementation status is tracked in [Implementation Status](docs/status.md). That document distinguishes completed
 infrastructure, partially validated agent-written generation, and unimplemented asset work.
@@ -37,8 +38,10 @@ Python/Pytest commands, or finishing the episode. Shell execution, GPU use, sche
 artifact collection, and retry limits stay inside the Python harness.
 
 When Planner emits `start_mesh_assets`, the harness starts the Meshy/repair/texture asset flow in the background for
-selected `generated_mesh` asset requests. Planner can dispatch writer roles that do not depend on the manifest while
-assets are still running, then call `wait_mesh_assets` before manifest-dependent writers or integration.
+selected `generated_mesh` asset requests. When Planner emits `start_xml_assets`, the harness starts parallel MJCF/XML
+asset workers for selected articulated asset requests. Planner can dispatch writer roles that do not depend on the
+manifest while assets are still running, then call the relevant wait action before manifest-dependent writers or
+integration.
 
 When Planner includes multiple independent writer roles in one `spawn_workers` action, the harness dispatches those
 writers concurrently. By default there is no artificial writer cap, so Planner can spawn all Scene, Body, Action, and
@@ -56,6 +59,7 @@ splitting it across multiple turns only when a concrete dependency requires it.
 | `specs/` | JSON schemas for planner, worker, critic, execution, and repair reports. See [Specs](docs/specs.md). |
 | `assets/` | Asset routing and asset implementations. See [Assets](docs/assets.md). |
 | `assets/mesh/` | Meshy / repair / texture asset implementation. See [Mesh Pipeline](docs/mesh.md). |
+| `assets/xml/` | MJCF/XML articulated asset generation, validation, preview, and actuator checks. |
 | `scripts/` | Suite scripts and prompt cases. See [Scripts and Suites](docs/scripts.md). |
 | `workspaces/` | Generated run workspaces. See [Workspaces](docs/workspaces.md). |
 | `docs/` | Centralized documentation. |

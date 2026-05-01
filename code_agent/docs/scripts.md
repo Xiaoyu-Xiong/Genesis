@@ -19,10 +19,16 @@ Useful options forwarded to `code_agent.cli run-suite`:
 
 - `--gpu` or `--cpu`: choose backend. GPU is the default target for validation; CPU is for explicit CPU checks.
 - `--max-cases N`: run a subset while iterating.
+- `--max-parallel-cases N`: cap how many suite cases may run at once. The default comes from
+  `CONFIGS.harness.max_parallel_cases`; `None` means all selected cases may run concurrently.
 - `--render` or `--no-render`: enable or skip generated render output.
 - `--duration-sec N`, `--steps N`, `--render-fps N`: override inferred simulation duration, step count, or video fps.
 - `--repair-rounds N`: allow owner-routed Codex writer repair attempts after critic failure.
 - `--timeout-sec N`: timeout for each generated simulation.
+
+Suite cases run concurrently by default because each case owns an independent workspace. The local Genesis execution
+stage is still serialized by a per-user lock in `utils/execution.py`, so only one generated simulation process runs at a
+time even while Planner, asset, writer, and critic work overlaps across cases.
 
 The planner and all four writer modules run for every suite case.
 Suite startup also fetches or reuses the selected official Genesis documentation context for FEM+IPC scenes. To build

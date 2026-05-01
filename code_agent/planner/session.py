@@ -86,6 +86,7 @@ class PlannerSession:
                 "skipped_asset_names": [],
                 "num_assets": 0,
                 "schema_errors": [],
+                "jobs": {},
             },
             "integration": None,
             "execution": None,
@@ -140,6 +141,8 @@ class PlannerSession:
                     "duration_sec": item.codex_result.duration_sec,
                     "final_message_path": item.codex_result.final_message_path,
                     "stderr_path": item.codex_result.stderr_path,
+                    "error_type": item.codex_result.error_type,
+                    "error_message": item.codex_result.error_message,
                 },
             }
             self.append_jsonl(
@@ -190,12 +193,14 @@ class PlannerSession:
     def build_summary(self) -> dict[str, Any]:
         critic = self.state.get("critic") if isinstance(self.state.get("critic"), dict) else {}
         execution = self.state.get("execution") if isinstance(self.state.get("execution"), dict) else {}
-        verdict = "pass" if self.state["status"] == "pass" else "fail"
-        if critic and critic.get("verdict") != "pass":
+        status = str(self.state.get("status") or "fail")
+        verdict = status if status in {"pass", "fail", "inconclusive"} else "fail"
+        if verdict == "pass" and critic and critic.get("verdict") != "pass":
             verdict = "fail"
         return {
             "case_id": self.config.case_id,
             "verdict": verdict,
+            "status": status,
             "execution_ok": bool(execution.get("ok")),
             "recommended_owner": critic.get("recommended_owner", "none") if isinstance(critic, dict) else "none",
             "repair_attempts": self.state["budgets"]["repair_attempts"],
@@ -206,6 +211,7 @@ class PlannerSession:
             "planner_actions_path": str(self.action_history_path),
             "dispatch_history_path": str(self.dispatch_history_path),
             "stop_reason": self.state.get("stop_reason"),
+            "blocked_reason": self.state.get("blocked_reason"),
         }
 
     def current_planner_output(self) -> dict[str, Any] | None:

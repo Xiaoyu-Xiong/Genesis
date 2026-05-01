@@ -5,8 +5,15 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-from code_agent.utils.codex import CodexExecRequest, run_codex_exec
 from code_agent.configs import CONFIGS
+from code_agent.utils.codex import CodexExecRequest, run_codex_exec
+from code_agent.utils.general_prompts import (
+    CRITIC_DECISION_GUIDE,
+    CRITIC_EVIDENCE_READING_GUIDE,
+    CRITIC_GENERAL_RULES,
+    CRITIC_VISUAL_EVIDENCE_GUIDE,
+    SOURCE_AWARE_REPAIR_GUIDE,
+)
 
 
 def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any]) -> dict[str, Any]:
@@ -30,11 +37,17 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
     )
     report = _load_json(Path(result.final_message_path))
     if report is None:
+        if result.error_type == "codex_usage_limit":
+            observations = ["Codex critic was blocked by usage limits and did not evaluate the run."]
+            failure_modes = ["critic.codex_usage_limit"]
+        else:
+            observations = ["Codex critic did not return parseable JSON."]
+            failure_modes = ["critic.parse_failed"]
         report = {
             "verdict": "inconclusive",
             "score": 0.0,
-            "observations": ["Codex critic did not return parseable JSON."],
-            "failure_modes": ["critic.parse_failed"],
+            "observations": observations,
+            "failure_modes": failure_modes,
             "recommended_owner": "none",
             "repair_summary": None,
             "evidence": {"metrics": [], "frames": [], "video": None, "event_logs": []},
@@ -45,6 +58,8 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
         "duration_sec": result.duration_sec,
         "final_message_path": result.final_message_path,
         "stderr_path": result.stderr_path,
+        "error_type": result.error_type,
+        "error_message": result.error_message,
     }
     (reports_dir / "codex_critic_report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report
@@ -67,10 +82,7 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
     stderr = _read_text(run_dir / "reports" / "stderr.txt")
     return textwrap.dedent(
         f"""
-        You are the single-pass Codex Critic for a generated Genesis rigid or rigid-mesh simulation.
-        The full repository and current case workspace are available for read-only context. You may inspect additional
-        source, contracts, reports, logs, assets, and artifacts with read-only commands if needed. Do not edit files.
-        Read the supplied evidence, inspect the attached render/contact-sheet image when present, and return JSON only.
+        {CRITIC_GENERAL_RULES}
 
         Original task prompt:
         {task}
@@ -81,9 +93,7 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         Evidence index:
         {json.dumps(evidence_index, indent=2)}
 
-        The complete evidence files listed above are available on disk. Read the full files directly when needed,
-        especially the event log and full artifact report. The event log may be too large to inline in one Codex turn;
-        do not treat non-inlined evidence as missing.
+        {CRITIC_EVIDENCE_READING_GUIDE}
 
         Execution report:
         {execution_report}
@@ -127,21 +137,12 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         stderr:
         {stderr}
 
-        Decide whether the run passes as a generated rigid simulation result. Compare the original task prompt,
-        generated source, execution artifacts, metrics, event logs, render stats, and visual evidence. Prioritize
-        execution correctness, required artifacts, plausible movement, physically coherent staging, and whether the
-        visual evidence matches the task. The output should not merely satisfy numeric proxies; while staying faithful
-        to the text prompt, it should look reasonable, logical, and visually coherent.
+        {CRITIC_DECISION_GUIDE}
 
-        When sampled frame paths, contact sheets, texture summaries, or texture-presence warnings are available, use
-        them as review evidence alongside numeric metrics instead of relying only on event logs. If meshes or textures
-        are involved, check whether orientation, scale, material binding, and rendered texture appearance are consistent
-        with the source and manifest.
+        {CRITIC_VISUAL_EVIDENCE_GUIDE}
 
-        If repair is needed, make `repair_summary` detailed, source-aware, and directly actionable. Name the owner
-        module, the concrete behavior that is wrong, the evidence proving it, the likely source-level cause, and the
-        changes that should be made. Avoid vague advice; give enough detail that the next Planner request can instruct
-        the responsible worker precisely. Do not compress important source-level feedback just to keep the answer short.
+        If repair is needed, use `repair_summary` for this guidance:
+        {SOURCE_AWARE_REPAIR_GUIDE}
 
         Return JSON matching critic_report.schema.json. `recommended_owner` must be one of:
         planner, scene, body, action, rendering, integrator, execution, none.
