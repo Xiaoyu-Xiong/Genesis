@@ -53,6 +53,15 @@ class DeformableConfigs:
     friction: float = 0.3
     tet_resolution: int = 2
     genesis_precision: str = "32"
+    fem_density_default: float = 1000.0
+    fem_density_min: float = 300.0
+    fem_density_max: float = 3000.0
+    fem_youngs_modulus_default: float = 1e5
+    fem_youngs_modulus_min: float = 1e4
+    fem_youngs_modulus_max: float = 5e6
+    fem_poisson_ratio_default: float = 0.35
+    fem_poisson_ratio_min: float = 0.0
+    fem_poisson_ratio_max: float = 0.45
     fem_model: Literal["linear", "stable_neohookean", "linear_corotated"] = "stable_neohookean"
     fem_hydroelastic_modulus: float = 1e7
     fem_friction_mu: float = 0.3

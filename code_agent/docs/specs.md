@@ -50,7 +50,9 @@ Planner owns the natural-language interpretation step for timing. It must emit `
 
 `contracts/deformable_config.json` records the effective `CONFIGS.deformable` values for each case. Deformable
 generation is gated by `enabled`; generated code receives this contract as `deformable_cfg` and must read FEM, IPC, tet,
-and precision defaults from it instead of hardcoding them.
+precision, and FEM material-range defaults from it instead of hardcoding them. FEM elastic bodies should still make
+task-specific material choices: generated `gs.materials.FEM.Elastic(...)` calls must pass explicit `E`, `nu`, and `rho`
+values selected from the config ranges, using the config defaults when no special material is needed.
 
 In the Planner-led episode runtime, Planner also owns worker wake-up decisions and repair routing. The harness still
 owns execution, validation, sandboxing, artifact collection, and persistence.

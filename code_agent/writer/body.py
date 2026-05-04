@@ -41,8 +41,10 @@ SPEC = WorkerSpec(
     FEM primitives must start without penetrations or self-intersections. For rotated boxes, use a conservative
     vertical half extent such as `0.5 * side * sqrt(3)` plus positive clearance/gap when computing stack heights; do
     not place a tilted bottom cube at exactly `side / 2` above the floor.
-    Use `gs.materials.FEM.Elastic(...)` for soft primitives when `deformable_cfg["enabled"]` is true. Read FEM model,
-    hydroelastic modulus, friction, contact resistance, and hessian-invariant settings from deformable_cfg.
+    Use `gs.materials.FEM.Elastic(...)` for soft primitives when `deformable_cfg["enabled"]` is true. Follow the common
+    FEM material selection guide: pass explicit `E`, `nu`, and `rho`, keep them within the config ranges, and use config
+    defaults when the task does not justify a special material. Read FEM model, hydroelastic modulus, friction, contact
+    resistance, and hessian-invariant settings from deformable_cfg.
     Use morph `tet_resolution=deformable_cfg["tet_resolution"]` for FEM Box/Sphere/Cylinder primitives.
     If deformable_cfg is disabled and the task fundamentally requires soft-body deformation, fail clearly instead of
     producing rigid substitutes.

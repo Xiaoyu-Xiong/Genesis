@@ -8,6 +8,7 @@ from typing import Any
 from code_agent.configs import CONFIGS
 from code_agent.utils.codex import CodexExecRequest, run_codex_exec
 from code_agent.utils.general_prompts import (
+    FEM_MATERIAL_SELECTION_GUIDE,
     GENERATED_RESULT_QUALITY_GUIDE,
     PHYSICAL_CAUSALITY_CONTRACT,
     PLANNER_GENERAL_RULES,
@@ -125,8 +126,11 @@ class EpisodePlanner:
               deformation behavior, choose finish with verdict inconclusive. Do not write a rigid-body substitute.
             - If enabled is true and the task requires soft-body behavior, use FEM+IPC only. Do not use MPM, PBD, SPH,
               cloth-only shortcuts, or rigid-only substitutes.
-            - All FEM, IPC, tet, and precision defaults must come from `deformable_cfg` /
+            - All FEM, IPC, tet, precision, and FEM material-range defaults must come from `deformable_cfg` /
               contracts/deformable_config.json in generated code.
+            - FEM elastic material choices must include explicit `E`, `nu`, and `rho` values selected from the
+              `deformable_cfg` ranges and defaults. Use this material guide when instructing body/action/critic work:
+              {FEM_MATERIAL_SELECTION_GUIDE}
 
             Available actions:
             - write_plan: create planner_output for this case. Include a complete `planner_output` object matching

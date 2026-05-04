@@ -265,7 +265,8 @@ def _worker_prompt(
           worker report instead of writing a rigid-body substitute.
         - If deformable_config["enabled"] is true and the planner asks for soft-body behavior, use FEM+IPC only. Do not
           use MPM, PBD, SPH, or other non-rigid solvers.
-        - All FEM, IPC, tet, and precision defaults must come from deformable_config, not hardcoded local constants.
+        - All FEM, IPC, tet, precision, and FEM material-range defaults must come from deformable_config, not hardcoded
+          local constants. FEM elastic bodies must still pass explicit task-appropriate `E`, `nu`, and `rho` values.
 
         Genesis documentation and local-code context:
         {genesis_context}

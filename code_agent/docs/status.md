@@ -24,6 +24,9 @@ the pipeline structure changes.
 - `CONFIGS.deformable.enabled` gates FEM+IPC generation and defaults to false. CLI `--enable-deformable` /
   `--disable-deformable` override it per suite run; the effective config is written to
   `contracts/deformable_config.json` and injected into Planner, Writer, Critic, and generated entrypoint context.
+  FEM material choices now expose `E`, `nu`, and `rho` defaults/ranges through config while keeping the material
+  interpretation guide in shared prompts. Generated FEM elastic materials should pass explicit `E`, `nu`, and `rho`
+  rather than relying on Genesis defaults.
 - `planner/session.py` implements the Planner-led episode state machine. `planner/actions.py` is the thin action
   router, with concrete handlers split under `planner/action_handlers/`. `utils/suite.py` starts one `PlannerSession`
   per case instead of hard-coding the full generation/execution/critic sequence itself.

@@ -113,6 +113,9 @@ camera rendering. Low wall-clock frame throughput or multi-minute execution is n
 broken only when it times out, crashes, stops making progress for a long period, produces invalid physics artifacts
 such as NaNs/explosions, or the evaluator/critic identifies a concrete source or output problem.
 
+For FEM elastic bodies, generated code should pass explicit `E`, `nu`, and `rho` values. The numeric defaults and ranges
+come from `CONFIGS.deformable`, while the shared prompt guide explains their physical meaning for agent-side selection.
+
 When deformable generation is disabled, Planner should stop soft-body tasks as inconclusive instead of generating a
 rigid-body substitute.
 

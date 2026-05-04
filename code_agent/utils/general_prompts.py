@@ -83,15 +83,33 @@ non-inlined evidence as missing.
 """.strip()
 
 
-DEFORMABLE_CRITIC_GUIDE = """
+FEM_MATERIAL_SELECTION_GUIDE = """
+FEM material selection guide:
+- Generated FEM elastic materials must pass explicit `E`, `nu`, and `rho` to `gs.materials.FEM.Elastic(...)`.
+- Choose material values for the task within the ranges exposed in `deformable_cfg`: `fem_youngs_modulus_min/max`,
+  `fem_poisson_ratio_min/max`, and `fem_density_min/max`. If the task does not justify a special material, use
+  `fem_youngs_modulus_default`, `fem_poisson_ratio_default`, and `fem_density_default`.
+- `E` is Young's modulus in Pascals. `1e4` to `5e4` is very soft jelly or gel with large visible deformation; `5e4` to
+  `5e5` is soft rubber with clear wobble and compression; `5e5` to `5e6` is firmer elastomer or soft plastic with smaller
+  deformation.
+- `nu` is Poisson ratio. Around `0.2` is more compressible or foam-like; `0.35` is a balanced soft-solid default; `0.45`
+  is nearly incompressible, volume-preserving rubber and can be numerically harder.
+- `rho` is density in kg/m^3. Around `300` is light foam-like material; `1000` is a water-like gel/rubber default; `3000`
+  is a heavy dense soft solid.
+""".strip()
+
+
+DEFORMABLE_CRITIC_GUIDE = f"""
 When deformable_config["enabled"] is false, generated source must not use FEM materials, FEM entities, IPCCouplerOptions,
 or deformation-only APIs. If the prompt fundamentally requires soft-body or deformation behavior while deformable is
 disabled, the correct Planner result is inconclusive rather than a rigid-body substitute.
 When deformable_config["enabled"] is true and the prompt asks for soft-body behavior, require real FEM+IPC evidence:
-FEM material/entity construction, config-driven FEM/IPC/tet parameters, plausible deformation metrics, and video or
-event evidence of wobble, compression, collapse, bending, or other requested deformation. Fail rigid-only substitutes,
-MPM/PBD/SPH implementations, hardcoded FEM/IPC defaults, or mid-simulation FEM position/velocity writes that fake the
-deformation.
+FEM material/entity construction, explicit `E`, `nu`, and `rho` material choices within the deformable config bounds,
+config-driven FEM/IPC/tet parameters, plausible deformation metrics, and video or event evidence of wobble, compression,
+collapse, bending, or other requested deformation. Fail rigid-only substitutes, MPM/PBD/SPH implementations, missing
+`E`/`nu`/`rho` on FEM elastic materials, hardcoded FEM/IPC defaults, or mid-simulation FEM position/velocity writes that
+fake the deformation.
+{FEM_MATERIAL_SELECTION_GUIDE}
 """.strip()
 
 
@@ -161,7 +179,7 @@ Genesis rigid primitive API constraints:
 """.strip()
 
 
-FEM_IPC_API_GUIDE = """
+FEM_IPC_API_GUIDE = f"""
 Genesis FEM+IPC primitive API constraints:
 - FEM+IPC is allowed only when `deformable_cfg["enabled"]` is true. If it is false, do not instantiate FEM
   materials/entities or `gs.options.IPCCouplerOptions`.
@@ -183,7 +201,8 @@ Genesis FEM+IPC primitive API constraints:
 - Place FEM primitives with strictly positive initial clearance. For rotated boxes, compute a conservative half extent
   (`0.5 * side * sqrt(3)` is acceptable) and stack centers with a positive gap; do not rely on unrotated `side / 2`
   when the body has nonzero Euler rotation.
-- FEM material should use `gs.materials.FEM.Elastic(...)` with `model=deformable_cfg["fem_model"]`,
+{FEM_MATERIAL_SELECTION_GUIDE}
+- The same FEM material should also use `model=deformable_cfg["fem_model"]`,
   `hydroelastic_modulus=deformable_cfg["fem_hydroelastic_modulus"]`,
   `friction_mu=deformable_cfg["fem_friction_mu"]`,
   `contact_resistance=deformable_cfg["fem_contact_resistance"]`, and
