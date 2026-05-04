@@ -74,6 +74,7 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
     generated_source = _generated_source_bundle(run_dir)
     planner_output = _read_text(run_dir / "contracts" / "planner_output.json")
     timing_contract = _read_text(run_dir / "contracts" / "timing.json")
+    deformable_config = _read_text(run_dir / "contracts" / "deformable_config.json")
     asset_manifest = _read_text(run_dir / "assets" / "asset_manifest.json")
     genesis_context = _genesis_context_pointer(run_dir)
     summary = _read_text(run_dir / "artifacts" / "summary.json")
@@ -115,6 +116,9 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
 
         Timing contract:
         {timing_contract}
+
+        Deformable capability/config contract:
+        {deformable_config}
 
         Asset manifest:
         {asset_manifest}
@@ -168,6 +172,7 @@ def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, An
         "run_result": run_dir / "artifacts" / "run_result.json",
         "planner_output": run_dir / "contracts" / "planner_output.json",
         "timing_contract": run_dir / "contracts" / "timing.json",
+        "deformable_config": run_dir / "contracts" / "deformable_config.json",
         "asset_manifest": run_dir / "assets" / "asset_manifest.json",
         "stdout": reports_dir / "stdout.txt",
         "stderr": reports_dir / "stderr.txt",

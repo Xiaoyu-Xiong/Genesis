@@ -69,7 +69,7 @@ fields.
 
 
 CRITIC_GENERAL_RULES = """
-You are the single-pass Codex Critic for a generated Genesis rigid or rigid-mesh simulation.
+You are the single-pass Codex Critic for a generated Genesis rigid, rigid-mesh, or FEM+IPC deformable simulation.
 The full repository and current case workspace are available for read-only context. You may inspect additional source,
 contracts, reports, logs, assets, and artifacts with read-only commands if needed. Do not edit files.
 Read the supplied evidence, inspect the attached render/contact-sheet image when present, and return JSON only.
@@ -83,13 +83,26 @@ non-inlined evidence as missing.
 """.strip()
 
 
+DEFORMABLE_CRITIC_GUIDE = """
+When deformable_config["enabled"] is false, generated source must not use FEM materials, FEM entities, IPCCouplerOptions,
+or deformation-only APIs. If the prompt fundamentally requires soft-body or deformation behavior while deformable is
+disabled, the correct Planner result is inconclusive rather than a rigid-body substitute.
+When deformable_config["enabled"] is true and the prompt asks for soft-body behavior, require real FEM+IPC evidence:
+FEM material/entity construction, config-driven FEM/IPC/tet parameters, plausible deformation metrics, and video or
+event evidence of wobble, compression, collapse, bending, or other requested deformation. Fail rigid-only substitutes,
+MPM/PBD/SPH implementations, hardcoded FEM/IPC defaults, or mid-simulation FEM position/velocity writes that fake the
+deformation.
+""".strip()
+
+
 CRITIC_DECISION_GUIDE = f"""
-Decide whether the run passes as a generated rigid simulation result. Compare the original task prompt, generated
+Decide whether the run passes as a generated Genesis simulation result. Compare the original task prompt, generated
 source, execution artifacts, metrics, event logs, render stats, and visual evidence. Prioritize execution correctness,
 required artifacts, plausible movement, physically coherent staging, and whether the visual evidence matches the task.
 {GENERATED_RESULT_QUALITY_GUIDE}
 {PHYSICAL_CONTROL_METHOD_GUIDE}
 {PHYSICAL_CAUSALITY_CRITIC_GUIDE}
+{DEFORMABLE_CRITIC_GUIDE}
 """.strip()
 
 
@@ -145,4 +158,44 @@ Genesis rigid primitive API constraints:
   `texture_path` is evidence metadata for the transferred base-color image and texture preview checks.
   Use the manifest's logical names, scale factors, coordinate metadata, texture paths, and simulation roles instead of
   guessing mesh paths, sizes, or orientation.
+""".strip()
+
+
+FEM_IPC_API_GUIDE = """
+Genesis FEM+IPC primitive API constraints:
+- FEM+IPC is allowed only when `deformable_cfg["enabled"]` is true. If it is false, do not instantiate FEM
+  materials/entities or `gs.options.IPCCouplerOptions`.
+- Deformable scenes must stay in the FEM+IPC family. Do not use MPM, PBD, SPH, cloth-specific shortcuts, or rigid-only
+  substitutes for soft-body prompts.
+- `create_scene` receives `deformable_cfg`. Use `gs.init(..., precision=deformable_cfg["genesis_precision"], ...)`.
+- Scene setup should pass runtime timing through `gs.options.SimOptions(dt=sim_dt, substeps=sim_substeps, gravity=...)`.
+- When FEM bodies should collide through IPC, construct `gs.Scene(..., coupler_options=gs.options.IPCCouplerOptions(...))`.
+  Map IPC values from `deformable_cfg`: `ipc_newton_*`, `ipc_n_linesearch_iterations`,
+  `ipc_linesearch_report_energy`, `ipc_linear_system_*`, `ipc_contact_*`, `ipc_collision_detection_method`,
+  `ipc_cfl_enable`, `ipc_sanity_check_enable`, `ipc_constraint_strength_translation`,
+  `ipc_constraint_strength_rotation`, `ipc_enable_rigid_ground_contact`, `ipc_enable_rigid_rigid_contact`,
+  `ipc_two_way_coupling`, `ipc_enable_rigid_dofs_sync`, and `ipc_free_base_driven_by_ipc`.
+- Use exactly one IPC ground/support surface for the same contact region. If scene.py creates a floor, store it as
+  `scene.genesis_static_floor`; body.py should reference that entity in actors instead of adding another coincident
+  plane. Duplicate overlapping IPC planes are invalid initial geometry.
+- For primitive soft bodies, use morphs such as `gs.morphs.Box(...)`, `gs.morphs.Sphere(...)`, and
+  `gs.morphs.Cylinder(...)` with `tet_resolution=deformable_cfg["tet_resolution"]`.
+- Place FEM primitives with strictly positive initial clearance. For rotated boxes, compute a conservative half extent
+  (`0.5 * side * sqrt(3)` is acceptable) and stack centers with a positive gap; do not rely on unrotated `side / 2`
+  when the body has nonzero Euler rotation.
+- FEM material should use `gs.materials.FEM.Elastic(...)` with `model=deformable_cfg["fem_model"]`,
+  `hydroelastic_modulus=deformable_cfg["fem_hydroelastic_modulus"]`,
+  `friction_mu=deformable_cfg["fem_friction_mu"]`,
+  `contact_resistance=deformable_cfg["fem_contact_resistance"]`, and
+  `hessian_invariant=deformable_cfg["fem_hessian_invariant"]`.
+- Rigid participants in IPC scenes should use `gs.materials.Rigid(...)` with appropriate IPC coupling fields such as
+  `coup_type` and `coup_friction`; use deformable config defaults for coupling friction when relevant.
+- FEM initialization may call `entity.set_velocity(...)` before stepping. After stepping starts, do not fake soft-body
+  behavior with repeated `set_position` or `set_velocity` writes. Use gravity, contact, IPC coupling, explicit vertex
+  constraints, actuator-driven mechanisms, or clearly requested physical force fields.
+- FEM state sampling can use `entity.get_state()`; convert `state.pos`/`state.vel` tensors to CPU/numpy/lists before
+  writing JSON. Event logs and metrics should include COM, bbox/height, spread, and a simple deformation proxy for
+  soft-body tasks.
+- `entity.get_state()` for FEM bodies can be expensive. Sample FEM vertex state sparsely for metrics/evidence, not on
+  every physics step by default.
 """.strip()

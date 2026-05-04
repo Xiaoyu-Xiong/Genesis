@@ -21,6 +21,7 @@ def _cmd_run_suite(args: argparse.Namespace) -> None:
         steps=args.steps,
         duration_sec=args.duration_sec,
         render_fps=args.render_fps,
+        deformable_enabled=args.deformable_enabled,
     )
     summary_path = args.out_dir / "summary.json"
     print(f"Done. {summary['num_passed']}/{summary['num_cases']} cases passed. Summary: {summary_path}")
@@ -51,6 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_suite_parser.add_argument("--duration-sec", type=float, default=None)
     run_suite_parser.add_argument("--render-fps", type=int, default=None)
     run_suite_parser.add_argument("--repair-rounds", type=int, default=CONFIGS.harness.max_repair_rounds)
+    deformable_group = run_suite_parser.add_mutually_exclusive_group()
+    deformable_group.add_argument("--enable-deformable", action="store_true", dest="deformable_enabled", default=None)
+    deformable_group.add_argument("--disable-deformable", action="store_false", dest="deformable_enabled")
     run_suite_parser.set_defaults(func=_cmd_run_suite)
 
     context_parser = sub.add_parser("build-genesis-context", help="Fetch/cache Genesis docs context for subagents.")

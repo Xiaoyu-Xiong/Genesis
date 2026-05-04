@@ -14,6 +14,9 @@ SPEC = WorkerSpec(
     - create `out_dir`
 	    - apply actor initial velocities when appropriate before the first simulation step, while keeping fixed/static props
 	      stable
+	    - for FEM actors, an `initial_velocity` with three numbers should be applied with `entity.set_velocity(...)` before
+	      the first step only; do not call `set_position` or `set_velocity` repeatedly during the simulation to fake
+	      deformation
 	    - when multiple actors expose `initial_velocity`, use each value only for its own actor; do not choose a projectile
 	      launch velocity by scanning unrelated static props, since static actors often carry explicit zero velocities
 	    - identify projectile actors from stable identity fields such as `name`, `logical_name`, `actor_name`, or direct dict
@@ -47,6 +50,13 @@ SPEC = WorkerSpec(
       `action.py`
     - sample actor positions into `event_log.json` with shape
       `{"steps": int, "samples": [{"step": int, "actors": {"name": [x,y,z]}}]}`
+    - for FEM/deformable actors, sample `entity.get_state().pos` when available and record center of mass, bbox min/max,
+      height, lateral spread, and a simple deformation proxy into both `event_log.json` samples and `metrics.json`
+    - FEM state reads can be expensive; do not call `get_state()` for every FEM actor on every simulation step unless the
+      Planner explicitly asks for dense telemetry. Prefer sparse metric samples at the first step, final step, render
+      capture steps, and/or a fixed interval such as every 0.25-0.5s; still call `scene.step()` for every physics step.
+    - for soft stacks such as jelly_cube_stack, metrics should include collapse/tilt evidence such as initial/final
+      stack height, max lateral spread, final top cube height, and whether the stack visibly changed shape
     - write `metrics.json`, `summary.json`, and `run_result.json`
     - mark `metrics["success"]` true when execution completes
     Rendering setup, Genesis camera creation, frame saving, and video composition are owned by `rendering.py`.

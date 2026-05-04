@@ -25,6 +25,8 @@ Useful options forwarded to `code_agent.cli run-suite`:
 - `--duration-sec N`, `--steps N`, `--render-fps N`: override inferred simulation duration, step count, or video fps.
 - `--repair-rounds N`: allow owner-routed Codex writer repair attempts after critic failure.
 - `--timeout-sec N`: timeout for each generated simulation.
+- `--enable-deformable` or `--disable-deformable`: override `CONFIGS.deformable.enabled`. Deformable generation is
+  disabled by default and must be explicitly enabled for FEM+IPC primitive work.
 
 Suite cases run concurrently by default because each case owns an independent workspace. The local Genesis execution
 stage is still serialized by a per-user lock in `utils/execution.py`, so only one generated simulation process runs at a
@@ -98,6 +100,21 @@ Cases:
 
 The active non-rigid target for new code-agent work is FEM+IPC. Other Genesis non-rigid families are not included in
 the context pack unless they are explicitly reintroduced later.
+
+Run deformable primitive cases with deformable generation explicitly enabled, for example:
+
+```bash
+bash code_agent/scripts/deformable_primitives/run.sh \
+  --enable-deformable --gpu --render --max-cases 1
+```
+
+FEM+IPC runs are expected to be much slower than rigid-only cases, especially with stacked soft bodies and Genesis
+camera rendering. Low wall-clock frame throughput or multi-minute execution is not by itself a failure. Treat a run as
+broken only when it times out, crashes, stops making progress for a long period, produces invalid physics artifacts
+such as NaNs/explosions, or the evaluator/critic identifies a concrete source or output problem.
+
+When deformable generation is disabled, Planner should stop soft-body tasks as inconclusive instead of generating a
+rigid-body substitute.
 
 ### `scripts/deformable_mesh/`
 

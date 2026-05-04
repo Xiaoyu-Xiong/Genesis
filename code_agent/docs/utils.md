@@ -18,13 +18,14 @@
   artifact arguments to `src/main.py`. Local Genesis simulation subprocesses are serialized with a thread lock plus a
   per-user `/tmp` file lock so parallel cases do not contend for the GPU/renderer during execution.
 - `suite.py`: reads `case_id|prompt` files, creates case workspaces, starts `PlannerSession`, and writes suite summary.
-  It also builds the suite-level Genesis FEM+IPC context pack before cases start. Selected cases run concurrently by
+  It also builds the suite-level Genesis FEM+IPC context pack before cases start and records the effective
+  deformable-generation gate from `CONFIGS.deformable.enabled` or CLI override. Selected cases run concurrently by
   default; set `CONFIGS.harness.max_parallel_cases` or CLI `--max-parallel-cases` to cap them.
 - `timing.py`: resolves Planner `execution_plan` values and explicit CLI overrides into steps, duration, fps, and target
   video frames.
 - `integrator.py`: writes the stable `src/main.py` entrypoint that imports generated Scene, Body, Action, and Rendering
   modules. The entrypoint carries `CONFIGS.runtime` defaults into generated code for simulation dt, substeps, render
-  cadence, fps, and camera resolution.
+  cadence, fps, and camera resolution, and passes the per-case `deformable_cfg` contract into Scene and Body.
 
 ## Boundaries
 

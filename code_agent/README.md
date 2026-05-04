@@ -82,3 +82,10 @@ bash code_agent/scripts/rigid_primitives/run.sh \
 
 The planner is always part of the run. Suite timing comes from the planner's structured `execution_plan`; override it
 with `--duration-sec`, `--steps`, or `--render-fps` only when a case needs explicit timing.
+
+Deformable FEM+IPC generation is disabled by default. Enable it explicitly for deformable primitive iteration:
+
+```bash
+bash code_agent/scripts/deformable_primitives/run.sh \
+  --enable-deformable --gpu --render --max-cases 1
+```

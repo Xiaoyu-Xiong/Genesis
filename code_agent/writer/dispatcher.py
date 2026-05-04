@@ -9,7 +9,7 @@ from code_agent.utils.codex import CodexExecRequest, run_codex_exec
 from code_agent.configs import CONFIGS
 
 from . import action, body, rendering, scene
-from code_agent.utils.general_prompts import RIGID_API_GUIDE, WORKER_COMMON_RULES
+from code_agent.utils.general_prompts import FEM_IPC_API_GUIDE, RIGID_API_GUIDE, WORKER_COMMON_RULES
 
 from .common import WorkerDispatchResult, WorkerRole, WorkerSpec
 
@@ -24,13 +24,13 @@ PLACEHOLDER_MODULES: dict[WorkerRole, str] = {
     "scene": '''from __future__ import annotations
 
 
-def create_scene(backend: str, *, sim_dt: float, sim_substeps: int):
+def create_scene(backend: str, *, sim_dt: float, sim_substeps: int, deformable_cfg: dict):
     raise NotImplementedError("scene worker did not replace this placeholder")
 ''',
     "body": '''from __future__ import annotations
 
 
-def create_bodies(scene, task: str):
+def create_bodies(scene, task: str, *, deformable_cfg: dict):
     raise NotImplementedError("body worker did not replace this placeholder")
 ''',
     "action": '''from __future__ import annotations
@@ -190,6 +190,7 @@ def _run_worker(
         task=task,
         planner_output=planner_output,
         asset_manifest=_load_asset_manifest(case_dir),
+        deformable_config=_load_deformable_config(case_dir),
         genesis_context=_load_genesis_context(case_dir),
         spec=spec,
         repair_context=repair_context,
@@ -236,6 +237,7 @@ def _worker_prompt(
     task: str,
     planner_output: dict[str, object],
     asset_manifest: dict[str, object],
+    deformable_config: dict[str, object],
     genesis_context: str,
     spec: WorkerSpec,
     repair_context: str | None,
@@ -253,6 +255,17 @@ def _worker_prompt(
 
         Asset manifest:
         {json.dumps(asset_manifest, indent=2)}
+
+        Effective deformable capability/config:
+        {json.dumps(deformable_config, indent=2)}
+
+        Deformable generation policy:
+        - If deformable_config["enabled"] is false, do not create FEM materials, FEM entities, IPCCouplerOptions, or
+          deformable behavior. If the assigned task fundamentally requires soft-body deformation, fail clearly in your
+          worker report instead of writing a rigid-body substitute.
+        - If deformable_config["enabled"] is true and the planner asks for soft-body behavior, use FEM+IPC only. Do not
+          use MPM, PBD, SPH, or other non-rigid solvers.
+        - All FEM, IPC, tet, and precision defaults must come from deformable_config, not hardcoded local constants.
 
         Genesis documentation and local-code context:
         {genesis_context}
@@ -274,6 +287,8 @@ def _worker_prompt(
         Required export: `{spec.required_export}`
 
         {RIGID_API_GUIDE}
+
+        {FEM_IPC_API_GUIDE}
 
         Role-specific instructions:
         {textwrap.dedent(spec.prompt_body).strip()}
@@ -309,6 +324,17 @@ def _load_asset_manifest(case_dir: Path) -> dict[str, object]:
     except json.JSONDecodeError:
         return {"assets": [], "assumptions": [], "unresolved_risks": [f"Invalid asset manifest JSON: {path}"]}
     return payload if isinstance(payload, dict) else {"assets": [], "assumptions": [], "unresolved_risks": []}
+
+
+def _load_deformable_config(case_dir: Path) -> dict[str, object]:
+    path = case_dir / "contracts" / "deformable_config.json"
+    if not path.exists():
+        return {"enabled": False, "unresolved_risks": [f"Missing deformable config contract: {path}"]}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {"enabled": False, "unresolved_risks": [f"Invalid deformable config JSON: {path}"]}
+    return payload if isinstance(payload, dict) else {"enabled": False, "unresolved_risks": []}
 
 
 def _load_genesis_context(case_dir: Path) -> str:

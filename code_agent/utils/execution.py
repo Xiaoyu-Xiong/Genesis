@@ -84,6 +84,9 @@ def run_generated_simulation(
         extra_args.extend(("--duration-sec", str(float(duration_sec))))
     if target_video_frames is not None:
         extra_args.extend(("--target-video-frames", str(int(target_video_frames))))
+    deformable_config_path = run_dir / "contracts" / "deformable_config.json"
+    if deformable_config_path.exists():
+        extra_args.extend(("--deformable-config", str(deformable_config_path.relative_to(run_dir))))
     extra_args.append(render_arg)
     with _exclusive_genesis_execution_lock() as lock_info:
         raw_report = run_local(

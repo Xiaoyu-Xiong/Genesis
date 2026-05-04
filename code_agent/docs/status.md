@@ -21,6 +21,9 @@ the pipeline structure changes.
 - `context/genesis.py` builds a suite-level Genesis context pack from selected official documentation and local source
   anchors. Its active non-rigid scope is FEM+IPC only; rigid, articulated, mesh, texture, and rendering context is kept
   only where it supports FEM+IPC scenes. Agent prompts receive compact pointers to the pack and read details on demand.
+- `CONFIGS.deformable.enabled` gates FEM+IPC generation and defaults to false. CLI `--enable-deformable` /
+  `--disable-deformable` override it per suite run; the effective config is written to
+  `contracts/deformable_config.json` and injected into Planner, Writer, Critic, and generated entrypoint context.
 - `planner/session.py` implements the Planner-led episode state machine. `planner/actions.py` is the thin action
   router, with concrete handlers split under `planner/action_handlers/`. `utils/suite.py` starts one `PlannerSession`
   per case instead of hard-coding the full generation/execution/critic sequence itself.
@@ -70,8 +73,8 @@ the pipeline structure changes.
 - The current worker protocol is direct-edit based: Codex workers edit only their assigned generated module and return
   structured report metadata.
 - `utils/integrator.py` writes the stable `src/main.py` that imports and wires Scene, Body, Action, and
-  Rendering modules. It passes configured simulation dt/substeps and render cadence/resolution defaults into the
-  generated module interfaces.
+  Rendering modules. It passes configured simulation dt/substeps, render cadence/resolution defaults, and the effective
+  deformable config into the generated module interfaces.
 - `utils/timing.py` consumes the planner's structured `execution_plan` plus explicit CLI overrides. It does
   not parse task text itself.
 - Local GPU execution is routed through `utils/execution.py` and `utils/local_execution.py`. Generated Genesis code is
@@ -122,6 +125,9 @@ the pipeline structure changes.
   non-interactive guard in `~/.bashrc`, so Codex or script-launched non-interactive shells can miss it even when an
   interactive terminal sees it. Mesh suite commands should export or load the key in the same command environment
   without logging the secret value.
+- FEM+IPC execution is inherently slow compared with rigid-only runs. Long wall-clock runtime and low rendered-frame
+  throughput are expected for soft-body stacks and should not be treated as generated-code failure unless paired with a
+  timeout, crash, stalled progress, invalid physics artifacts, or explicit evaluator/critic evidence.
 
 ## Not Implemented Yet
 
@@ -139,6 +145,8 @@ the pipeline structure changes.
 - Retry budgets are still primarily CLI/session parameters, not the full policy from `configs.py`.
 - One rigid primitive case has been validated end-to-end through Genesis execution and semantic critic acceptance on the
   dedicated GPU. Broader suite coverage, repeated-run stability, and FEM+IPC/asset-heavy cases are not yet validated.
+  The first deformable target is primitive FEM+IPC generation behind `--enable-deformable`, starting with
+  `jelly_cube_stack`.
 
 ## Current Structural Next Step
 

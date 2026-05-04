@@ -32,7 +32,9 @@ image so the critic can inspect rendered appearance directly. The critic is inst
 numeric evidence, and visual result, then return detailed source-aware repair guidance in JSON matching
 `critic_report.schema.json`. It also audits physical causality: passive task objects should not reach goals through
 hidden state writes, proxy constraints, or outcome-directed external forces that bypass modeled contacts, joints,
-actuators, or explicitly requested physical effects.
+actuators, or explicitly requested physical effects. For FEM+IPC primitive work, it also reads
+`contracts/deformable_config.json` and checks whether deformable usage matches the enabled gate, whether FEM/IPC/tet
+defaults are config-driven, and whether metrics/video evidence show real soft-body deformation.
 
 `runner.py` is the active top-level evaluator. It combines artifact checks with the single-pass Codex Critic and writes
 the merged `reports/critic_report.json`.

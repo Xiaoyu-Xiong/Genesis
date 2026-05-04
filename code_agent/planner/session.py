@@ -11,6 +11,7 @@ try:
 except ImportError:  # pragma: no cover - the uv environment normally has jsonschema.
     Draft202012Validator = None  # type: ignore[assignment]
 
+from code_agent.configs import deformable_config_dict
 from code_agent.io_utils import dump_json
 from code_agent.utils.timing import TimingPlan, resolve_timing
 from code_agent.planner.actions import EpisodeActionExecutor, WORKER_ROLES
@@ -30,6 +31,7 @@ class PlannerSessionConfig:
     steps: int | None = None
     duration_sec: float | None = None
     render_fps: int | None = None
+    deformable_enabled: bool = False
     max_planner_turns: int | None = None
 
 
@@ -43,11 +45,13 @@ class PlannerSession:
         self.reports_dir = self.case_dir / "reports"
         self.logs_dir = self.case_dir / "logs"
         self.command_dir = self.reports_dir / "planner_commands"
+        self.deformable_config_path = self.contracts_dir / "deformable_config.json"
         self.action_history_path = self.reports_dir / "planner_actions.jsonl"
         self.dispatch_history_path = self.reports_dir / "dispatch_history.jsonl"
         self.state_path = self.reports_dir / "episode_state.json"
         self.summary_path = self.case_dir / "summary.json"
         self.timing: TimingPlan | None = None
+        self.deformable_config = deformable_config_dict(enabled=config.deformable_enabled)
         max_turns = config.max_planner_turns or max(12, 7 + config.repair_rounds * 5)
         self.state: dict[str, Any] = {
             "schema_version": 1,
@@ -57,6 +61,11 @@ class PlannerSession:
             "turn_index": 0,
             "planner_output_path": None,
             "timing": None,
+            "capabilities": {
+                "deformable_enabled": config.deformable_enabled,
+                "deformable_scope": "FEM+IPC only when enabled; MPM/PBD/SPH remain out of scope.",
+                "deformable_config_path": str(self.deformable_config_path),
+            },
             "control": {
                 "needs_integration": False,
                 "needs_execution": False,
@@ -124,9 +133,13 @@ class PlannerSession:
     def _ensure_dirs(self) -> None:
         for path in (self.contracts_dir, self.reports_dir, self.logs_dir, self.command_dir):
             path.mkdir(parents=True, exist_ok=True)
+        self.write_deformable_config_contract()
         for path in (self.action_history_path, self.dispatch_history_path):
             if path.exists():
                 path.unlink()
+
+    def write_deformable_config_contract(self) -> None:
+        dump_json(self.deformable_config, self.deformable_config_path)
 
     def record_worker_results(self, results: list[WorkerDispatchResult]) -> None:
         for item in results:
@@ -212,6 +225,8 @@ class PlannerSession:
             "dispatch_history_path": str(self.dispatch_history_path),
             "stop_reason": self.state.get("stop_reason"),
             "blocked_reason": self.state.get("blocked_reason"),
+            "deformable_enabled": self.config.deformable_enabled,
+            "deformable_config_path": str(self.deformable_config_path),
         }
 
     def current_planner_output(self) -> dict[str, Any] | None:
@@ -304,7 +319,9 @@ class PlannerSession:
                 f"- Machine-readable context JSON: {context_json}",
                 f"- Cached official docs directory: {docs_dir or '<see context JSON>'}",
                 f"- Selected official-doc catalog: {catalog_path or '<see context JSON>'}",
-                "- Active non-rigid scope: FEM+IPC only.",
+                f"- Deformable generation enabled: {self.config.deformable_enabled}.",
+                f"- Effective deformable config: {self.deformable_config_path}",
+                "- Active non-rigid scope when enabled: FEM+IPC only.",
                 "- Rigid bodies, articulated MJCF/URDF robots, generated meshes, textures, and rendering are in scope "
                 "only as FEM+IPC support or as explicitly requested rigid/mesh scenes.",
                 "- Prefer local Genesis source and examples over online docs if they disagree.",

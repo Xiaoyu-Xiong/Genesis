@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Literal
 
 
@@ -49,6 +49,7 @@ class RuntimeConfigs:
 class DeformableConfigs:
     """FEM + IPC deformable defaults for generated simulations."""
 
+    enabled: bool = False
     friction: float = 0.3
     tet_resolution: int = 2
     genesis_precision: str = "32"
@@ -182,3 +183,12 @@ CONFIGS = Configs(
     mesh_repair=MeshRepairConfigs(),
     xml_asset=XMLAssetConfigs(),
 )
+
+
+def deformable_config_dict(*, enabled: bool | None = None) -> dict[str, object]:
+    """Return the effective deformable config exposed to Planner and generated code."""
+
+    data = asdict(CONFIGS.deformable)
+    if enabled is not None:
+        data["enabled"] = bool(enabled)
+    return data

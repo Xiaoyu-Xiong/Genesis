@@ -48,6 +48,10 @@ These schemas should describe episode state and tool requests only. They should 
 Planner owns the natural-language interpretation step for timing. It must emit `execution_plan.duration_sec`,
 `step_budget`, `render_fps`, and `render_budget`; the harness only validates and forwards those numeric values.
 
+`contracts/deformable_config.json` records the effective `CONFIGS.deformable` values for each case. Deformable
+generation is gated by `enabled`; generated code receives this contract as `deformable_cfg` and must read FEM, IPC, tet,
+and precision defaults from it instead of hardcoding them.
+
 In the Planner-led episode runtime, Planner also owns worker wake-up decisions and repair routing. The harness still
 owns execution, validation, sandboxing, artifact collection, and persistence.
 
@@ -58,12 +62,19 @@ owns execution, validation, sandboxing, artifact collection, and persistence.
   `assets/asset_manifest.json`.
 - Scene owns fixed objects, stage setup, global FEM+IPC defaults, configured simulation dt/substeps, artifact layout,
   and optional camera/light anchors for Rendering to refine.
-- Body owns movable or task-participating actors.
+- Body owns movable or task-participating rigid actors and, when deformable is enabled, FEM primitive actors.
 - Action owns behavior, controls, metrics, event logging, and final score.
 - Rendering owns camera placement, lighting refinements, configured capture cadence/resolution, render output paths, and
   visual validation hints. It may consume Scene/Body/Action exports but should not change task controls or body
   definitions.
 - Integrator owns final runnable project wiring.
+
+Current generated module interfaces are:
+
+- `scene.create_scene(backend, *, sim_dt, sim_substeps, deformable_cfg)`
+- `body.create_bodies(scene, task, *, deformable_cfg)`
+- `action.run_actions(scene, actors, *, out_dir, steps, render_state=None)`
+- `rendering.setup_rendering(...)`, `capture_frame`, and `finalize_rendering`
 
 ## Rendering Worker Output Requirements
 

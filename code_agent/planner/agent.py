@@ -102,6 +102,8 @@ class EpisodePlanner:
         render_every_n_steps = CONFIGS.runtime.render_every_n_steps
         render_fps = CONFIGS.runtime.render_fps
         render_res = CONFIGS.runtime.render_res
+        deformable_enabled = self.session.config.deformable_enabled
+        deformable_config_text = json.dumps(self.session.deformable_config, indent=2)
         state_text = json.dumps(self._prompt_state(), indent=2)
         genesis_context = self.session.genesis_context_prompt()
         return textwrap.dedent(
@@ -113,6 +115,18 @@ class EpisodePlanner:
 
             Genesis documentation and local-code context:
             {genesis_context}
+
+            Deformable capability:
+            - Enabled: {deformable_enabled}
+            - Effective config contract: {self.session.deformable_config_path}
+            - Effective config values:
+            {deformable_config_text}
+            - If enabled is false and the task fundamentally requires soft-body, jelly, elastic, FEM, IPC, or visible
+              deformation behavior, choose finish with verdict inconclusive. Do not write a rigid-body substitute.
+            - If enabled is true and the task requires soft-body behavior, use FEM+IPC only. Do not use MPM, PBD, SPH,
+              cloth-only shortcuts, or rigid-only substitutes.
+            - All FEM, IPC, tet, and precision defaults must come from `deformable_cfg` /
+              contracts/deformable_config.json in generated code.
 
             Available actions:
             - write_plan: create planner_output for this case. Include a complete `planner_output` object matching
@@ -152,7 +166,8 @@ class EpisodePlanner:
               contain enough shared layout/entity/timing detail; add serial edges only for concrete dependencies that
               truly require seeing another worker's generated source or report.
               Module contract required exports must match the current implementation interfaces exactly:
-              scene=`create_scene(backend, *, sim_dt, sim_substeps)`; body=`create_bodies(scene, task)`;
+              scene=`create_scene(backend, *, sim_dt, sim_substeps, deformable_cfg)`;
+              body=`create_bodies(scene, task, *, deformable_cfg)`;
               action=`run_actions(scene, actors, *, out_dir, steps, render_state=None)`;
               rendering=`setup_rendering(..., render_every_n_steps, render_res)`, `capture_frame`, and
               `finalize_rendering`.

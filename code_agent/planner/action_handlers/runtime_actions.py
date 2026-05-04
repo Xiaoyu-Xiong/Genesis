@@ -33,6 +33,7 @@ class RuntimeActionHandler:
             }
         planner_output_path = self.session.contracts_dir / "planner_output.json"
         dump_json(planner_output, planner_output_path)
+        self.session.write_deformable_config_contract()
         timing = resolve_timing(
             planner_output=planner_output,
             steps=self.session.config.steps,
@@ -88,6 +89,7 @@ class RuntimeActionHandler:
             default_render_fps=timing.render_fps,
             default_duration_sec=timing.duration_sec,
             default_target_video_frames=timing.target_video_frames,
+            deformable_cfg=self.session.deformable_config,
         )
         self.session.state["integration"] = {
             "ok": True,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from code_agent.configs import CONFIGS
+from code_agent.configs import CONFIGS, deformable_config_dict
 
 
 def write_main(
@@ -14,6 +14,7 @@ def write_main(
     default_render_fps: int,
     default_duration_sec: float | None,
     default_target_video_frames: int | None,
+    deformable_cfg: dict[str, object] | None = None,
 ) -> Path:
     """Write the stable entrypoint that wires Codex-authored modules together."""
 
@@ -25,10 +26,12 @@ def write_main(
     default_sim_substeps = CONFIGS.runtime.sim_substeps
     default_render_every_n_steps = CONFIGS.runtime.render_every_n_steps
     default_render_res = CONFIGS.runtime.render_res
+    default_deformable_cfg = dict(deformable_cfg or deformable_config_dict())
     main_py.write_text(
         textwrap.dedent(
             f"""
             import argparse
+            import json
             from pathlib import Path
 
             from action import run_actions
@@ -38,6 +41,7 @@ def write_main(
 
 
             TASK = {task!r}
+            DEFAULT_DEFORMABLE_CFG = {default_deformable_cfg!r}
 
 
             def main():
@@ -52,12 +56,22 @@ def write_main(
                 parser.add_argument("--sim-substeps", type=int, default={int(default_sim_substeps)!r})
                 parser.add_argument("--render-every-n-steps", type=int, default={int(default_render_every_n_steps)!r})
                 parser.add_argument("--render-res", type=int, nargs=2, default={list(default_render_res)!r})
+                parser.add_argument("--deformable-config", type=Path, default=None)
                 parser.add_argument("--render", action="store_true", default=True)
                 parser.add_argument("--no-render", action="store_false", dest="render")
                 args = parser.parse_args()
 
-                scene = create_scene(args.backend, sim_dt=args.sim_dt, sim_substeps=args.sim_substeps)
-                actors = create_bodies(scene, TASK)
+                deformable_cfg = dict(DEFAULT_DEFORMABLE_CFG)
+                if args.deformable_config is not None:
+                    deformable_cfg.update(json.loads(args.deformable_config.read_text(encoding="utf-8")))
+
+                scene = create_scene(
+                    args.backend,
+                    sim_dt=args.sim_dt,
+                    sim_substeps=args.sim_substeps,
+                    deformable_cfg=deformable_cfg,
+                )
+                actors = create_bodies(scene, TASK, deformable_cfg=deformable_cfg)
                 render_state = None
                 if args.render:
                     render_state = setup_rendering(

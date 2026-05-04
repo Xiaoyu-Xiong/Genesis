@@ -30,6 +30,8 @@ SPEC = WorkerSpec(
     - honor the supplied `steps`, `fps`, `duration_sec`, and `target_video_frames`; do not replace them with local
       magic defaults
     - design camera parameters for the task, including camera position, lookat, fov, and fps
+    - for FEM/deformable tasks, frame the full soft-body interaction so compression, wobble, collapse, spread, bending,
+      and contact with supports or the ground are visible throughout the video
     - use the supplied `render_res` as the camera resolution unless there is a strong task-specific reason to override
       it, and record the final resolution in `render_stats.json`
     - call `scene.add_camera(...)` with `GUI=False`
