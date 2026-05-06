@@ -117,7 +117,7 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         Timing contract:
         {timing_contract}
 
-        Deformable capability/config contract:
+        FEM/IPC capability/config contract:
         {deformable_config}
 
         Asset manifest:
@@ -265,7 +265,8 @@ def _genesis_context_pointer(run_dir: Path) -> str:
             f"- Machine-readable context JSON: {context_json}",
             f"- Cached official docs directory: {docs_dir}",
             f"- Selected official-doc catalog: {catalog_path}",
-            "- Active non-rigid scope: FEM+IPC only. For this critic pass, use rigid/mesh/rendering docs as needed.",
+            "- Active non-rigid scope: FEM+IPC only. IPC may also be used for rigid/articulated contact when enabled.",
+            "- For this critic pass, use rigid/mesh/rendering docs as needed.",
             "- Prefer local Genesis source and examples over online docs if they disagree.",
         ]
     )

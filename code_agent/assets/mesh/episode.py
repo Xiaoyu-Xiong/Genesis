@@ -7,7 +7,7 @@ from typing import Any
 
 from code_agent.assets.mesh.manifest import build_manifest, failed_manifest_entry, manifest_entry_from_bundle
 from code_agent.assets.mesh.models import MeshyApiConfig
-from code_agent.assets.mesh.pipeline import DownloadedMeshyAsset, download_meshy_mesh_from_text, process_downloaded_meshy_mesh
+from code_agent.assets.mesh.pipeline import download_meshy_mesh_from_text, process_downloaded_meshy_mesh
 from code_agent.assets.mesh.request_adapter import (
     mesh_prompt_from_request,
     mesh_repair_config,
@@ -15,6 +15,7 @@ from code_agent.assets.mesh.request_adapter import (
     meshy_texture_config,
     select_mesh_requests,
 )
+from code_agent.assets.mesh.validation import run_genesis_fem_import_validation
 from code_agent.assets.mesh.workflow.steps import slugify_prompt
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import dump_json
@@ -80,9 +81,6 @@ def generate_mesh_assets_for_episode(
     api_max_workers = _meshy_api_max_workers(len(selected_requests))
     local_max_workers = max(1, min(len(selected_requests), CONFIGS.meshy_request.max_parallel_local_processing))
     selected_names = [str(request.get("name", "")) for request in selected_requests]
-    previous_report = _load_json_if_exists(report_path)
-    reusable_api_results = _reusable_api_results(previous_report, selected_requests)
-    reusable_processed_results = _reusable_processed_results(previous_report)
     progress_report = {
         "ok": False,
         "status": "mesh_asset_generation_running",
@@ -101,13 +99,7 @@ def generate_mesh_assets_for_episode(
     dump_json(progress_report, report_path)
 
     api_results: list[dict[str, Any] | None] = [None] * len(selected_requests)
-    if reusable_api_results is not None:
-        api_results = reusable_api_results
-        progress_report["status"] = "meshy_api_requests_reused"
-        progress_report["api_assets"] = [_api_progress_entry(result) for result in api_results if result is not None]
-        progress_report["resume_source_report_path"] = str(report_path)
-        dump_json(progress_report, report_path)
-    elif api_max_workers == 1:
+    if api_max_workers == 1:
         for index, request in enumerate(selected_requests):
             progress_report["status"] = "meshy_api_requests_running"
             progress_report["current_api_asset"] = str(request.get("name", ""))
@@ -162,11 +154,7 @@ def generate_mesh_assets_for_episode(
         progress_report["current_local_asset"] = str(api_result.get("request", {}).get("name", ""))
         progress_report["current_local_asset_index"] = index
         dump_json(progress_report, report_path)
-        local_name = str(api_result.get("request", {}).get("name", ""))
-        if local_name in reusable_processed_results:
-            result = reusable_processed_results[local_name]
-        else:
-            result = _process_one_mesh_asset(api_result)
+        result = _process_one_mesh_asset(api_result)
         results.append(result)
         progress_report["assets"] = results
         partial_manifest = build_manifest([item["manifest_entry"] for item in results], skipped_names=skipped_names)
@@ -255,6 +243,10 @@ def _process_one_mesh_asset(api_result: dict[str, Any]) -> dict[str, Any]:
             downloaded=api_result["downloaded"],
             repair_config=mesh_repair_config(),
         )
+        pre_validation_entry = manifest_entry_from_bundle(request, bundle)
+        genesis_validation = run_genesis_fem_import_validation(pre_validation_entry)
+        bundle.genesis_fem_import = genesis_validation
+        _write_genesis_validation_artifacts(bundle)
         manifest_entry = manifest_entry_from_bundle(request, bundle)
         return {
             "ok": manifest_entry["status"] == "ready",
@@ -276,79 +268,26 @@ def _process_one_mesh_asset(api_result: dict[str, Any]) -> dict[str, Any]:
         }
 
 
-def _load_json_if_exists(path: Path) -> dict[str, Any] | None:
+def _load_json_dict(path: Path) -> dict[str, Any]:
     if not path.is_file():
-        return None
+        return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _reusable_api_results(
-    previous_report: dict[str, Any] | None,
-    selected_requests: list[dict[str, Any]],
-) -> list[dict[str, Any] | None] | None:
-    if previous_report is None:
-        return None
-    raw_entries = previous_report.get("api_assets")
-    if not isinstance(raw_entries, list):
-        raw_assets = previous_report.get("assets")
-        raw_entries = [
-            item["api_phase"]
-            for item in raw_assets
-            if isinstance(item, dict) and isinstance(item.get("api_phase"), dict)
-        ] if isinstance(raw_assets, list) else None
-    if not isinstance(raw_entries, list):
-        return None
-    entries_by_name = {
-        str(entry.get("request", {}).get("name", "")): entry for entry in raw_entries if isinstance(entry, dict)
-    }
-    results: list[dict[str, Any] | None] = []
-    for request in selected_requests:
-        name = str(request.get("name", ""))
-        entry = entries_by_name.get(name)
-        if not entry or not entry.get("ok") or not isinstance(entry.get("downloaded_asset"), dict):
-            return None
-        downloaded = DownloadedMeshyAsset.from_dict(entry["downloaded_asset"])
-        results.append(
-            {
-                "ok": True,
-                "request": request,
-                "mesh_prompt": entry.get("mesh_prompt", ""),
-                "downloaded": downloaded,
-                "downloaded_asset": downloaded.to_dict(),
-            }
-        )
-    return results
-
-
-def _reusable_processed_results(previous_report: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-    if previous_report is None:
+    except json.JSONDecodeError:
         return {}
-    raw_assets = previous_report.get("assets")
-    if not isinstance(raw_assets, list):
-        return {}
-    reusable: dict[str, dict[str, Any]] = {}
-    for item in raw_assets:
-        if not isinstance(item, dict) or "manifest_entry" not in item:
-            continue
-        manifest_entry = item.get("manifest_entry")
-        if not isinstance(manifest_entry, dict):
-            continue
-        if manifest_entry.get("status") != "ready":
-            continue
-        runtime_path = manifest_entry.get("runtime_path")
-        visual_path = manifest_entry.get("visual_path")
-        texture_path = manifest_entry.get("texture_path")
-        required_paths = [runtime_path, visual_path, texture_path]
-        if any(isinstance(path, str) and path != "unavailable" and not Path(path).is_file() for path in required_paths):
-            continue
-        name = str(item.get("request", {}).get("name", ""))
-        if name:
-            reusable[name] = item
-    return reusable
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_genesis_validation_artifacts(bundle: Any) -> None:
+    validation = getattr(bundle, "genesis_fem_import", None)
+    if validation is None:
+        return
+    output_dir = Path(bundle.generation.output_dir)
+    dump_json(validation.to_dict(), output_dir / "genesis_fem_import_check.json")
+    metadata_path = bundle.generation.metadata_path
+    metadata = _load_json_dict(metadata_path)
+    metadata["genesis_fem_import"] = validation.to_dict()
+    dump_json(metadata, metadata_path)
 
 
 def _api_progress_entry(api_result: dict[str, Any]) -> dict[str, Any]:

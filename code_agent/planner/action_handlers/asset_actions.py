@@ -5,7 +5,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from code_agent.assets.bridge import generate_mesh_assets_for_episode, generate_xml_assets_for_episode
+from code_agent.assets.mesh.episode import generate_mesh_assets_for_episode
+from code_agent.assets.xml.episode import generate_xml_assets_for_episode
 from code_agent.io_utils import dump_json
 
 
@@ -27,22 +28,6 @@ class AssetActionHandler:
             started_status="mesh_assets_started",
             report_path=self.session.case_dir / "reports" / "asset_generation_report.json",
         )
-
-    def generate_mesh_assets(self, action: dict[str, Any]) -> dict[str, Any]:
-        started = self.start_mesh_assets(action)
-        if not started.get("ok"):
-            return started
-        if started.get("status") == "mesh_assets_ready":
-            return started
-        waited = self.poll_asset_job(kind="mesh", wait=True)
-        if waited is None:
-            return {
-                "ok": False,
-                "status": "error",
-                "message": "Mesh asset generation did not produce a future to wait on.",
-            }
-        waited["blocking"] = True
-        return waited
 
     def wait_mesh_assets(self, action: dict[str, Any]) -> dict[str, Any]:
         _ = action
@@ -72,22 +57,6 @@ class AssetActionHandler:
             started_status="xml_assets_started",
             report_path=self.session.case_dir / "reports" / "xml_asset_generation_report.json",
         )
-
-    def generate_xml_assets(self, action: dict[str, Any]) -> dict[str, Any]:
-        started = self.start_xml_assets(action)
-        if not started.get("ok"):
-            return started
-        if started.get("status") == "xml_assets_ready":
-            return started
-        waited = self.poll_asset_job(kind="xml", wait=True)
-        if waited is None:
-            return {
-                "ok": False,
-                "status": "error",
-                "message": "XML asset generation did not produce a future to wait on.",
-            }
-        waited["blocking"] = True
-        return waited
 
     def wait_xml_assets(self, action: dict[str, Any]) -> dict[str, Any]:
         _ = action

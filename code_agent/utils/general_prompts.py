@@ -50,7 +50,10 @@ Repair guidance must be detailed, source-aware, and directly actionable. Compare
 execution and visual output, metrics/event logs, relevant generated source, and module ownership. Name the owner module,
 the concrete behavior that is wrong, the evidence proving it, the likely source-level cause, and what a convincing fix
 should accomplish. Avoid vague advice like "improve the trajectory" when concrete evidence exists. Do not compress
-important source-level feedback just to keep the answer short.
+important source-level feedback just to keep the answer short. If the evidence points to a generated mesh asset itself
+being invalid or unsuitable (failed manifold check, Genesis FEM import validation failure, missing/corrupt texture,
+wrong generated topology, or a visual/runtime mesh pairing defect), route the fix to Planner/mesh asset regeneration
+instead of asking scene/body/action/rendering workers to patch, reshape, retopologize, or procedurally replace that mesh.
 """.strip()
 
 
@@ -99,10 +102,38 @@ FEM material selection guide:
 """.strip()
 
 
+RIGID_IPC_COUPLING_GUIDE = """
+Rigid IPC coupling mode guide:
+- `coup_type="ipc_only"` means the rigid non-articulated object is simulated by IPC for gravity and contact, then its
+  transform is copied back to Genesis for rendering/state queries. Use it for passive rigid props, loose rigid links,
+  simple obstacles, chain links, anchors, balls, or boxes whose motion should mainly come from IPC contact. It is not
+  supported for articulated objects, and many direct post-build pose/velocity control APIs are unavailable or
+  inappropriate because IPC owns the motion.
+- `coup_type="two_way_soft_constraint"` keeps a Genesis rigid/articulated body driven by Genesis dynamics or controls
+  while IPC tracks it with a soft transform constraint and can feed contact forces/torques back when
+  `IPCCouplerOptions.two_way_coupling` is true. Use it for actuator-driven rigid bodies, moving tools, gripper fingers,
+  robot links, windup drums, paddles, presses, or selected articulated links that need IPC contact but still need
+  Genesis controls. `constraint_strength_translation` and `constraint_strength_rotation` tune how tightly IPC follows
+  Genesis: higher is stiffer and less laggy, lower is softer and usually more forgiving.
+- `coup_type="external_articulation"` couples a fixed-base articulated MJCF/URDF entity at the joint/DOF level through
+  IPC. Use it when the whole articulated mechanism should participate in IPC contact according to its joint state, such
+  as a robot arm or gripper represented as one MJCF asset. It is stricter than `two_way_soft_constraint`: avoid
+  post-build root/qpos teleports, drive motion through actuator/DOF controls, and be careful with initialization because
+  some direct state-setting APIs are unsupported.
+- `coup_links=(...)` is only for `two_way_soft_constraint`; use it to couple just the links that contact the task
+  object, such as left/right gripper fingers, instead of putting an entire robot into IPC.
+- If `coup_type` is left as `None`, Genesis auto-selects a mode based on entity type, but generated code should choose
+  an explicit mode when the task's contact behavior depends on it.
+""".strip()
+
+
 DEFORMABLE_CRITIC_GUIDE = f"""
-When deformable_config["enabled"] is false, generated source must not use FEM materials, FEM entities, IPCCouplerOptions,
-or deformation-only APIs. If the prompt fundamentally requires soft-body or deformation behavior while deformable is
+When deformable_config["enabled"] is false, generated source must not use FEM materials, FEM entities, or
+deformation-only APIs. If the prompt fundamentally requires soft-body or deformation behavior while deformable is
 disabled, the correct Planner result is inconclusive rather than a rigid-body substitute.
+When deformable_config["ipc_enabled"] is false, generated source must not instantiate `gs.options.IPCCouplerOptions`.
+When deformable_config["enabled"] is false and deformable_config["ipc_enabled"] is true, IPC is allowed only for
+rigid/articulated contact; fail any fake deformable behavior.
 When deformable_config["enabled"] is true and the prompt asks for soft-body behavior, require real FEM+IPC evidence:
 FEM material/entity construction, explicit `E`, `nu`, and `rho` material choices within the deformable config bounds,
 config-driven FEM/IPC/tet parameters, plausible deformation metrics, and video or event evidence of wobble, compression,
@@ -148,7 +179,7 @@ execute it yourself.
 """.strip()
 
 
-RIGID_API_GUIDE = """
+RIGID_API_GUIDE = f"""
 Genesis rigid primitive API constraints:
 - Import Genesis as `import genesis as gs`.
 - Initialize with `gs.init(backend=gs.cpu if backend == "cpu" else gs.gpu, precision="32",
@@ -156,6 +187,14 @@ Genesis rigid primitive API constraints:
 - Create a scene with `gs.Scene(sim_options=gs.options.SimOptions(dt=sim_dt, substeps=sim_substeps), ...,
   show_viewer=False, show_FPS=False)` using the `sim_dt` and `sim_substeps` arguments passed into `create_scene`.
 - Add a ground plane with `scene.add_entity(gs.morphs.Plane())`.
+- If `deformable_cfg["ipc_enabled"]` is true for a rigid/articulated scene, route contact through IPC by constructing
+  `gs.Scene(..., coupler_options=gs.options.IPCCouplerOptions(...))` and mapping IPC values from `deformable_cfg`.
+  Strip the config prefix when passing Genesis options, e.g. `ipc_contact_d_hat` -> `contact_d_hat` and
+  `ipc_constraint_strength_translation` -> `constraint_strength_translation`.
+{RIGID_IPC_COUPLING_GUIDE}
+- For rigid IPC scenes, set `enable_rigid_rigid_contact` from `deformable_cfg["ipc_enable_rigid_rigid_contact"]`.
+  Keep it true when rigid bodies should collide with each other through IPC; keep it false when IPC should only handle
+  rigid-soft contact or selected articulated contacts and Genesis's rigid solver should avoid delegated pairs.
 - Use primitive morphs such as `gs.morphs.Box(size=(...), pos=(...), fixed=True/False)`,
   `gs.morphs.Sphere(radius=..., pos=(...))`, and `gs.morphs.Cylinder(radius=..., height=..., pos=(...))`.
 - Add all entities before `scene.build()`.
@@ -176,19 +215,25 @@ Genesis rigid primitive API constraints:
   `texture_path` is evidence metadata for the transferred base-color image and texture preview checks.
   Use the manifest's logical names, scale factors, coordinate metadata, texture paths, and simulation roles instead of
   guessing mesh paths, sizes, or orientation.
+  If a generated mesh manifest entry is missing, failed, invalid, or cannot be imported, fail clearly and report that
+  the Planner should regenerate the mesh asset; do not edit mesh files or approximate the object with ad hoc primitives.
 """.strip()
 
 
 FEM_IPC_API_GUIDE = f"""
 Genesis FEM+IPC primitive API constraints:
-- FEM+IPC is allowed only when `deformable_cfg["enabled"]` is true. If it is false, do not instantiate FEM
-  materials/entities or `gs.options.IPCCouplerOptions`.
+- FEM materials/entities are allowed only when `deformable_cfg["enabled"]` is true. If it is false, do not instantiate
+  FEM materials/entities or deformation-only APIs.
+- `gs.options.IPCCouplerOptions` is allowed when `deformable_cfg["ipc_enabled"]` is true. FEM deformable scenes force
+  IPC on; rigid-only scenes may also use IPC when this flag is true.
+- If `deformable_cfg["ipc_enabled"]` is false, do not instantiate `gs.options.IPCCouplerOptions`.
 - Deformable scenes must stay in the FEM+IPC family. Do not use MPM, PBD, SPH, cloth-specific shortcuts, or rigid-only
   substitutes for soft-body prompts.
 - `create_scene` receives `deformable_cfg`. Use `gs.init(..., precision=deformable_cfg["genesis_precision"], ...)`.
 - Scene setup should pass runtime timing through `gs.options.SimOptions(dt=sim_dt, substeps=sim_substeps, gravity=...)`.
 - When FEM bodies should collide through IPC, construct `gs.Scene(..., coupler_options=gs.options.IPCCouplerOptions(...))`.
-  Map IPC values from `deformable_cfg`: `ipc_newton_*`, `ipc_n_linesearch_iterations`,
+  Map IPC values from `deformable_cfg`, stripping the `ipc_` config prefix before passing Genesis option names:
+  `ipc_newton_*`, `ipc_n_linesearch_iterations`,
   `ipc_linesearch_report_energy`, `ipc_linear_system_*`, `ipc_contact_*`, `ipc_collision_detection_method`,
   `ipc_cfl_enable`, `ipc_sanity_check_enable`, `ipc_constraint_strength_translation`,
   `ipc_constraint_strength_rotation`, `ipc_enable_rigid_ground_contact`, `ipc_enable_rigid_rigid_contact`,

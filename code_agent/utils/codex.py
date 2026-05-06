@@ -96,8 +96,9 @@ def build_codex_exec_command(request: CodexExecRequest, *, resolved_codex: str |
         command.extend(["--model", request.model])
     if request.reasoning_effort:
         command.extend(["-c", f'model_reasoning_effort="{request.reasoning_effort}"'])
-    if request.service_tier:
-        command.extend(["-c", f'service_tier="{request.service_tier}"'])
+    cli_service_tier = _codex_cli_service_tier(request.service_tier)
+    if cli_service_tier:
+        command.extend(["-c", f'service_tier="{cli_service_tier}"'])
     if request.service_tier == "fast":
         command.extend(["-c", "features.fast_mode=true"])
     if request.output_schema_path is not None:
@@ -107,6 +108,14 @@ def build_codex_exec_command(request: CodexExecRequest, *, resolved_codex: str |
     command.extend(request.extra_args)
     command.append("-")
     return command
+
+
+def _codex_cli_service_tier(service_tier: Literal["fast", "standard"] | None) -> str | None:
+    """Map public code-agent names to the service tier tokens accepted by Codex CLI."""
+
+    if service_tier == "standard":
+        return None
+    return service_tier
 
 
 def run_codex_exec(request: CodexExecRequest) -> CodexExecResult:

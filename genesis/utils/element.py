@@ -15,15 +15,18 @@ from . import mesh as mu
 _TEXTURED_RENDER_ARTIFACTS: dict[str, dict[str, object]] = {}
 
 
-def _mesh_to_elements_texture_key(file, scale, tet_cfg: dict) -> str:
+def _mesh_to_elements_texture_key(file, scale, tet_cfg: dict, file_meshes_are_zup=True) -> str:
     if isinstance(file, (str, os.PathLike)):
-        return mu.get_hashkey(Path(file), np.asarray(scale), tet_cfg)
+        return mu.get_hashkey(Path(file), np.asarray(scale), tet_cfg, bool(file_meshes_are_zup))
     if hasattr(file, "vertices") and hasattr(file, "faces"):
-        return mu.get_hashkey(file.vertices, file.faces, np.asarray(scale), tet_cfg)
-    return mu.get_hashkey(str(file), np.asarray(scale), tet_cfg)
+        return mu.get_hashkey(file.vertices, file.faces, np.asarray(scale), tet_cfg, bool(file_meshes_are_zup))
+    return mu.get_hashkey(str(file), np.asarray(scale), tet_cfg, bool(file_meshes_are_zup))
 
-def get_mesh_to_elements_render_artifact(file, scale=1.0, tet_cfg=dict()):
-    return _TEXTURED_RENDER_ARTIFACTS.get(_mesh_to_elements_texture_key(file, scale, tet_cfg))
+
+def get_mesh_to_elements_render_artifact(file, scale=1.0, tet_cfg=dict(), file_meshes_are_zup=True):
+    return _TEXTURED_RENDER_ARTIFACTS.get(
+        _mesh_to_elements_texture_key(file, scale, tet_cfg, file_meshes_are_zup)
+    )
 
 
 def _locate_textured_source_assets(file) -> tuple[Path | None, Path | None]:
@@ -39,7 +42,15 @@ def _locate_textured_source_assets(file) -> tuple[Path | None, Path | None]:
     return None, None
 
 
-def _build_remeshed_textured_source(*, file, remeshed):
+def _build_remeshed_textured_source(*, file, remeshed, file_meshes_are_zup=True):
+    existing_textured_mesh, existing_texture_path = _load_existing_repaired_textured_source(
+        file=file,
+        target_vertices=remeshed.vertices,
+        file_meshes_are_zup=file_meshes_are_zup,
+    )
+    if existing_textured_mesh is not None and existing_texture_path is not None:
+        return existing_textured_mesh, existing_texture_path
+
     textured_mesh_path, base_color_path = _locate_textured_source_assets(file)
     if textured_mesh_path is None or base_color_path is None:
         return None, None
@@ -59,18 +70,20 @@ def _build_remeshed_textured_source(*, file, remeshed):
     cache_dir = cache_stem
     processed_dir = cache_dir / "processed"
     remeshed_obj = processed_dir / "remeshed_source.obj"
+    remeshed_textured_obj = processed_dir / "repaired_textured.obj"
     remeshed_png = processed_dir / "base_color.png"
     aligned_source_obj = cache_dir / "source" / "raw_textured_aligned.obj"
 
-    if not remeshed_obj.exists() or not remeshed_png.exists():
-        from agent.mesh.texture_transfer import _copy_with_vertex_affine, transfer_texture_to_repaired_mesh
+    if not remeshed_textured_obj.exists() or not remeshed_png.exists():
+        from code_agent.assets.mesh.texture.obj_io import copy_with_vertex_affine
+        from code_agent.assets.mesh.texture.transfer import transfer_texture_to_repaired_mesh
 
         processed_dir.mkdir(parents=True, exist_ok=True)
         remeshed.export(remeshed_obj)
         source_mesh_path = textured_mesh_path
         if aligned_scale is not None or aligned_delta is not None:
             aligned_source_obj.parent.mkdir(parents=True, exist_ok=True)
-            _copy_with_vertex_affine(
+            copy_with_vertex_affine(
                 src_path=textured_mesh_path,
                 dst_path=aligned_source_obj,
                 scale=aligned_scale,
@@ -86,12 +99,52 @@ def _build_remeshed_textured_source(*, file, remeshed):
         )
 
     remeshed_textured_mesh = trimesh.load_mesh(
-        str(remeshed_obj),
+        str(remeshed_textured_obj),
         force="mesh",
         skip_texture=False,
         process=False,
     )
     return remeshed_textured_mesh, remeshed_png
+
+
+def _load_existing_repaired_textured_source(*, file, target_vertices, file_meshes_are_zup=True):
+    if not isinstance(file, (str, os.PathLike)):
+        return None, None
+    mesh_path = Path(file)
+    if mesh_path.parent.name != "processed":
+        return None, None
+
+    textured_mesh_path = mesh_path.parent / "repaired_textured.obj"
+    base_color_path = mesh_path.parent / "base_color.png"
+    if not textured_mesh_path.exists() or not base_color_path.exists():
+        return None, None
+
+    try:
+        runtime_mesh = trimesh.load_mesh(str(mesh_path), force="mesh", skip_texture=True, process=False)
+        textured_mesh = trimesh.load_mesh(str(textured_mesh_path), force="mesh", skip_texture=False, process=False)
+    except Exception:  # noqa: BLE001
+        return None, None
+
+    if not file_meshes_are_zup:
+        runtime_mesh.apply_transform(mu.Y_UP_TRANSFORM.T)
+        textured_mesh.apply_transform(mu.Y_UP_TRANSFORM.T)
+
+    runtime_vertices = np.asarray(runtime_mesh.vertices, dtype=np.float64)
+    target_vertices = np.asarray(target_vertices, dtype=np.float64)
+    if runtime_vertices.size == 0 or target_vertices.size == 0:
+        return None, None
+
+    runtime_min = np.min(runtime_vertices, axis=0)
+    runtime_extent = np.ptp(runtime_vertices, axis=0)
+    target_min = np.min(target_vertices, axis=0)
+    target_extent = np.ptp(target_vertices, axis=0)
+    scale = np.ones(3, dtype=np.float64)
+    valid = runtime_extent > 1e-12
+    scale[valid] = target_extent[valid] / runtime_extent[valid]
+    delta = target_min - runtime_min * scale
+
+    textured_mesh.vertices = np.asarray(textured_mesh.vertices, dtype=np.float64) * scale + delta
+    return textured_mesh, base_color_path
 
 
 def _locate_textured_source_transform(*, file, target_vertices):
@@ -168,9 +221,17 @@ def cylinder_to_elements(pos=(0, 0, 0), radius=0.5, height=1.0, tet_cfg=dict()):
     return verts, elems
 
 
-def mesh_to_elements(file, pos=(0, 0, 0), scale=1.0, tet_cfg=dict()):
-    texture_key = _mesh_to_elements_texture_key(file, scale, tet_cfg)
-    mesh = mu.load_mesh(file)
+def mesh_to_elements(file, pos=(0, 0, 0), scale=1.0, tet_cfg=dict(), file_meshes_are_zup=True):
+    use_iso_remesh = os.environ.get("GENESIS_FEM_USE_ISO_REMESH") == "1"
+    skip_iso_remesh = not use_iso_remesh
+    texture_key = _mesh_to_elements_texture_key(file, scale, tet_cfg, file_meshes_are_zup)
+    if skip_iso_remesh and isinstance(file, (str, os.PathLike)):
+        mesh = trimesh.load_mesh(file, force="mesh", skip_texture=False, process=False)
+    else:
+        mesh = mu.load_mesh(file)
+
+    if not file_meshes_are_zup:
+        mesh.apply_transform(mu.Y_UP_TRANSFORM.T)
 
     mesh.vertices = mesh.vertices * scale
     textured_source_mesh = mesh.copy() if mu.mesh_has_texture(mesh) else None
@@ -181,48 +242,66 @@ def mesh_to_elements(file, pos=(0, 0, 0), scale=1.0, tet_cfg=dict()):
     remeshed_textured_mesh = None
     render_texture_path = None
 
-    # Retry isotropic remeshing with progressively less aggressive edge lengths until
-    # the remeshed surface stays manifold-ready and TetGen accepts it.
-    retry_factors = (1.0, 0.9, 0.8, 0.7, 0.62, 0.55, 0.48, 0.4, 0.32, 0.25)
-    remesh_error: str | None = None
-    for attempt_index, factor in enumerate(retry_factors, start=1):
-        target_edge = base_target_edge * factor
-        remeshed = mu.remesh_surface_mesh(mesh, edge_len_abs=target_edge, fix=False)
-        candidate_cfg = _primitive_tet_cfg(tet_cfg, target_edge=target_edge)
-        if textured_source_mesh is not None:
-            candidate_cfg["nobisect"] = True
-
-        if not (remeshed.is_watertight and remeshed.is_winding_consistent):
-            remesh_error = (
-                f"attempt {attempt_index}: remeshed surface is not watertight/winding-consistent "
-                f"(edge_len_abs={target_edge})"
+    if skip_iso_remesh:
+        if textured_source_mesh is None:
+            remeshed_textured_mesh, remeshed_texture_path = _build_remeshed_textured_source(
+                file=file,
+                remeshed=mesh,
+                file_meshes_are_zup=file_meshes_are_zup,
             )
-            continue
-
-        try:
-            # Probe TetGen acceptance on the remeshed surface before committing to this mesh.
-            if textured_source_mesh is not None:
-                mu.tetrahedralize_mesh_with_boundary(remeshed, candidate_cfg)
-            else:
-                mu.tetrahedralize_mesh(remeshed, candidate_cfg)
-        except Exception as exc:  # noqa: BLE001
-            remesh_error = (
-                f"attempt {attempt_index}: remeshed surface failed tetgen check with edge_len_abs={target_edge}: {exc}"
-            )
-            continue
-
-        mesh = remeshed
-        remeshed_textured_mesh = None
+            if remeshed_textured_mesh is not None:
+                textured_source_mesh = remeshed_textured_mesh
+                render_texture_path = None if remeshed_texture_path is None else str(remeshed_texture_path)
+        tet_cfg = _primitive_tet_cfg(tet_cfg, target_edge=base_target_edge)
         if textured_source_mesh is not None:
-            remeshed_textured_mesh, remeshed_texture_path = _build_remeshed_textured_source(file=file, remeshed=remeshed)
-            render_texture_path = None if remeshed_texture_path is None else str(remeshed_texture_path)
-        tet_cfg = candidate_cfg
-        break
+            tet_cfg["nobisect"] = True
     else:
-        gs.raise_exception(
-            f"Unable to produce a tetgen-ready remeshed surface from the mesh input after {len(retry_factors)} attempts. "
-            f"Last error: {remesh_error}"
-        )
+        # Retry isotropic remeshing with progressively less aggressive edge lengths until
+        # the remeshed surface stays manifold-ready and TetGen accepts it.
+        retry_factors = (1.0, 0.9, 0.8, 0.7, 0.62, 0.55, 0.48, 0.4, 0.32, 0.25)
+        remesh_error: str | None = None
+        for attempt_index, factor in enumerate(retry_factors, start=1):
+            target_edge = base_target_edge * factor
+            remeshed = mu.remesh_surface_mesh(mesh, edge_len_abs=target_edge, fix=False)
+            candidate_cfg = _primitive_tet_cfg(tet_cfg, target_edge=target_edge)
+            if textured_source_mesh is not None:
+                candidate_cfg["nobisect"] = True
+
+            if not (remeshed.is_watertight and remeshed.is_winding_consistent):
+                remesh_error = (
+                    f"attempt {attempt_index}: remeshed surface is not watertight/winding-consistent "
+                    f"(edge_len_abs={target_edge})"
+                )
+                continue
+
+            try:
+                # Probe TetGen acceptance on the remeshed surface before committing to this mesh.
+                if textured_source_mesh is not None:
+                    mu.tetrahedralize_mesh_with_boundary(remeshed, candidate_cfg)
+                else:
+                    mu.tetrahedralize_mesh(remeshed, candidate_cfg)
+            except Exception as exc:  # noqa: BLE001
+                remesh_error = (
+                    f"attempt {attempt_index}: remeshed surface failed tetgen check with edge_len_abs={target_edge}: {exc}"
+                )
+                continue
+
+            mesh = remeshed
+            remeshed_textured_mesh = None
+            if textured_source_mesh is not None:
+                remeshed_textured_mesh, remeshed_texture_path = _build_remeshed_textured_source(
+                    file=file,
+                    remeshed=remeshed,
+                    file_meshes_are_zup=file_meshes_are_zup,
+                )
+                render_texture_path = None if remeshed_texture_path is None else str(remeshed_texture_path)
+            tet_cfg = candidate_cfg
+            break
+        else:
+            gs.raise_exception(
+                f"Unable to produce a tetgen-ready remeshed surface from the mesh input after {len(retry_factors)} attempts. "
+                f"Last error: {remesh_error}"
+            )
 
     # compute file name via hashing for caching
     tet_file_path = mu.get_tet_path(mesh.vertices, mesh.faces, tet_cfg)
@@ -330,7 +409,7 @@ def _build_render_artifact(*, remeshed_textured_mesh, tet_verts, tet_boundary_fa
 
     render_vertices = np.asarray(remeshed_textured_mesh.vertices, dtype=np.float64)
     render_faces = np.asarray(remeshed_textured_mesh.faces, dtype=np.int32)
-    render_uvs = np.asarray(remeshed_textured_mesh.visual.uv, dtype=gs.np_float)
+    render_uvs = np.asarray(_mesh_visual_uvs(remeshed_textured_mesh), dtype=gs.np_float)
     render_src_indices = np.full(len(render_vertices), -1, dtype=np.int32)
 
     unmatched = []
@@ -386,9 +465,11 @@ def _mesh_visual_uvs(mesh):
     visual_uvs = getattr(mesh.visual, "uv", None)
     if visual_uvs is None:
         gs.raise_exception("Textured remeshed source mesh does not expose UV coordinates.")
-    visual_uvs = np.asarray(visual_uvs, dtype=np.float64)
+    visual_uvs = np.asarray(visual_uvs, dtype=np.float64).copy()
     if visual_uvs.ndim != 2 or visual_uvs.shape[1] != 2:
         gs.raise_exception(f"Unexpected UV shape for textured remeshed source mesh: {visual_uvs.shape}.")
+    # Keep FEM texture coordinates in the same convention as Genesis's regular Mesh import path.
+    visual_uvs[:, 1] = 1.0 - visual_uvs[:, 1]
     return visual_uvs
 
 

@@ -27,10 +27,8 @@
       "enum": [
         "write_plan",
         "start_mesh_assets",
-        "generate_mesh_assets",
         "wait_mesh_assets",
         "start_xml_assets",
-        "generate_xml_assets",
         "wait_xml_assets",
         "spawn_workers",
         "run_integrator",

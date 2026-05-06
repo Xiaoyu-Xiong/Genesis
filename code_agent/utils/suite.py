@@ -32,20 +32,30 @@ def load_cases(path: Path) -> list[Case]:
     return cases
 
 
-def _write_case_inputs(case_dir: Path, case: Case, *, deformable_enabled: bool) -> None:
+def _write_case_inputs(case_dir: Path, case: Case, *, deformable_enabled: bool, ipc_enabled: bool) -> None:
     inputs = case_dir / "inputs"
     inputs.mkdir(parents=True, exist_ok=True)
     (inputs / "user_prompt.md").write_text(case.task + "\n", encoding="utf-8")
-    deformable_line = (
-        "FEM+IPC deformable generation is ENABLED for this case. Use only FEM+IPC for non-rigid behavior; "
-        "MPM, PBD, SPH, and other non-rigid families remain out of scope."
-        if deformable_enabled
-        else "FEM+IPC deformable generation is DISABLED for this case. If the task fundamentally requires soft-body "
-        "or deformation behavior, Planner should stop as inconclusive instead of approximating it with rigid bodies."
-    )
+    if deformable_enabled:
+        capability_line = (
+            "FEM deformable generation is ENABLED for this case, and IPC contact is forced ON. Use only FEM+IPC for "
+            "non-rigid behavior; MPM, PBD, SPH, and other non-rigid families remain out of scope."
+        )
+    elif ipc_enabled:
+        capability_line = (
+            "FEM deformable generation is DISABLED for this case, but IPC rigid/articulated contact is ENABLED. "
+            "For rigid contact-heavy scenes, Planner should tell workers to use IPC for contact while keeping bodies "
+            "rigid or articulated."
+        )
+    else:
+        capability_line = (
+            "FEM deformable generation and IPC contact are DISABLED for this case. If the task fundamentally requires "
+            "soft-body or deformation behavior, Planner should stop as inconclusive instead of approximating it with "
+            "rigid bodies."
+        )
     (inputs / "capabilities.md").write_text(
         "Genesis local GPU code generation for rigid, articulated, mesh, texture, rendering, critic, and repair "
-        f"workflows. {deformable_line} Planner controls worker dispatch, execution, critic, and repair actions.\n",
+        f"workflows. {capability_line} Planner controls worker dispatch, execution, critic, and repair actions.\n",
         encoding="utf-8",
     )
 
@@ -64,6 +74,7 @@ def run_suite(
     duration_sec: float | None = None,
     render_fps: int | None = None,
     deformable_enabled: bool | None = None,
+    ipc_enabled: bool | None = None,
 ) -> dict[str, object]:
     out_dir.mkdir(parents=True, exist_ok=True)
     cases = load_cases(tasks_file)
@@ -71,6 +82,9 @@ def run_suite(
         cases = cases[:max_cases]
 
     effective_deformable_enabled = CONFIGS.deformable.enabled if deformable_enabled is None else bool(deformable_enabled)
+    effective_ipc_enabled = effective_deformable_enabled or (
+        CONFIGS.ipc.enabled if ipc_enabled is None else bool(ipc_enabled)
+    )
     genesis_context = build_genesis_context_pack(out_dir)
     max_workers = _resolve_max_parallel_cases(num_cases=len(cases), max_parallel_cases=max_parallel_cases)
     started_at = time.time()
@@ -85,6 +99,7 @@ def run_suite(
         "duration_sec": duration_sec,
         "render_fps": render_fps,
         "deformable_enabled": effective_deformable_enabled,
+        "ipc_enabled": effective_ipc_enabled,
         "max_parallel_cases": max_workers,
         "genesis_execution_lock": {
             "scope": "all run_generated_simulation calls in this Python process, plus a per-user /tmp file lock",
@@ -116,6 +131,7 @@ def run_suite(
                 duration_sec=duration_sec,
                 render_fps=render_fps,
                 deformable_enabled=effective_deformable_enabled,
+                ipc_enabled=effective_ipc_enabled,
             ): index
             for index, case in enumerate(cases)
         }
@@ -166,10 +182,11 @@ def _run_case(
     duration_sec: float | None,
     render_fps: int | None,
     deformable_enabled: bool,
+    ipc_enabled: bool,
 ) -> dict[str, Any]:
     case_dir = out_dir / case.case_id
     case_dir.mkdir(parents=True, exist_ok=True)
-    _write_case_inputs(case_dir, case, deformable_enabled=deformable_enabled)
+    _write_case_inputs(case_dir, case, deformable_enabled=deformable_enabled, ipc_enabled=ipc_enabled)
     install_genesis_context_pack(case_dir, genesis_context)
     session = PlannerSession(
         PlannerSessionConfig(
@@ -184,6 +201,7 @@ def _run_case(
             duration_sec=duration_sec,
             render_fps=render_fps,
             deformable_enabled=deformable_enabled,
+            ipc_enabled=ipc_enabled,
         )
     )
     return session.run()

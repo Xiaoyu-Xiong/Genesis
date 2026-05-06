@@ -1,42 +1,15 @@
 # Utils
 
-`code_agent/utils/` contains non-agent support code used by Planner, Writer, Evaluation, and the CLI.
+`utils/` contains runtime mechanics shared by Planner, writers, evaluation, and CLI.
 
-## Modules
+- `codex.py`: non-interactive `codex exec` wrapper with schema output, logs, final messages, stderr, timeout, model,
+  sandbox, reasoning effort, and service-tier handling.
+- `suite.py`: loads cases, creates workspaces, builds Genesis context, starts `PlannerSession`, and writes suite
+  summaries.
+- `integrator.py`: writes stable `src/main.py` and passes runtime defaults plus `deformable_cfg` to generated modules.
+- `execution.py`: runs generated projects through uv and serializes local Genesis subprocesses with a process lock.
+- `local_execution.py`: captures stdout/stderr, execution metadata, and artifact paths.
+- `timing.py`: resolves Planner timing plus CLI overrides.
+- `general_prompts.py`: shared Planner/Writer/Critic prompt contracts.
 
-- `codex.py`: standardizes non-interactive `codex exec` calls. It builds the command, applies sandbox/model/reasoning
-  effort/service-tier/schema settings, writes JSONL event logs, captures the final message and stderr, and returns
-  `CodexExecResult`. `CONFIGS.codex.service_tier="fast"` enables Codex's official fast mode without lowering reasoning
-  effort; set it to `"standard"` for the normal service tier, or `None` to omit the service-tier override entirely.
-  Usage-limit responses are classified as `codex_usage_limit`, allowing Planner episodes to end as blocked/inconclusive
-  while preserving stale execution artifacts for inspection.
-- `general_prompts.py`: stores reusable prompt clauses shared by Planner, Writer, XML asset, and Critic calls,
-  including the physical-causality contract and the Writer common API guide.
-- `local_execution.py`: runs a generated Python entrypoint in a workspace, captures stdout/stderr, writes
-  `execution_report.json`, and discovers artifacts.
-- `execution.py`: adapts generated simulation projects to `local_execution.py`; it passes backend, render, timing, and
-  artifact arguments to `src/main.py`. Local Genesis simulation subprocesses are serialized with a thread lock plus a
-  per-user `/tmp` file lock so parallel cases do not contend for the GPU/renderer during execution.
-- `suite.py`: reads `case_id|prompt` files, creates case workspaces, starts `PlannerSession`, and writes suite summary.
-  It also builds the suite-level Genesis FEM+IPC context pack before cases start and records the effective
-  deformable-generation gate from `CONFIGS.deformable.enabled` or CLI override. Selected cases run concurrently by
-  default; set `CONFIGS.harness.max_parallel_cases` or CLI `--max-parallel-cases` to cap them.
-- `timing.py`: resolves Planner `execution_plan` values and explicit CLI overrides into steps, duration, fps, and target
-  video frames.
-- `integrator.py`: writes the stable `src/main.py` entrypoint that imports generated Scene, Body, Action, and Rendering
-  modules. The entrypoint carries `CONFIGS.runtime` defaults into generated code for simulation dt, substeps, render
-  cadence, fps, and camera resolution, and passes the per-case `deformable_cfg` contract into Scene and Body.
-
-## Boundaries
-
-Utilities do not reason about task quality and do not write generated simulation modules. Planner owns planning and
-episode control, Writer owns generated code modules, Evaluation owns pass/fail judgment, and Utils owns repeatable
-runtime mechanics.
-
-Planner and Writer may request execution through the harness, but generated workers should not call `uv`, `pytest`, or
-Genesis directly. All generated-code execution should go through `utils.execution`.
-
-Writer batches requested by Planner may run concurrently. With the default
-`CONFIGS.harness.max_parallel_workers=None`, the harness applies no artificial writer cap: every role included in one
-`spawn_workers` action can run at the same time. Planner controls dependencies by choosing which writer roles appear in
-the same action and should prefer maximal safe parallelism.
+Generated workers should not run Genesis or mutate the environment directly; execution goes through these utilities.

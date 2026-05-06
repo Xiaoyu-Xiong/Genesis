@@ -122,6 +122,7 @@ class FEMEntity(Entity):
                 self._morph.file,
                 self._morph.scale,
                 self.tet_cfg,
+                self._morph.file_meshes_are_zup,
             )
         if (
             isinstance(render_artifact, dict)
@@ -476,6 +477,7 @@ class FEMEntity(Entity):
                     pos=(0.0, 0.0, 0.0),
                     scale=self._morph.scale,
                     tet_cfg=self.tet_cfg,
+                    file_meshes_are_zup=self._morph.file_meshes_are_zup,
                 )
                 if self._uvs is not None and not self._surface.requires_uv:
                     try:
@@ -483,6 +485,7 @@ class FEMEntity(Entity):
                             self._morph.file,
                             self._morph.scale,
                             self.tet_cfg,
+                            self._morph.file_meshes_are_zup,
                         )
                         baked_texture_path = (
                             render_artifact.get("texture_path") if isinstance(render_artifact, dict) else None

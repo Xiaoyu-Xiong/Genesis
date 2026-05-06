@@ -8,7 +8,7 @@ SPEC = WorkerSpec(
     target_file="src/scene.py",
     required_export="create_scene",
     responsibility=(
-        "stage, fixed objects, global Genesis setup, FEM+IPC scene options, fixed props, fixed generated meshes, "
+        "stage, fixed objects, global Genesis setup, IPC/FEM scene options, fixed props, fixed generated meshes, "
         "and scene lifecycle"
     ),
     prompt_body="""
@@ -17,11 +17,14 @@ SPEC = WorkerSpec(
     It must pass the supplied timing parameters into Genesis with
     `gs.options.SimOptions(dt=sim_dt, substeps=sim_substeps)` when constructing the scene. Do not hardcode local
     timestep or substep defaults.
-    If `deformable_cfg["enabled"]` is true and the Planner requests soft-body behavior, configure FEM+IPC through
-    Genesis scene options. Use `deformable_cfg["genesis_precision"]` for `gs.init(...)` precision, and map IPC option
-    values from `deformable_cfg` into `gs.options.IPCCouplerOptions(...)`. Do not use MPM, PBD, SPH, or rigid-only
-    substitutes for soft-body tasks.
-    If `deformable_cfg["enabled"]` is false, do not create FEM/IPC options. If the task fundamentally requires
+    If `deformable_cfg["ipc_enabled"]` is true, configure IPC through Genesis scene options and map IPC option values
+    from `deformable_cfg` into `gs.options.IPCCouplerOptions(...)`. This applies both to FEM+IPC deformable scenes and
+    to rigid/articulated scenes whose contacts should be handled by IPC.
+    If `deformable_cfg["ipc_enabled"]` is false, do not create `gs.options.IPCCouplerOptions`.
+    If `deformable_cfg["enabled"]` is true and the Planner requests soft-body behavior, keep the non-rigid parts in
+    the FEM+IPC family. Use `deformable_cfg["genesis_precision"]` for `gs.init(...)` precision. Do not use MPM, PBD,
+    SPH, or rigid-only substitutes for soft-body tasks.
+    If `deformable_cfg["enabled"]` is false, do not create FEM materials/entities. If the task fundamentally requires
     deformable physics, fail clearly in the worker report instead of writing a rigid approximation.
     Add at most one global ground Plane when the scene needs a floor. If you create it here, store the returned entity
     on `scene.genesis_static_floor` and describe it in `scene.genesis_case_metadata`; body.py must then reuse that
@@ -33,7 +36,8 @@ SPEC = WorkerSpec(
     orientation at runtime. Repaired generated mesh assets keep strict-manifold simulation geometry in `runtime_path`;
     `visual_path` is a seam-aware textured render mesh attached through
     `gs.morphs.Mesh(..., visual_file=entry["visual_path"], ...)`, not an independent simulation body. Keep fixed props
-    lightweight: no more than 6 fixed objects.
+    lightweight: no more than 6 fixed objects. If a generated mesh entry is missing, failed, or invalid, fail clearly
+    and route regeneration to the mesh agent through Planner instead of editing or approximating the mesh in scene.py.
     Do not create dynamic or task-moving bodies. Do not create cameras or render code.
     """,
 )

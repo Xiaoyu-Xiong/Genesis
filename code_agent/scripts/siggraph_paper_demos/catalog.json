@@ -1,0 +1,221 @@
+{
+  "updated_at": "2026-05-05T12:56:42-04:00",
+  "purpose": "SIGGRAPH paper demo candidates for text-to-Genesis generation and tuning.",
+  "selection_rules": [
+    "No cloth, fluid, or RL/control-heavy examples.",
+    "Prefer complete paper demo scenes over isolated stress tests.",
+    "Keep the suite balanced across pure rigid, soft with rigid boundaries, and rigid-soft two-way coupling."
+  ],
+  "coverage": {
+    "pure_rigid": [
+      "anchor_chain_windup",
+      "bike_chain_sprocket",
+      "expanding_lock_box"
+    ],
+    "soft_one_way_rigid": [
+      "halloween_pumpkin_party",
+      "soft_dragon_obstacle_course",
+      "spiky_soft_balls_pinball"
+    ],
+    "rigid_soft_two_way": [
+      "soft_toys_squeeze_through_tube",
+      "woven_basket_soft_impact"
+    ]
+  },
+  "source_videos": [
+    {
+      "id": "ipc_2020_supplemental",
+      "path": "videos/ipc_2020_supplemental.mp4",
+      "contact_sheet": "contact_sheets/ipc_2020_supplemental.jpg",
+      "source_url": "https://ipc-sim.github.io/file/IPC-supplemental-video.mp4",
+      "sha256": "7d6d31fbaee40c0144e7e1e2a9585d697f466f7f1bbb825ad152129d4e42c141",
+      "bytes": 64691731
+    },
+    {
+      "id": "rigid_ipc_2021_main",
+      "path": "videos/rigid_ipc_2021_main.mp4",
+      "contact_sheet": "contact_sheets/rigid_ipc_2021_main.jpg",
+      "source_url": "https://github.com/ipc-sim/ipc-sim.github.io/blob/master/rigid-ipc/assets/rigid-ipc-video.mp4?raw=true",
+      "sha256": "49cb47ff609d85f83ae06b23ffabeb381e2d2dfcb506560f714b3f6a393ce8dd",
+      "bytes": 78736392
+    },
+    {
+      "id": "rigid_ipc_2021_supplemental",
+      "path": "videos/rigid_ipc_2021_supplemental.mp4",
+      "contact_sheet": "contact_sheets/rigid_ipc_2021_supplemental.jpg",
+      "source_url": "https://github.com/ipc-sim/ipc-sim.github.io/blob/master/rigid-ipc/assets/rigid-ipc-supplemental-video.mp4?raw=true",
+      "sha256": "492b2c73ead70c698385e2feab710f7352fe6ce05d610a14289b4893af37859a",
+      "bytes": 45753133
+    },
+    {
+      "id": "pd_ipc_gpu_2022",
+      "path": "videos/pd_ipc_gpu_2022.mp4",
+      "contact_sheet": "contact_sheets/pd_ipc_gpu_2022.jpg",
+      "source_url": "https://www.youtube.com/watch?v=acEplzIIOEs",
+      "sha256": "cb59a3e884555cc17284fd7ca26eb2ac5a9eda94c04e3228e8f68f3bdff58440",
+      "bytes": 9457369
+    },
+    {
+      "id": "sos_hyperelasticity_2023",
+      "path": "videos/sos_hyperelasticity_2023.mp4",
+      "contact_sheet": "contact_sheets/sos_hyperelasticity_2023.jpg",
+      "source_url": "https://www.youtube.com/watch?v=CqudChzrgQ8",
+      "sha256": "a421f4a03ded590c0273095355a1eb09267d5048c83c8e7c86aafdc778b4b86f",
+      "bytes": 9239648
+    }
+  ],
+  "examples": [
+    {
+      "title": "anchor_chain_windup",
+      "coverage": "pure_rigid",
+      "paper": "Intersection-free Rigid Body Dynamics",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2021",
+      "project_page": "https://ipc-sim.github.io/rigid-ipc/",
+      "source_video_id": "rigid_ipc_2021_supplemental",
+      "source_segment_sec": {
+        "start": 88.0,
+        "end": 186.0
+      },
+      "clip_path": "clips/anchor_chain_windup.mp4",
+      "clip_contact_sheet": "clip_contact_sheets/anchor_chain_windup.jpg",
+      "clip_sha256": "cd13f2c3d125415b60315e50438ee08c20facbf8f4723d8cd221d084ce86188c",
+      "clip_bytes": 7676555,
+      "prompt": "Create a pure rigid-body scene where a heavy anchor hangs from a chain of interlocking rigid links, drops under gravity, then a motorized horizontal winch axle winds the chain so links bunch and kink while lifting the anchor, render 10s behavior.",
+      "pipeline_fit": "medium",
+      "notes": "A complete rigid chain-and-winch demo; no deformable bodies, fluids, cloth, or learned control."
+    },
+    {
+      "title": "bike_chain_sprocket",
+      "coverage": "pure_rigid",
+      "paper": "Intersection-free Rigid Body Dynamics",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2021",
+      "project_page": "https://ipc-sim.github.io/rigid-ipc/",
+      "source_video_id": "rigid_ipc_2021_main",
+      "source_segment_sec": {
+        "start": 58.0,
+        "end": 69.0
+      },
+      "clip_path": "clips/bike_chain_sprocket.mp4",
+      "clip_contact_sheet": "clip_contact_sheets/bike_chain_sprocket.jpg",
+      "clip_sha256": "d6b441ebad286b58ea3f778c1907cb1c1241d62d1339d3bd0d1c16257930b443",
+      "clip_bytes": 1277472,
+      "prompt": "Create a pure rigid-body scene with a loop of interlocking chain links around two toothed sprockets; motorize one sprocket so the chain wraps, slides, and drives the other sprocket through tight contact, render 10s behavior.",
+      "pipeline_fit": "medium",
+      "notes": "A contact-rich rigid mechanism demo with a simple motorized sprocket control."
+    },
+    {
+      "title": "expanding_lock_box",
+      "coverage": "pure_rigid",
+      "paper": "Intersection-free Rigid Body Dynamics",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2021",
+      "project_page": "https://ipc-sim.github.io/rigid-ipc/",
+      "source_video_id": "rigid_ipc_2021_main",
+      "source_segment_sec": {
+        "start": 4.0,
+        "end": 13.2
+      },
+      "clip_path": "clips/expanding_lock_box.mp4",
+      "clip_contact_sheet": "clip_contact_sheets/expanding_lock_box.jpg",
+      "clip_sha256": "d1ffe82983c7c498388dec9eafca5235b6f6bb4a2cf0cd21844fa37d65dc7fdb",
+      "clip_bytes": 855834,
+      "prompt": "Create a pure rigid-body mechanism scene of an expanding lock box: a gear-like key turns a central spiral cam, retracts five sliding locking pins through contact, then the bottom panel drops open under gravity, render 10s behavior.",
+      "pipeline_fit": "stretch",
+      "notes": "A complete rigid mechanical demo and a good long-term target for generated articulated/mesh assets."
+    },
+    {
+      "title": "halloween_pumpkin_party",
+      "coverage": "soft_one_way_rigid",
+      "paper": "Penetration-free Projective Dynamics on the GPU",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2022",
+      "project_page": "https://math.ucla.edu/multiples/publication/",
+      "source_video_id": "pd_ipc_gpu_2022",
+      "source_segment_sec": {
+        "start": 276.0,
+        "end": 304.0
+      },
+      "clip_path": "clips/halloween_pumpkin_party.mp4",
+      "clip_contact_sheet": "clip_contact_sheets/halloween_pumpkin_party.jpg",
+      "clip_sha256": "c99f96991664a9b02c2746a6fdb4bd192c5732e58895d68e0ab68dee4a944d14",
+      "clip_bytes": 869227,
+      "prompt": "Create a stylized soft-body Halloween scene with soft pumpkin and ghost toy meshes bouncing around a rigid twisted tree and ground props, colliding and settling with no fabric or fluids, render 10s behavior.",
+      "pipeline_fit": "medium",
+      "notes": "A complete stylized soft-body scene. It relies on generated toy/prop meshes but no cloth or fluid simulation."
+    },
+    {
+      "title": "soft_dragon_obstacle_course",
+      "coverage": "soft_one_way_rigid",
+      "paper": "Penetration-free Projective Dynamics on the GPU",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2022",
+      "project_page": "https://math.ucla.edu/multiples/publication/",
+      "source_video_id": "pd_ipc_gpu_2022",
+      "source_segment_sec": {
+        "start": 196.0,
+        "end": 223.0
+      },
+      "clip_path": "clips/soft_dragon_obstacle_course.mp4",
+      "clip_contact_sheet": "clip_contact_sheets/soft_dragon_obstacle_course.jpg",
+      "clip_sha256": "87b0a343fd8ecfec7bd1fdb50ea95c1aecaeca00141e73c0ec0bd9f0e8506f6b",
+      "clip_bytes": 469394,
+      "prompt": "Create a soft-body scene where a long soft dragon toy is released through a field of fixed vertical rigid posts, bending, twisting, and tumbling around the obstacles through contact, render 10s behavior.",
+      "pipeline_fit": "medium",
+      "notes": "A non-cloth soft mesh demo with static rigid obstacle contact."
+    },
+    {
+      "title": "soft_toys_squeeze_through_tube",
+      "coverage": "rigid_soft_two_way",
+      "paper": "Incremental Potential Contact: Intersection- and Inversion-Free, Large-Deformation Dynamics",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2020",
+      "project_page": "https://ipc-sim.github.io/",
+      "source_video_id": "ipc_2020_supplemental",
+      "source_segment_sec": {
+        "start": 126.0,
+        "end": 157.0
+      },
+      "clip_path": "clips/soft_toys_squeeze_through_tube.mp4",
+      "clip_contact_sheet": "clip_contact_sheets/soft_toys_squeeze_through_tube.jpg",
+      "clip_sha256": "52c267a8b3dcd9836914758ae879b40eae66ed3036121707da9aa95ae0c8543d",
+      "clip_bytes": 860933,
+      "prompt": "Create a rigid-soft two-way coupled squeeze-out scene inside a fixed transparent container whose upper part is a vertical cylindrical tube and whose lower part is a tapered conical funnel with a small flat-cut circular opening at the very bottom. Pack the container with several soft FEM toy meshes: a red soft ball, a green lizard or dinosaur, a blue spider or crab-like toy, a tan bumpy plush animal, and a purple teardrop toy. A heavy dynamic rigid cylindrical plunger descends from above and physically presses the toys downward; every toy including the ball visibly squashes, bulges, jams against other toys and the transparent wall, squeezes through the small bottom opening, rebounds, and separates into a soft pile below, render 10s behavior.",
+      "pipeline_fit": "medium",
+      "notes": "A complete IPC squeeze-out demo adapted to two-way coupling by making the plunger a physical rigid participant."
+    },
+    {
+      "title": "spiky_soft_balls_pinball",
+      "coverage": "soft_one_way_rigid",
+      "paper": "Second-Order Stencil Descent for Interior-Point Hyperelasticity",
+      "venue": "ACM Trans. Graph. (SIGGRAPH), 42(4), 2023",
+      "project_page": "https://wanghmin.github.io/publication/lan-2023-sos/",
+      "source_video_id": "sos_hyperelasticity_2023",
+      "source_segment_sec": {
+        "start": 216.0,
+        "end": 253.0
+      },
+      "clip_path": "clips/spiky_soft_balls_pinball.mp4",
+      "clip_contact_sheet": "clip_contact_sheets/spiky_soft_balls_pinball.jpg",
+      "clip_sha256": "31b48504e56aa14e70874f31cb4b2560bb987970a05ed6b4f0b49dd68445ff5c",
+      "clip_bytes": 847475,
+      "prompt": "Create a soft-body pinball-like scene with several spiky soft balls inside a narrow arena of fixed rigid side walls and staggered short rigid pegs; launch or drop the balls so they bounce, snag, deform, and settle around the pegs, render 10s behavior.",
+      "pipeline_fit": "medium",
+      "notes": "A non-cloth soft-body contact scene with repeated obstacle impacts."
+    },
+    {
+      "title": "woven_basket_soft_impact",
+      "coverage": "rigid_soft_two_way",
+      "paper": "Second-Order Stencil Descent for Interior-Point Hyperelasticity",
+      "venue": "ACM Trans. Graph. (SIGGRAPH), 42(4), 2023",
+      "project_page": "https://wanghmin.github.io/publication/lan-2023-sos/",
+      "source_video_id": "sos_hyperelasticity_2023",
+      "source_segment_sec": {
+        "start": 119.0,
+        "end": 162.0
+      },
+      "clip_path": "clips/woven_basket_soft_impact.mp4",
+      "clip_contact_sheet": "clip_contact_sheets/woven_basket_soft_impact.jpg",
+      "clip_sha256": "a50ce53d28170a28840b8aa0608f9798b9c0d27946c920691262a87e3df7a7f5",
+      "clip_bytes": 2224022,
+      "prompt": "Create a rigid-soft coupled scene where a deformable woven basket made from elastic soft ring or lattice elements supports rigid branch-like objects and soft foliage; the objects fall into the basket, deform it deeply, and settle together through two-way contact, render 10s behavior.",
+      "pipeline_fit": "stretch",
+      "notes": "A more complete mixed rigid/deformable demo without fabric. Approximate the woven structure with generated soft lattice or soft torus/ring elements."
+    }
+  ]
+}

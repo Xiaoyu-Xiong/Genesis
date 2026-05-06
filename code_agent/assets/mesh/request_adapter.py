@@ -7,7 +7,7 @@ from code_agent.assets.mesh.models import MeshRepairConfig, MeshyGenerationConfi
 from code_agent.configs import CONFIGS
 
 
-MESH_ASSET_TYPES = {"mesh", "generated_mesh", "text_to_mesh", "text-to-mesh", "meshy"}
+MESH_ASSET_TYPES = {"generated_mesh"}
 
 
 def select_mesh_requests(
@@ -38,7 +38,7 @@ def select_mesh_requests(
 
 
 def is_mesh_asset_request(request: dict[str, Any]) -> bool:
-    asset_type = str(request.get("asset_type", "")).strip().lower().replace(" ", "_")
+    asset_type = str(request.get("asset_type", "")).strip().lower()
     return asset_type in MESH_ASSET_TYPES
 
 

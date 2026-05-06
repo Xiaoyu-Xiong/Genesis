@@ -24,14 +24,10 @@ class EpisodeActionExecutor:
                 return self.runtime.write_plan(action)
             if name == "start_mesh_assets":
                 return self.assets.start_mesh_assets(action)
-            if name == "generate_mesh_assets":
-                return self.assets.generate_mesh_assets(action)
             if name == "wait_mesh_assets":
                 return self.assets.wait_mesh_assets(action)
             if name == "start_xml_assets":
                 return self.assets.start_xml_assets(action)
-            if name == "generate_xml_assets":
-                return self.assets.generate_xml_assets(action)
             if name == "wait_xml_assets":
                 return self.assets.wait_xml_assets(action)
             if name == "spawn_workers":

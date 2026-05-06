@@ -10,6 +10,20 @@ from typing import Any
 
 
 DEFAULT_RENDER_SUFFIXES = (".mp4", ".mov", ".gif", ".png", ".jpg", ".jpeg", ".webp")
+IPC_INITIAL_PENETRATION_REASON = "ipc.initial_penetration"
+IPC_INITIAL_PENETRATION_OWNER = "body"
+_IPC_ERROR_TERMS = ("ipc", "uipc", "libuipc", "sanity_check", "sanity check")
+_PENETRATION_TERMS = (
+    "initial penetration",
+    "interpenetr",
+    "penetrat",
+    "intersection",
+    "intersect",
+    "thickness",
+    "distance",
+    "d_hat",
+    "barrier",
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -43,6 +57,7 @@ def evaluate_artifacts(config: DeterministicEvaluationConfig) -> dict[str, Any]:
 
     if config.require_successful_exit:
         _check_exit_code(execution_report, checks)
+    repair_hint = _classify_repair_hint(execution_report, run_dir, checks)
 
     summary_path = _resolve_artifact_path(config.summary_path, run_dir, artifact_paths, "summary.json")
     metrics_path = _resolve_artifact_path(config.metrics_path, run_dir, artifact_paths, "metrics.json")
@@ -67,6 +82,8 @@ def evaluate_artifacts(config: DeterministicEvaluationConfig) -> dict[str, Any]:
         "passed": passed,
         "checks": checks,
         "failure_classes": _failure_classes(checks),
+        "recommended_owner": repair_hint["recommended_owner"],
+        "repair_summary": repair_hint["repair_summary"],
         "created_at_unix": time.time(),
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,6 +163,56 @@ def _check_render(path: Path | None, checks: list[dict[str, Any]], required: boo
         checks.append(_check("render", "fail", "render.empty", f"{path} is empty."))
         return
     checks.append(_check("render", "pass", None, f"{path} exists and is non-empty."))
+
+
+def _classify_repair_hint(execution_report: Any, run_dir: Path, checks: list[dict[str, Any]]) -> dict[str, str | None]:
+    if not isinstance(execution_report, dict):
+        return {"recommended_owner": "none", "repair_summary": None}
+    exit_code = execution_report.get("exit_code")
+    if exit_code == 0 and not execution_report.get("timed_out", False):
+        return {"recommended_owner": "none", "repair_summary": None}
+
+    output_text = "\n".join(
+        text
+        for text in (
+            _read_execution_text(execution_report.get("stderr_path"), run_dir),
+            _read_execution_text(execution_report.get("stdout_path"), run_dir),
+            str(execution_report.get("error", "")),
+            str(execution_report.get("exception", "")),
+        )
+        if text
+    ).lower()
+    if not output_text:
+        return {"recommended_owner": "none", "repair_summary": None}
+
+    ipc_seen = any(term in output_text for term in _IPC_ERROR_TERMS)
+    penetration_seen = any(term in output_text for term in _PENETRATION_TERMS)
+    if not (ipc_seen and penetration_seen):
+        return {"recommended_owner": "none", "repair_summary": None}
+
+    summary = (
+        "libuipc/IPC reported an initial penetration, intersection, thickness, distance, or sanity-check failure. "
+        "Repair body.py by adjusting initial poses, scales, spacing, and container dimensions for FEM/generated-mesh/"
+        "rigid IPC bodies so collision surfaces do not overlap and have positive clearance before gravity or actions "
+        "produce compression."
+    )
+    checks.append(_check("ipc_initial_penetration", "fail", IPC_INITIAL_PENETRATION_REASON, summary))
+    return {"recommended_owner": IPC_INITIAL_PENETRATION_OWNER, "repair_summary": summary}
+
+
+def _read_execution_text(path_value: Any, run_dir: Path) -> str:
+    paths: list[Path] = []
+    if isinstance(path_value, str) and path_value:
+        path = Path(path_value)
+        paths.append(path if path.is_absolute() else (run_dir / path))
+    paths.extend([run_dir / "reports" / "stderr.txt", run_dir / "reports" / "stdout.txt"])
+    for path in paths:
+        try:
+            if path.is_file():
+                return path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+    return ""
 
 
 def _artifact_paths(execution_report: Any) -> list[Path]:

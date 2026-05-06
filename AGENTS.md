@@ -16,6 +16,13 @@ These rules are mandatory for this repository.
 - **Put memory caps on long WSL runs.** Launch overnight suites, mesh/XML asset batches, and other memory-heavy background
   jobs under a process-tree memory limit. Prefer `systemd-run --user` with `MemoryMax=...`; fall back to `ulimit` only
   when cgroups are unavailable. Record the run root, log path, service/unit or PID, and memory cap in the response.
+- **Preserve `uv` and CUDA library paths in non-interactive/systemd environments.** User systemd services and other
+  non-interactive shells may not inherit the interactive shell `PATH` or `LD_LIBRARY_PATH`. When launching suites or
+  generated simulations through `systemd-run`, pass an explicit `PATH` containing the directory that owns `uv`, or invoke
+  `uv` by absolute path. On WSL GPU runs, also pass the interactive CUDA library path (for example
+  `/home/xxyfh/Genesis/.venv/cuda-12.8/lib:/usr/lib/wsl/lib`) so Genesis does not load an incompatible system
+  `libcuda.so`. Otherwise nested execution may fail as inconclusive with `uv: command not found` or die during CUDA
+  initialization.
 
 ## Quick Start
 

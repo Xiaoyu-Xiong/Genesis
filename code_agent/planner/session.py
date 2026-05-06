@@ -32,6 +32,7 @@ class PlannerSessionConfig:
     duration_sec: float | None = None
     render_fps: int | None = None
     deformable_enabled: bool = False
+    ipc_enabled: bool = False
     max_planner_turns: int | None = None
 
 
@@ -51,7 +52,10 @@ class PlannerSession:
         self.state_path = self.reports_dir / "episode_state.json"
         self.summary_path = self.case_dir / "summary.json"
         self.timing: TimingPlan | None = None
-        self.deformable_config = deformable_config_dict(enabled=config.deformable_enabled)
+        self.deformable_config = deformable_config_dict(
+            deformable_enabled=config.deformable_enabled,
+            ipc_enabled=config.ipc_enabled,
+        )
         max_turns = config.max_planner_turns or max(12, 7 + config.repair_rounds * 5)
         self.state: dict[str, Any] = {
             "schema_version": 1,
@@ -63,7 +67,9 @@ class PlannerSession:
             "timing": None,
             "capabilities": {
                 "deformable_enabled": config.deformable_enabled,
-                "deformable_scope": "FEM+IPC only when enabled; MPM/PBD/SPH remain out of scope.",
+                "ipc_enabled": config.ipc_enabled,
+                "deformable_scope": "FEM only when enabled; MPM/PBD/SPH remain out of scope.",
+                "ipc_scope": "IPC may be enabled for rigid/articulated contact; deformable forces IPC on.",
                 "deformable_config_path": str(self.deformable_config_path),
             },
             "control": {
@@ -226,6 +232,7 @@ class PlannerSession:
             "stop_reason": self.state.get("stop_reason"),
             "blocked_reason": self.state.get("blocked_reason"),
             "deformable_enabled": self.config.deformable_enabled,
+            "ipc_enabled": self.config.ipc_enabled,
             "deformable_config_path": str(self.deformable_config_path),
         }
 
@@ -319,11 +326,14 @@ class PlannerSession:
                 f"- Machine-readable context JSON: {context_json}",
                 f"- Cached official docs directory: {docs_dir or '<see context JSON>'}",
                 f"- Selected official-doc catalog: {catalog_path or '<see context JSON>'}",
-                f"- Deformable generation enabled: {self.config.deformable_enabled}.",
-                f"- Effective deformable config: {self.deformable_config_path}",
-                "- Active non-rigid scope when enabled: FEM+IPC only.",
+                f"- FEM deformable generation enabled: {self.config.deformable_enabled}.",
+                f"- IPC contact/coupling enabled: {self.config.ipc_enabled}.",
+                f"- Effective FEM/IPC config: {self.deformable_config_path}",
+                "- Active non-rigid scope when FEM is enabled: FEM+IPC only.",
+                "- If FEM is disabled but IPC is enabled, rigid bodies and articulated MJCF/URDF assets may still use "
+                "IPC for contact/coupling.",
                 "- Rigid bodies, articulated MJCF/URDF robots, generated meshes, textures, and rendering are in scope "
-                "only as FEM+IPC support or as explicitly requested rigid/mesh scenes.",
+                "as explicitly requested rigid/mesh scenes or as FEM+IPC support.",
                 "- Prefer local Genesis source and examples over online docs if they disagree.",
             ]
         )

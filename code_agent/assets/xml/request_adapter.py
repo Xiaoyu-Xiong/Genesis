@@ -7,14 +7,7 @@ from code_agent.assets.mesh.request_adapter import positive_vector3, request_siz
 
 XML_ASSET_TYPES = {
     "mjcf",
-    "xml",
-    "generated_mjcf",
     "generated_xml",
-    "mjcf_xml",
-    "articulated_mjcf",
-    "articulated_xml",
-    "robot_mjcf",
-    "robot_xml",
 }
 
 
@@ -47,7 +40,7 @@ def select_xml_requests(
 
 
 def is_xml_asset_request(request: dict[str, Any]) -> bool:
-    asset_type = str(request.get("asset_type", "")).strip().lower().replace(" ", "_").replace("-", "_")
+    asset_type = str(request.get("asset_type", "")).strip().lower()
     return asset_type in XML_ASSET_TYPES
 
 

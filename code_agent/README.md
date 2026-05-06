@@ -1,91 +1,69 @@
 # Code Agent
 
-`code_agent/` is the code-native natural-language-to-Genesis pipeline. It generates runnable Genesis Python code plus
-artifacts, logs, metrics, and critic reports.
+`code_agent/` turns a natural-language case into runnable Genesis code, artifacts, metrics, render output, and critic
+reports.
 
-The current implementation stage uses a Planner-led episode runtime plus separate Codex Scene, Body, Action, and
-Rendering writers in `workspace-write` sandbox mode. Planner chooses structured actions for the full lifecycle of one
-case: writing the plan, waking generation workers, requesting integration and local GPU execution, asking Critic for
-evaluation, sending focused repair briefs, and finishing the episode.
+The active runtime is Planner-led:
 
-Mesh prompts and articulated MJCF/XML prompts can now be routed through Planner-callable asset actions, including
-background modes that can overlap with non-asset-dependent code writers. XML asset workers generate primitive MJCF
-body trees with MuJoCo import validation, preview rendering, and actuator response checks before their manifest entries
-are merged into the case asset manifest.
+1. `utils/suite.py` reads `case_id|prompt` cases and creates one workspace per case.
+2. `planner/session.py` runs Planner turns. Planner emits one JSON action at a time.
+3. `planner/action_handlers/` executes actions: start/wait asset jobs, spawn writers, integrate, run, evaluate, repair,
+   or finish.
+4. `writer/` owns four generated modules: `scene.py`, `body.py`, `action.py`, and `rendering.py`.
+5. `evaluation/` combines deterministic artifact checks, visual evidence, and the read-only Codex Critic.
 
-Implementation status is tracked in [Implementation Status](docs/status.md). That document distinguishes completed
-infrastructure, partially validated agent-written generation, and unimplemented asset work.
+## Physics Modes
 
-## Current Plan
+The suite exposes two switches:
 
-The implementation plan is [Codex-First Code Agent Pipeline Plan](agentive_code_pipeline_plan.md).
+- `--enable-deformable` / `--disable-deformable`
+- `--enable-ipc` / `--disable-ipc`
 
-The first-version worker split is represented in code and remains the default generation worker set:
+Supported modes:
 
-- `Scene Worker`: stage, fixed objects, global FEM+IPC defaults, artifact layout.
-- `Body Worker`: movable or task-participating actors.
-- `Action Worker`: scripted behavior, controls, metrics, event logging, task score.
-- `Rendering Worker`: camera placement, lights, render capture code, frame/video outputs, visual validation signals.
-- `Integrator`: deterministic final runnable project wiring.
+- ordinary rigid: deformable off, IPC off
+- rigid/articulated + IPC contact: deformable off, IPC on
+- FEM deformable + IPC: deformable on, IPC forced on
 
-Writer specs live in four files under `writer/`: `scene.py`, `body.py`, `action.py`, and `rendering.py`.
-`writer/dispatcher.py` owns Codex invocation, report parsing, target-file validation, role-set dispatch, and targeted
-repair dispatch.
+Generated code receives the effective contract at `contracts/deformable_config.json` as `deformable_cfg`.
 
-`planner/session.py` starts one Planner episode per case. Planner emits structured actions such as spawning workers,
-running integration, executing generated code, invoking Critic, requesting owner repair, running controlled
-Python/Pytest commands, or finishing the episode. Shell execution, GPU use, schema validation, write-scope enforcement,
-artifact collection, and retry limits stay inside the Python harness.
+## Assets
 
-When Planner emits `start_mesh_assets`, the harness starts the Meshy/repair/texture asset flow in the background for
-selected `generated_mesh` asset requests. When Planner emits `start_xml_assets`, the harness starts parallel MJCF/XML
-asset workers for selected articulated asset requests. Planner can dispatch writer roles that do not depend on the
-manifest while assets are still running, then call the relevant wait action before manifest-dependent writers or
-integration.
+Planner can start mesh or XML/MJCF asset jobs in the background:
 
-When Planner includes multiple independent writer roles in one `spawn_workers` action, the harness dispatches those
-writers concurrently. By default there is no artificial writer cap, so Planner can spawn all Scene, Body, Action, and
-Rendering writers in one turn when the shared plan/manifest is sufficient. Planner keeps dependent work serial by
-splitting it across multiple turns only when a concrete dependency requires it.
+- `start_mesh_assets` / `wait_mesh_assets`
+- `start_xml_assets` / `wait_xml_assets`
 
-## Directory Map
+Ready assets are merged into `assets/asset_manifest.json`. Writers must use manifest paths and metadata rather than
+guessing filesystem locations.
 
-| Directory | Purpose |
-| --- | --- |
-| `planner/` | Planner agent prompt construction, Planner-turn invocation, and per-case episode harness. |
-| `writer/` | Scene, Body, Action, and Rendering code-writing subagents plus writer dispatch. |
-| `utils/` | Codex invocation, local execution, suite loading, timing, and integration helpers. |
-| `evaluation/` | Deterministic checks and single-pass critic runner. See [Evaluation](docs/evaluation.md). |
-| `specs/` | JSON schemas for planner, worker, critic, execution, and repair reports. See [Specs](docs/specs.md). |
-| `assets/` | Asset routing and asset implementations. See [Assets](docs/assets.md). |
-| `assets/mesh/` | Meshy / repair / texture asset implementation. See [Mesh Pipeline](docs/mesh.md). |
-| `assets/xml/` | MJCF/XML articulated asset generation, validation, preview, and actuator checks. |
-| `scripts/` | Suite scripts and prompt cases. See [Scripts and Suites](docs/scripts.md). |
-| `workspaces/` | Generated run workspaces. See [Workspaces](docs/workspaces.md). |
-| `docs/` | Centralized documentation. |
+## Run
 
-## Execution Rule
-
-Python, `uv`, `pytest`, and Genesis execution should run through the repository uv environment, using the dedicated
-local GPU by default for simulation, rendering, profiling, optimization, tests, and examples. CPU execution is only for
-explicit CPU requests, unavailable GPU, or clearly CPU-only tasks. Codex workers edit only their assigned generated
-module and return a structured report. Workers should not execute Genesis simulations directly.
-
-## Current Validation Command
-
-Run a rigid suite on the local GPU:
+Use the repository uv environment:
 
 ```bash
-bash code_agent/scripts/rigid_primitives/run.sh \
+uv run python -m code_agent.cli run-suite \
+  --tasks-file code_agent/scripts/rigid_primitives/cases.txt \
+  --out-dir code_agent/workspaces/suites/rigid_primitives/dev \
   --gpu --max-cases 1 --render
 ```
 
-The planner is always part of the run. Suite timing comes from the planner's structured `execution_plan`; override it
-with `--duration-sec`, `--steps`, or `--render-fps` only when a case needs explicit timing.
-
-Deformable FEM+IPC generation is disabled by default. Enable it explicitly for deformable primitive iteration:
+For rigid+IPC:
 
 ```bash
-bash code_agent/scripts/deformable_primitives/run.sh \
-  --enable-deformable --gpu --render --max-cases 1
+uv run python -m code_agent.cli run-suite \
+  --tasks-file code_agent/scripts/siggraph_paper_demos/cases.txt \
+  --out-dir code_agent/workspaces/suites/siggraph_paper_demos/dev \
+  --disable-deformable --enable-ipc --gpu --max-cases 1 --render
 ```
+
+For FEM+IPC:
+
+```bash
+uv run python -m code_agent.cli run-suite \
+  --tasks-file code_agent/scripts/deformable_primitives/cases.txt \
+  --out-dir code_agent/workspaces/suites/deformable_primitives/dev \
+  --enable-deformable --gpu --max-cases 1 --render
+```
+
+More details live in [docs](docs/README.md).

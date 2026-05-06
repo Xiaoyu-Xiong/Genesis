@@ -12,13 +12,13 @@ class CodexConfigs:
     worker_model: str = "gpt-5.5"
     critic_model: str = "gpt-5.5"
     reasoning_effort: str = "xhigh"
-    service_tier: Literal["fast", "standard"] | None = "fast"
+    service_tier: Literal["fast", "standard"] | None = "standard"
     planner_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     critic_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     worker_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
     ask_for_approval: Literal["untrusted", "on-request", "never"] = "never"
     planner_timeout_sec: float = 900.0
-    worker_timeout_sec: float = 600.0
+    worker_timeout_sec: float = 900.0
     critic_timeout_sec: float = 900.0
 
 
@@ -40,14 +40,14 @@ class RuntimeConfigs:
 
     sim_dt: float = 0.01
     sim_substeps: int = 1
-    render_every_n_steps: int = 3
-    render_fps: int = 33
+    render_every_n_steps: int = 1
+    render_fps: int = 25
     render_res: tuple[int, int] = (640, 480)
 
 
 @dataclass(slots=True, frozen=True)
 class DeformableConfigs:
-    """FEM + IPC deformable defaults for generated simulations."""
+    """FEM deformable defaults for generated simulations."""
 
     enabled: bool = False
     friction: float = 0.3
@@ -67,31 +67,38 @@ class DeformableConfigs:
     fem_friction_mu: float = 0.3
     fem_contact_resistance: float | None = None
     fem_hessian_invariant: bool = False
+
+
+@dataclass(slots=True, frozen=True)
+class IPCConfigs:
+    """IPC contact/coupling defaults for generated simulations."""
+
+    enabled: bool = True
     ipc_newton_max_iterations: int | None = None
-    ipc_newton_min_iterations: int | None = 3
-    ipc_newton_tolerance: float | None = 0.02
-    ipc_newton_ccd_tolerance: float | None = 0.5
+    ipc_newton_min_iterations: int | None = 2
+    ipc_newton_tolerance: float | None = None
+    ipc_newton_ccd_tolerance: float | None = None
     ipc_newton_use_adaptive_tolerance: bool | None = True
-    ipc_newton_translation_tolerance: float | None = 0.05
+    ipc_newton_translation_tolerance: float | None = None
     ipc_newton_semi_implicit_enable: bool | None = None
     ipc_newton_semi_implicit_beta_tolerance: float | None = None
-    ipc_n_linesearch_iterations: int | None = 16
+    ipc_n_linesearch_iterations: int | None = None
     ipc_linesearch_report_energy: bool | None = None
-    ipc_linear_system_solver: Literal["linear_pcg", "direct"] | None = None
+    ipc_linear_system_solver: Literal["fused_pcg", "linear_pcg"] | None = "fused_pcg"
     ipc_linear_system_tolerance: float | None = None
     ipc_contact_enable: bool | None = None
-    ipc_contact_d_hat: float = 0.002
+    ipc_contact_d_hat: float = 0.01
     ipc_contact_friction_enable: bool = True
-    ipc_contact_resistance: float = 1.5e5
-    ipc_contact_eps_velocity: float = 0.02
-    ipc_contact_constitution: Literal["ipc", "isometric"] = "ipc"
-    ipc_collision_detection_method: Literal["linear_bvh", "spatial_hash"] = "linear_bvh"
+    ipc_contact_resistance: float = 3e6
+    ipc_contact_eps_velocity: float = 0.01
+    ipc_contact_constitution: Literal["ipc", "al-ipc"] = "ipc"
+    ipc_collision_detection_method: Literal["info_stackless_bvh", "stackless_bvh", "linear_bvh"] | None = "info_stackless_bvh"
     ipc_cfl_enable: bool | None = True
-    ipc_sanity_check_enable: bool | None = False
-    ipc_constraint_strength_translation: float = 0.5
-    ipc_constraint_strength_rotation: float = 0.2
+    ipc_sanity_check_enable: bool | None = True
+    ipc_constraint_strength_translation: float = 10
+    ipc_constraint_strength_rotation: float = 10
     ipc_enable_rigid_ground_contact: bool = False
-    ipc_enable_rigid_rigid_contact: bool = False
+    ipc_enable_rigid_rigid_contact: bool = True
     ipc_two_way_coupling: bool = True
     ipc_enable_rigid_dofs_sync: bool = True
     ipc_free_base_driven_by_ipc: bool = True
@@ -156,6 +163,7 @@ class MeshRepairConfigs:
     ftetwild_quiet: bool = True
     ftetwild_disable_filtering: bool = False
     tetgen_sanity_timeout_sec: float = 120.0
+    genesis_fem_import_timeout_sec: float = 240.0
     texture_transfer_max_resolution: int = 1024
     texture_transfer_chunk_size: int = 200000
 
@@ -176,6 +184,7 @@ class Configs:
     harness: HarnessConfigs
     runtime: RuntimeConfigs
     deformable: DeformableConfigs
+    ipc: IPCConfigs
     critic: CriticConfigs
     meshy_request: MeshyRequestConfigs
     mesh_repair: MeshRepairConfigs
@@ -187,6 +196,7 @@ CONFIGS = Configs(
     harness=HarnessConfigs(),
     runtime=RuntimeConfigs(),
     deformable=DeformableConfigs(),
+    ipc=IPCConfigs(),
     critic=CriticConfigs(),
     meshy_request=MeshyRequestConfigs(),
     mesh_repair=MeshRepairConfigs(),
@@ -194,10 +204,27 @@ CONFIGS = Configs(
 )
 
 
-def deformable_config_dict(*, enabled: bool | None = None) -> dict[str, object]:
-    """Return the effective deformable config exposed to Planner and generated code."""
+def deformable_config_dict(
+    *,
+    enabled: bool | None = None,
+    deformable_enabled: bool | None = None,
+    ipc_enabled: bool | None = None,
+) -> dict[str, object]:
+    """Return the effective FEM/IPC config exposed to Planner and generated code."""
+
+    if deformable_enabled is not None and enabled is not None and bool(deformable_enabled) != bool(enabled):
+        raise ValueError("enabled and deformable_enabled disagree")
+    if deformable_enabled is None:
+        deformable_enabled = enabled
 
     data = asdict(CONFIGS.deformable)
-    if enabled is not None:
-        data["enabled"] = bool(enabled)
+    effective_deformable_enabled = (
+        CONFIGS.deformable.enabled if deformable_enabled is None else bool(deformable_enabled)
+    )
+    requested_ipc_enabled = CONFIGS.ipc.enabled if ipc_enabled is None else bool(ipc_enabled)
+    effective_ipc_enabled = bool(effective_deformable_enabled or requested_ipc_enabled)
+
+    data["enabled"] = effective_deformable_enabled
+    data.update({key: value for key, value in asdict(CONFIGS.ipc).items() if key != "enabled"})
+    data["ipc_enabled"] = effective_ipc_enabled
     return data

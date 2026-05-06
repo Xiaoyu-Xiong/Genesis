@@ -12,6 +12,7 @@ from code_agent.utils.general_prompts import (
     GENERATED_RESULT_QUALITY_GUIDE,
     PHYSICAL_CAUSALITY_CONTRACT,
     PLANNER_GENERAL_RULES,
+    RIGID_IPC_COUPLING_GUIDE,
     SOURCE_AWARE_REPAIR_GUIDE,
 )
 
@@ -104,6 +105,7 @@ class EpisodePlanner:
         render_fps = CONFIGS.runtime.render_fps
         render_res = CONFIGS.runtime.render_res
         deformable_enabled = self.session.config.deformable_enabled
+        ipc_enabled = self.session.config.ipc_enabled
         deformable_config_text = json.dumps(self.session.deformable_config, indent=2)
         state_text = json.dumps(self._prompt_state(), indent=2)
         genesis_context = self.session.genesis_context_prompt()
@@ -117,15 +119,22 @@ class EpisodePlanner:
             Genesis documentation and local-code context:
             {genesis_context}
 
-            Deformable capability:
-            - Enabled: {deformable_enabled}
+            FEM/IPC capability:
+            - FEM deformable enabled: {deformable_enabled}
+            - IPC contact/coupling enabled: {ipc_enabled} (forced on whenever FEM deformable is enabled)
             - Effective config contract: {self.session.deformable_config_path}
             - Effective config values:
             {deformable_config_text}
-            - If enabled is false and the task fundamentally requires soft-body, jelly, elastic, FEM, IPC, or visible
+            - If FEM deformable is false and the task fundamentally requires soft-body, jelly, elastic, FEM, or visible
               deformation behavior, choose finish with verdict inconclusive. Do not write a rigid-body substitute.
-            - If enabled is true and the task requires soft-body behavior, use FEM+IPC only. Do not use MPM, PBD, SPH,
-              cloth-only shortcuts, or rigid-only substitutes.
+            - If FEM deformable is true and the task requires soft-body behavior, use FEM+IPC only. Do not use MPM,
+              PBD, SPH, cloth-only shortcuts, or rigid-only substitutes.
+            - If FEM deformable is false but IPC is true, rigid/articulated contact scenes may use IPC. Tell workers to
+              keep bodies rigid/articulated, configure `gs.options.IPCCouplerOptions`, and use rigid IPC coupling
+              materials for contact-heavy rigid behavior.
+              Use this coupling guide when choosing object roles and body/action contracts:
+              {RIGID_IPC_COUPLING_GUIDE}
+            - If IPC is false, workers must not instantiate `gs.options.IPCCouplerOptions`.
             - All FEM, IPC, tet, precision, and FEM material-range defaults must come from `deformable_cfg` /
               contracts/deformable_config.json in generated code.
             - FEM elastic material choices must include explicit `E`, `nu`, and `rho` values selected from the
@@ -145,6 +154,12 @@ class EpisodePlanner:
               asset_type=`generated_mesh` and set dispatch_graph.wait_for_asset_manifest=true when writers should wait
               for generated mesh paths before writing code. In each asset request, `scale` and `bbox` are positive XYZ
               dimensions in meters only; do not use them for position, lower bounds, centers, or signed extents.
+              Meshy mesh generation accepts at most 800 characters in the final mesh-agent prompt. Keep each
+              generated_mesh request concise enough that the assembled prompt from name, purpose, simulation_role,
+              dimensions, texture_needs, and the automatic simulation-ready geometry suffix stays within that limit.
+              Mesh asset generation owns mesh validity. If a generated mesh's manifold, texture transfer, or Genesis
+              FEM import validation fails, regenerate that asset through the mesh asset action; do not ask body/scene
+              workers to rewrite or procedurally repair the mesh geometry.
               For articulated robots, grippers, gates, latches, actuated mechanisms, or any task object that is best
               represented as one self-contained primitive MJCF body tree with joints and actuators, add an XML/MJCF
               asset request with asset_type=`generated_xml` or `mjcf`. Describe the required joints, actuator semantics,
@@ -179,16 +194,12 @@ class EpisodePlanner:
               immediately. Use `asset_names` to restrict generation to specific asset request names, or null/[] to
               generate all generated_mesh requests. Prefer this over blocking generation when any writer can make
               progress without the final manifest.
-            - generate_mesh_assets: compatibility action that starts mesh assets and waits for completion in the same
-              turn. Use it only when you deliberately want to serialize asset generation before all writers.
             - wait_mesh_assets: wait for a previously started background mesh asset job to finish and validate
               assets/asset_manifest.json.
             - start_xml_assets: start Planner-requested XML/MJCF assets in the background and return immediately. Use
               `asset_names` to restrict generation to specific XML/MJCF asset request names, or null/[] to generate all
               XML/MJCF requests. XML asset workers are parallel-capable by default, and this asset job may overlap with
               mesh asset jobs and code-writing workers that do not need the manifest yet.
-            - generate_xml_assets: compatibility action that starts XML/MJCF assets and waits for completion in the same
-              turn. Use it only when you deliberately want to serialize XML generation before all writers.
             - wait_xml_assets: wait for a previously started background XML/MJCF asset job to finish and merge its
               partial manifest into assets/asset_manifest.json.
             - spawn_workers: start one or more generation workers. Use `roles` from scene, body, action, rendering.
@@ -221,6 +232,11 @@ class EpisodePlanner:
               wait_mesh_assets / wait_xml_assets when the next useful writer/integration step requires the manifest.
             - If any generation worker is missing or failed, choose spawn_workers or request_repair for the relevant
               owner.
+            - If assets/asset_manifest.json or reports/asset_generation_report.json show a generated_mesh entry with
+              status failed, failed manifold validation, failed Genesis FEM import validation, missing/corrupt texture,
+              or an unsuitable generated topology, choose start_mesh_assets for the affected asset_names. Do not
+              request body/scene/action/rendering repair for mesh-intrinsic defects; those workers should only fix
+              placement, material use, controls, or rendering around ready assets.
             - To improve speed, prefer grouping all currently missing writer roles into one spawn_workers action.
               Keep dependencies serial only when a specific worker must inspect another worker's completed source/report
               before it can write a correct module.
@@ -231,6 +247,10 @@ class EpisodePlanner:
             - If the latest critic verdict is inconclusive because `codex_result.error_type` is `codex_usage_limit`,
               choose finish with verdict inconclusive; do not request code repair from a missing/blocked critic review.
             - If critic fails and repair budget remains, choose request_repair for the most relevant generation owner.
+            - If deterministic artifact checks, stderr, or stdout mention `ipc.initial_penetration`, libuipc initial
+              penetration/intersection/thickness/distance/sanity-check failure, choose request_repair for `body` with
+              the concrete error details; treat this as an initial placement/clearance issue, not an
+              execution-environment issue, unless the logs clearly show a missing dependency or runtime setup failure.
             - Prefer run_execution over generic run_python for generated simulations.
             - {GENERATED_RESULT_QUALITY_GUIDE}
 

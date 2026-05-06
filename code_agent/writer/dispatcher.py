@@ -256,15 +256,19 @@ def _worker_prompt(
         Asset manifest:
         {json.dumps(asset_manifest, indent=2)}
 
-        Effective deformable capability/config:
+        Effective FEM/IPC capability/config:
         {json.dumps(deformable_config, indent=2)}
 
-        Deformable generation policy:
-        - If deformable_config["enabled"] is false, do not create FEM materials, FEM entities, IPCCouplerOptions, or
-          deformable behavior. If the assigned task fundamentally requires soft-body deformation, fail clearly in your
-          worker report instead of writing a rigid-body substitute.
+        FEM/IPC generation policy:
+        - If deformable_config["enabled"] is false, do not create FEM materials, FEM entities, or deformable behavior.
+          If the assigned task fundamentally requires soft-body deformation, fail clearly in your worker report instead
+          of writing a rigid-body substitute.
         - If deformable_config["enabled"] is true and the planner asks for soft-body behavior, use FEM+IPC only. Do not
           use MPM, PBD, SPH, or other non-rigid solvers.
+        - If deformable_config["ipc_enabled"] is true, IPC contact/coupling may be used. For rigid-only scenes, keep
+          the bodies rigid/articulated and use IPC only for contact/coupling through `gs.options.IPCCouplerOptions` and
+          `gs.materials.Rigid(...)` coupling fields.
+        - If deformable_config["ipc_enabled"] is false, do not instantiate `gs.options.IPCCouplerOptions`.
         - All FEM, IPC, tet, precision, and FEM material-range defaults must come from deformable_config, not hardcoded
           local constants. FEM elastic bodies must still pass explicit task-appropriate `E`, `nu`, and `rho` values.
 
@@ -330,12 +334,12 @@ def _load_asset_manifest(case_dir: Path) -> dict[str, object]:
 def _load_deformable_config(case_dir: Path) -> dict[str, object]:
     path = case_dir / "contracts" / "deformable_config.json"
     if not path.exists():
-        return {"enabled": False, "unresolved_risks": [f"Missing deformable config contract: {path}"]}
+        return {"enabled": False, "ipc_enabled": False, "unresolved_risks": [f"Missing deformable config contract: {path}"]}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        return {"enabled": False, "unresolved_risks": [f"Invalid deformable config JSON: {path}"]}
-    return payload if isinstance(payload, dict) else {"enabled": False, "unresolved_risks": []}
+        return {"enabled": False, "ipc_enabled": False, "unresolved_risks": [f"Invalid deformable config JSON: {path}"]}
+    return payload if isinstance(payload, dict) else {"enabled": False, "ipc_enabled": False, "unresolved_risks": []}
 
 
 def _load_genesis_context(case_dir: Path) -> str:
@@ -359,7 +363,8 @@ def _load_genesis_context(case_dir: Path) -> str:
             f"- Machine-readable context JSON: {context_json}",
             f"- Cached official docs directory: {docs_dir}",
             f"- Selected official-doc catalog: {catalog_path}",
-            "- Active non-rigid scope: FEM+IPC only. For rigid/mesh cases, use rigid/mesh/rendering docs as needed.",
+            "- Active non-rigid scope: FEM+IPC only. IPC may also be used for rigid/articulated contact when enabled.",
+            "- For rigid/mesh cases, use rigid/mesh/rendering docs as needed.",
             "- Prefer local Genesis source and examples over online docs if they disagree.",
         ]
     )

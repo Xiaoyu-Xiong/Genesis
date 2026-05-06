@@ -342,11 +342,56 @@ class MeshManifoldCheckResult:
 
 
 @dataclass(slots=True)
+class MeshGenesisFEMImportResult:
+    ok: bool
+    runtime_path: Path
+    visual_path: Path | None
+    scale: tuple[float, float, float] | None
+    file_meshes_are_zup: bool | None
+    tet_resolution: int
+    vertex_count: int = 0
+    element_count: int = 0
+    surface_vertex_count: int = 0
+    surface_visual_uv_shape: tuple[int, int] | None = None
+    render_vertex_count: int | None = None
+    render_face_count: int | None = None
+    texture_path: Path | None = None
+    returncode: int | None = None
+    stdout_tail: str | None = None
+    stderr_tail: str | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "runtime_path": str(self.runtime_path),
+            "visual_path": None if self.visual_path is None else str(self.visual_path),
+            "scale": None if self.scale is None else list(self.scale),
+            "file_meshes_are_zup": self.file_meshes_are_zup,
+            "tet_resolution": self.tet_resolution,
+            "vertex_count": self.vertex_count,
+            "element_count": self.element_count,
+            "surface_vertex_count": self.surface_vertex_count,
+            "surface_visual_uv_shape": (
+                None if self.surface_visual_uv_shape is None else list(self.surface_visual_uv_shape)
+            ),
+            "render_vertex_count": self.render_vertex_count,
+            "render_face_count": self.render_face_count,
+            "texture_path": None if self.texture_path is None else str(self.texture_path),
+            "returncode": self.returncode,
+            "stdout_tail": self.stdout_tail,
+            "stderr_tail": self.stderr_tail,
+            "error": self.error,
+        }
+
+
+@dataclass(slots=True)
 class TextToMeshBundle:
     generation: MeshyGenerationResult
     texture: MeshyTextureResult | None = None
     repair: MeshRepairResult | None = None
     texture_transfer: MeshTextureTransferResult | None = None
+    genesis_fem_import: MeshGenesisFEMImportResult | None = None
     repair_attempts: tuple[MeshRepairResult, ...] = ()
     raw_manifold: MeshManifoldCheckResult | None = None
     manifold: MeshManifoldCheckResult | None = None
@@ -360,6 +405,8 @@ class TextToMeshBundle:
             data["repair"] = self.repair.to_dict()
         if self.texture_transfer is not None:
             data["texture_transfer"] = self.texture_transfer.to_dict()
+        if self.genesis_fem_import is not None:
+            data["genesis_fem_import"] = self.genesis_fem_import.to_dict()
         if self.repair_attempts:
             data["repair_attempts"] = [item.to_dict() for item in self.repair_attempts]
         if self.raw_manifold is not None:

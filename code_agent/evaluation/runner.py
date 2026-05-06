@@ -54,11 +54,19 @@ def evaluate_generated_run(
     ]
     failure_classes = artifact_report["failure_classes"]
     render_ok = "render.missing" not in failure_classes and "render.empty" not in failure_classes
-    recommended_owner = "none"
-    if codex_report is not None:
+    deterministic_owner = str(artifact_report.get("recommended_owner") or "none")
+    deterministic_repair_summary = artifact_report.get("repair_summary")
+    strong_deterministic_owner = deterministic_owner != "none" and "ipc.initial_penetration" in failure_classes
+    if strong_deterministic_owner:
+        recommended_owner = deterministic_owner
+    elif codex_report is not None:
         recommended_owner = str(codex_report.get("recommended_owner", "none"))
+    elif deterministic_owner != "none":
+        recommended_owner = deterministic_owner
     elif not execution_ok:
         recommended_owner = "execution"
+    else:
+        recommended_owner = "none"
 
     report: dict[str, Any] = {
         "verdict": verdict,
@@ -70,10 +78,12 @@ def evaluate_generated_run(
         "event_ok": True,
         "missing_artifacts": missing,
         "recommended_owner": recommended_owner,
+        "deterministic_recommended_owner": deterministic_owner,
+        "deterministic_repair_summary": deterministic_repair_summary,
         "physical_plausibility_score": 0.6 if verdict == "pass" else 0.2,
         "task_completion_score": 0.6 if verdict == "pass" else 0.2,
         "visual_clarity_score": 0.6 if render_ok else 0.0,
-        "summary": "Combined artifact checks and Codex critic.",
+        "summary": deterministic_repair_summary or "Combined artifact checks and Codex critic.",
         "artifact_report": artifact_report,
         "codex_critic_report": codex_report,
     }

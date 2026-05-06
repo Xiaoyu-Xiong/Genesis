@@ -39,93 +39,6 @@ class DownloadedMeshyAsset:
     profile_sec: dict[str, float]
     started_at_monotonic: float
 
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DownloadedMeshyAsset":
-        generation_data = data["generation"]
-        generation_config_data = data["generation_config"]
-        texture_config_data = data.get("texture_config")
-        texture_data = data.get("texture")
-
-        generation = MeshyGenerationResult(
-            provider=str(generation_data["provider"]),
-            prompt=str(generation_data["prompt"]),
-            output_dir=Path(generation_data["output_dir"]),
-            mesh_path=Path(generation_data["mesh_path"]),
-            prompt_path=Path(generation_data["prompt_path"]),
-            submit_response_path=Path(generation_data["submit_response_path"]),
-            final_response_path=Path(generation_data["final_response_path"]),
-            metadata_path=Path(generation_data["metadata_path"]),
-            preview_task_id=str(generation_data["preview_task_id"]),
-            final_status=str(generation_data["final_status"]),
-            stage_durations_sec=dict(generation_data.get("stage_durations_sec") or {}),
-            submit_response={},
-            final_response={},
-        )
-
-        generation_config = MeshyGenerationConfig(
-            prompt=str(generation_config_data["prompt"]),
-            output_dir=Path(generation_config_data["output_dir"]),
-            mesh_format=str(generation_config_data["mesh_format"]),
-            ai_model=str(generation_config_data["ai_model"]),
-            art_style=str(generation_config_data["art_style"]),
-            should_remesh=bool(generation_config_data["should_remesh"]),
-            topology=str(generation_config_data["topology"]),
-            target_polycount=generation_config_data.get("target_polycount"),
-            symmetry_mode=str(generation_config_data["symmetry_mode"]),
-            moderation=bool(generation_config_data["moderation"]),
-            negative_prompt=generation_config_data.get("negative_prompt"),
-            auto_size=bool(generation_config_data["auto_size"]),
-            origin_at=generation_config_data.get("origin_at"),
-            poll_interval_sec=float(generation_config_data["poll_interval_sec"]),
-            max_wait_sec=float(generation_config_data["max_wait_sec"]),
-            extra_payload=dict(generation_config_data.get("extra_payload") or {}),
-        )
-
-        texture_config = None
-        if texture_config_data is not None:
-            texture_config = MeshyTextureConfig(
-                enabled=bool(texture_config_data["enabled"]),
-                texture_prompt=texture_config_data.get("texture_prompt"),
-                ai_model=texture_config_data.get("ai_model"),
-                enable_pbr=bool(texture_config_data["enable_pbr"]),
-                remove_lighting=bool(texture_config_data["remove_lighting"]),
-            )
-
-        texture = None
-        if texture_data is not None:
-            texture = MeshyTextureResult(
-                requested=bool(texture_data["requested"]),
-                ok=bool(texture_data["ok"]),
-                prompt=str(texture_data["prompt"]),
-                output_dir=Path(texture_data["output_dir"]),
-                preview_task_id=str(texture_data["preview_task_id"]),
-                refine_task_id=texture_data.get("refine_task_id"),
-                submit_response_path=_optional_path(texture_data.get("submit_response_path")),
-                final_response_path=_optional_path(texture_data.get("final_response_path")),
-                textured_mesh_path=_optional_path(texture_data.get("textured_mesh_path")),
-                textured_mtl_path=_optional_path(texture_data.get("textured_mtl_path")),
-                texture_paths={key: Path(path) for key, path in dict(texture_data.get("texture_paths") or {}).items()},
-                ai_model=texture_data.get("ai_model"),
-                enable_pbr=bool(texture_data["enable_pbr"]),
-                remove_lighting=bool(texture_data["remove_lighting"]),
-                final_status=texture_data.get("final_status"),
-                stage_durations_sec=dict(texture_data.get("stage_durations_sec") or {}),
-                submit_response={},
-                final_response={},
-                error=texture_data.get("error"),
-            )
-
-        return cls(
-            generation=generation,
-            generation_config=generation_config,
-            texture_config=texture_config,
-            texture=texture,
-            pipeline_source_mesh_path=Path(data["pipeline_source_mesh_path"]),
-            pipeline_source_kind=str(data["pipeline_source_kind"]),
-            profile_sec=dict(data.get("profile_sec") or {}),
-            started_at_monotonic=time.monotonic(),
-        )
-
     def to_dict(self) -> dict[str, Any]:
         return {
             "generation": self.generation.to_dict(),
@@ -323,9 +236,3 @@ def process_downloaded_meshy_mesh(
         manifold=final_manifold_result,
         profile_sec=profile_sec,
     )
-
-
-def _optional_path(value: object) -> Path | None:
-    if value is None:
-        return None
-    return Path(str(value))

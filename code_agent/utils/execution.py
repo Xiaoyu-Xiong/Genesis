@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import os
 import tempfile
 import threading
@@ -9,11 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from code_agent.utils.local_execution import LocalRunConfig, run_local
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - WSL/Linux has fcntl; keep a thread-lock fallback for portability.
-    fcntl = None  # type: ignore[assignment]
 
 
 _GENESIS_EXECUTION_THREAD_LOCK = threading.Lock()
@@ -125,11 +121,9 @@ def _exclusive_genesis_execution_lock():
     started = time.time()
     with _GENESIS_EXECUTION_THREAD_LOCK:
         with lock_path.open("a+", encoding="utf-8") as lock_file:
-            if fcntl is not None:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             wait_sec = time.time() - started
             try:
                 yield {"path": lock_path, "wait_sec": wait_sec}
             finally:
-                if fcntl is not None:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
