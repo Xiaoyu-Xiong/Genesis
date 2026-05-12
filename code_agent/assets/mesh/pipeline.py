@@ -58,7 +58,10 @@ def download_meshy_mesh_from_text(
     generation_config: MeshyGenerationConfig,
     texture_config: MeshyTextureConfig | None = None,
 ) -> DownloadedMeshyAsset:
-    meshy_geometry_prompt = augment_meshy_geometry_prompt(prompt)
+    meshy_geometry_prompt = augment_meshy_geometry_prompt(
+        prompt,
+        max_chars=generation_config.prompt_max_chars,
+    )
     generation_config.prompt = meshy_geometry_prompt
 
     output_dir = generation_config.output_dir

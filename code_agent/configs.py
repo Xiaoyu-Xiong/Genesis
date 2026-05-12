@@ -117,6 +117,7 @@ class CriticConfigs:
 class MeshyRequestConfigs:
     """Meshy asset request defaults."""
 
+    prompt_max_chars: int = 800
     max_parallel_api_requests: int | None = None
     max_parallel_local_processing: int = 1
     mesh_format: Literal["obj", "glb", "stl"] = "obj"

@@ -5,7 +5,7 @@
 Flow:
 
 1. `request_adapter.py` selects requests and builds concise Meshy prompts.
-2. `episode.py` runs Meshy API calls and writes progress reports.
+2. `episode.py` preserves unselected ready mesh entries, regenerates selected requests, and writes progress reports.
 3. `pipeline.py` downloads, repairs, validates manifold geometry, transfers texture metadata, and records profiles.
 4. `validation.py` checks whether the repaired mesh can be imported as Genesis FEM geometry.
 5. `manifest.py` writes the canonical entry consumed by Scene/Body workers.

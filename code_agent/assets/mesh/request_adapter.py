@@ -47,6 +47,7 @@ def meshy_generation_config(prompt: str, output_dir: Path) -> MeshyGenerationCon
     return MeshyGenerationConfig(
         prompt=prompt,
         output_dir=output_dir,
+        prompt_max_chars=defaults.prompt_max_chars,
         mesh_format=defaults.mesh_format,
         ai_model=defaults.ai_model,
         art_style=defaults.art_style,

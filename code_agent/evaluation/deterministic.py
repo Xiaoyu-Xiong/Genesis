@@ -194,7 +194,9 @@ def _classify_repair_hint(execution_report: Any, run_dir: Path, checks: list[dic
         "libuipc/IPC reported an initial penetration, intersection, thickness, distance, or sanity-check failure. "
         "Repair body.py by adjusting initial poses, scales, spacing, and container dimensions for FEM/generated-mesh/"
         "rigid IPC bodies so collision surfaces do not overlap and have positive clearance before gravity or actions "
-        "produce compression."
+        "produce compression. If the same log later reports 'IPC rigid state accessor feature is unavailable', treat "
+        "that accessor message as a secondary consequence of the invalid IPC world unless it is reproduced without "
+        "initial-geometry or 'World is not valid' diagnostics."
     )
     checks.append(_check("ipc_initial_penetration", "fail", IPC_INITIAL_PENETRATION_REASON, summary))
     return {"recommended_owner": IPC_INITIAL_PENETRATION_OWNER, "repair_summary": summary}

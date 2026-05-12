@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from urllib import error, parse, request
 
-from ..models import MeshyApiConfig, MeshyGenerationConfig, MeshyRequestError
+from ..models import MeshyApiConfig, MeshyGenerationConfig, MeshyPromptLengthError, MeshyRequestError
 
 
 class MeshyClient:
@@ -14,6 +14,11 @@ class MeshyClient:
         self.config = config
 
     def submit_text_to_mesh(self, generation: MeshyGenerationConfig) -> dict[str, object]:
+        if len(generation.prompt) > generation.prompt_max_chars:
+            raise MeshyPromptLengthError(
+                prompt_len=len(generation.prompt),
+                max_chars=generation.prompt_max_chars,
+            )
         payload: dict[str, object] = {
             "mode": "preview",
             "prompt": generation.prompt,
@@ -176,6 +181,11 @@ class MeshyClient:
                 raw = resp.read().decode("utf-8")
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace") if hasattr(exc, "read") else str(exc)
+            if _is_prompt_length_error(detail):
+                raise MeshyPromptLengthError(
+                    max_chars=_extract_prompt_limit(detail),
+                    detail=detail[:500],
+                ) from exc
             raise MeshyRequestError(f"Meshy {label} HTTP {exc.code}: {detail}") from exc
         except error.URLError as exc:
             raise MeshyRequestError(f"Meshy {label} request failed: {exc.reason}") from exc
@@ -225,6 +235,20 @@ def _task_error_message(payload: dict[str, object]) -> str:
         if isinstance(message, str) and message.strip():
             return message.strip()
     return ""
+
+
+def _is_prompt_length_error(detail: str) -> bool:
+    lowered = detail.lower()
+    if "prompt" not in lowered:
+        return False
+    length_terms = ("length", "character", "char", "too long", "at most", "maximum", "max")
+    return "800" in lowered or any(term in lowered for term in length_terms)
+
+
+def _extract_prompt_limit(detail: str) -> int | None:
+    if "800" in detail:
+        return 800
+    return None
 
 
 MESHY_READY_SET = frozenset({"SUCCEEDED"})

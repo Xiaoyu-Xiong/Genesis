@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from code_agent.assets.mesh.manifest import build_manifest, failed_manifest_entry, manifest_entry_from_bundle
-from code_agent.assets.mesh.models import MeshyApiConfig
+from code_agent.assets.mesh.models import MeshyApiConfig, MeshyPromptLengthError
 from code_agent.assets.mesh.pipeline import download_meshy_mesh_from_text, process_downloaded_meshy_mesh
 from code_agent.assets.mesh.request_adapter import (
     mesh_prompt_from_request,
@@ -19,6 +19,9 @@ from code_agent.assets.mesh.validation import run_genesis_fem_import_validation
 from code_agent.assets.mesh.workflow.steps import slugify_prompt
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import dump_json
+
+
+MESH_PROMPT_LENGTH_FAILURE_CLASS = "mesh.prompt_length_exceeded"
 
 
 def generate_mesh_assets_for_episode(
@@ -34,23 +37,29 @@ def generate_mesh_assets_for_episode(
     manifest_path = assets_dir / "asset_manifest.json"
     report_path = case_dir / "reports" / "asset_generation_report.json"
     selected_requests, skipped_names = select_mesh_requests(planner_output, asset_names)
+    selected_names = [str(request.get("name", "")) for request in selected_requests]
+    mentioned_names = {name for name in selected_names if name} | {name for name in asset_names or [] if name}
+    preserved_entries = _preserved_ready_manifest_entries(manifest_path, mentioned_names)
+    preserved_results = [_preserved_result_entry(entry) for entry in preserved_entries]
+    preserved_names = [str(entry.get("logical_name", "")) for entry in preserved_entries if entry.get("logical_name")]
 
     if not selected_requests:
-        manifest = {
-            "assets": [],
-            "assumptions": ["No generated mesh asset requests were selected for this episode."],
-            "unresolved_risks": [
-                f"Requested asset name was not found or was not a mesh request: {name}" for name in skipped_names
-            ],
-        }
+        manifest = build_manifest(preserved_entries, skipped_names=skipped_names)
+        manifest["assumptions"].append(
+            "No generated mesh asset requests were selected; ready unselected mesh entries were preserved."
+        )
         report = {
             "ok": not skipped_names,
-            "status": "no_mesh_requests",
+            "status": "mesh_assets_ready" if preserved_entries and not skipped_names else "no_mesh_requests",
+            "message": None,
             "asset_manifest_path": str(manifest_path),
             "asset_generation_report_path": str(report_path),
+            "num_assets": len(preserved_entries),
             "selected_asset_names": [],
+            "preserved_asset_names": preserved_names,
             "skipped_asset_names": skipped_names,
-            "assets": [],
+            "failure_classes": [],
+            "assets": preserved_results,
         }
         dump_json(manifest, manifest_path)
         dump_json(report, report_path)
@@ -59,19 +68,28 @@ def generate_mesh_assets_for_episode(
     try:
         api_config = MeshyApiConfig.from_env(timeout_sec=CONFIGS.meshy_request.timeout_sec)
     except Exception as exc:  # noqa: BLE001 - convert provider setup failures into manifest entries.
-        entries = [failed_manifest_entry(request, f"{type(exc).__name__}: {exc}") for request in selected_requests]
+        generated_entries = [
+            failed_manifest_entry(request, f"{type(exc).__name__}: {exc}") for request in selected_requests
+        ]
+        entries = _merge_manifest_entries(preserved_entries, generated_entries)
         manifest = build_manifest(entries, skipped_names=skipped_names)
+        generated_results = [
+            {"ok": False, "request": request, "manifest_entry": entry, "error": entry["notes"][0]}
+            for request, entry in zip(selected_requests, generated_entries, strict=False)
+        ]
         report = {
             "ok": False,
             "status": "provider_unavailable",
+            "message": "Mesh asset provider is unavailable.",
             "asset_manifest_path": str(manifest_path),
             "asset_generation_report_path": str(report_path),
-            "selected_asset_names": [str(request.get("name", "")) for request in selected_requests],
+            "num_assets": len(entries),
+            "selected_asset_names": selected_names,
+            "generated_asset_names": selected_names,
+            "preserved_asset_names": preserved_names,
             "skipped_asset_names": skipped_names,
-            "assets": [
-                {"ok": False, "request": request, "manifest_entry": entry, "error": entry["notes"][0]}
-                for request, entry in zip(selected_requests, entries, strict=False)
-            ],
+            "failure_classes": ["mesh.provider_unavailable"],
+            "assets": preserved_results + generated_results,
         }
         dump_json(manifest, manifest_path)
         dump_json(report, report_path)
@@ -80,21 +98,23 @@ def generate_mesh_assets_for_episode(
     output_root = assets_dir / "mesh"
     api_max_workers = _meshy_api_max_workers(len(selected_requests))
     local_max_workers = max(1, min(len(selected_requests), CONFIGS.meshy_request.max_parallel_local_processing))
-    selected_names = [str(request.get("name", "")) for request in selected_requests]
     progress_report = {
         "ok": False,
         "status": "mesh_asset_generation_running",
         "asset_manifest_path": str(manifest_path),
         "asset_generation_report_path": str(report_path),
-        "num_assets": len(selected_requests),
+        "num_assets": len(preserved_entries) + len(selected_requests),
         "api_parallel": api_max_workers > 1,
         "max_parallel_api_requests": api_max_workers,
         "local_parallel": local_max_workers > 1,
         "max_parallel_local_processing": local_max_workers,
         "selected_asset_names": selected_names,
+        "generated_asset_names": selected_names,
+        "preserved_asset_names": preserved_names,
         "skipped_asset_names": skipped_names,
+        "failure_classes": [],
         "api_assets": [],
-        "assets": [],
+        "assets": preserved_results,
     }
     dump_json(progress_report, report_path)
 
@@ -156,27 +176,44 @@ def generate_mesh_assets_for_episode(
         dump_json(progress_report, report_path)
         result = _process_one_mesh_asset(api_result)
         results.append(result)
-        progress_report["assets"] = results
-        partial_manifest = build_manifest([item["manifest_entry"] for item in results], skipped_names=skipped_names)
+        progress_report["assets"] = preserved_results + results
+        partial_entries = _merge_manifest_entries(preserved_entries, [item["manifest_entry"] for item in results])
+        partial_manifest = build_manifest(partial_entries, skipped_names=skipped_names)
         dump_json(partial_manifest, manifest_path)
         dump_json(progress_report, report_path)
 
-    manifest = build_manifest([result["manifest_entry"] for result in results], skipped_names=skipped_names)
+    entries = _merge_manifest_entries(preserved_entries, [result["manifest_entry"] for result in results])
+    manifest = build_manifest(entries, skipped_names=skipped_names)
     ok = all(bool(result.get("ok")) for result in results) and not skipped_names
+    failure_classes = _failure_classes_from_results(results)
+    prompt_length_assets = _asset_names_for_failure(results, MESH_PROMPT_LENGTH_FAILURE_CLASS)
+    prompt_length_message = _prompt_length_report_message(prompt_length_assets) if prompt_length_assets else None
     report = {
         "ok": ok,
-        "status": "mesh_assets_generated" if ok else "mesh_asset_generation_failed",
+        "status": (
+            "mesh_assets_generated"
+            if ok
+            else "mesh_prompt_length_exceeded"
+            if prompt_length_assets
+            else "mesh_asset_generation_failed"
+        ),
+        "message": prompt_length_message,
+        "recommended_owner": "planner" if prompt_length_assets else None,
+        "repair_summary": prompt_length_message,
         "asset_manifest_path": str(manifest_path),
         "asset_generation_report_path": str(report_path),
-        "num_assets": len(results),
+        "num_assets": len(entries),
         "api_parallel": api_max_workers > 1,
         "max_parallel_api_requests": api_max_workers,
         "local_parallel": local_max_workers > 1,
         "max_parallel_local_processing": local_max_workers,
         "selected_asset_names": selected_names,
+        "generated_asset_names": selected_names,
+        "preserved_asset_names": preserved_names,
         "skipped_asset_names": skipped_names,
+        "failure_classes": failure_classes,
         "api_assets": [_api_progress_entry(result) for result in api_results if result is not None],
-        "assets": results,
+        "assets": preserved_results + results,
     }
     dump_json(manifest, manifest_path)
     dump_json(report, report_path)
@@ -214,6 +251,20 @@ def _download_one_mesh_asset(
             "downloaded": downloaded,
             "downloaded_asset": downloaded.to_dict(),
         }
+    except MeshyPromptLengthError as exc:
+        mesh_prompt = mesh_prompt_from_request(request, task)
+        message = _prompt_length_asset_message(request, mesh_prompt, exc)
+        manifest_entry = failed_manifest_entry(request, message)
+        return {
+            "ok": False,
+            "request": request,
+            "mesh_prompt": mesh_prompt,
+            "manifest_entry": manifest_entry,
+            "error": message,
+            "failure_class": MESH_PROMPT_LENGTH_FAILURE_CLASS,
+            "recommended_owner": "planner",
+            "repair_summary": message,
+        }
     except Exception as exc:  # noqa: BLE001 - one failed mesh should not hide the full asset report.
         manifest_entry = failed_manifest_entry(request, f"{type(exc).__name__}: {exc}")
         return {
@@ -236,6 +287,9 @@ def _process_one_mesh_asset(api_result: dict[str, Any]) -> dict[str, Any]:
             "mesh_prompt": api_result.get("mesh_prompt", ""),
             "manifest_entry": api_result["manifest_entry"],
             "error": api_result.get("error", "Meshy API phase failed."),
+            "failure_class": api_result.get("failure_class"),
+            "recommended_owner": api_result.get("recommended_owner"),
+            "repair_summary": api_result.get("repair_summary"),
             "api_phase": _api_progress_entry(api_result),
         }
     try:
@@ -266,6 +320,115 @@ def _process_one_mesh_asset(api_result: dict[str, Any]) -> dict[str, Any]:
             "api_phase": _api_progress_entry(api_result),
             "error": manifest_entry["notes"][0],
         }
+
+
+def _preserved_ready_manifest_entries(manifest_path: Path, selected_names: set[str]) -> list[dict[str, Any]]:
+    manifest = _load_json_dict(manifest_path)
+    raw_assets = manifest.get("assets")
+    if not isinstance(raw_assets, list):
+        return []
+    preserved: list[dict[str, Any]] = []
+    for raw_entry in raw_assets:
+        if not isinstance(raw_entry, dict):
+            continue
+        entry = dict(raw_entry)
+        name = str(entry.get("logical_name", ""))
+        if name in selected_names:
+            continue
+        if _is_ready_generated_mesh_entry(entry):
+            preserved.append(entry)
+    return preserved
+
+
+def _is_ready_generated_mesh_entry(entry: dict[str, Any]) -> bool:
+    if entry.get("source_type") != "generated_mesh" or entry.get("status") != "ready":
+        return False
+    runtime_path = entry.get("runtime_path")
+    if not _manifest_file_available(runtime_path, required=True):
+        return False
+    if not _manifest_file_available(entry.get("visual_path"), required=False):
+        return False
+    return _manifest_file_available(entry.get("texture_path"), required=False)
+
+
+def _manifest_file_available(value: Any, *, required: bool) -> bool:
+    if value is None:
+        return not required
+    if not isinstance(value, str) or not value or value == "unavailable":
+        return False
+    return Path(value).is_file()
+
+
+def _preserved_result_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "preserved": True,
+        "request": {"name": entry.get("logical_name", "")},
+        "manifest_entry": entry,
+    }
+
+
+def _merge_manifest_entries(
+    preserved_entries: list[dict[str, Any]],
+    generated_entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    entries_by_name: dict[str, dict[str, Any]] = {}
+    ordered_names: list[str] = []
+    for entry in [*preserved_entries, *generated_entries]:
+        name = str(entry.get("logical_name", ""))
+        if not name:
+            continue
+        if name not in entries_by_name:
+            ordered_names.append(name)
+        entries_by_name[name] = entry
+    return [entries_by_name[name] for name in ordered_names]
+
+
+def _failure_classes_from_results(results: list[dict[str, Any]]) -> list[str]:
+    return sorted(
+        {
+            str(result.get("failure_class"))
+            for result in results
+            if result.get("failure_class")
+        }
+    )
+
+
+def _asset_names_for_failure(results: list[dict[str, Any]], failure_class: str) -> list[str]:
+    names: list[str] = []
+    for result in results:
+        if result.get("failure_class") != failure_class:
+            continue
+        request = result.get("request")
+        if isinstance(request, dict):
+            name = str(request.get("name", "")).strip()
+            if name:
+                names.append(name)
+    return sorted(set(names))
+
+
+def _prompt_length_report_message(asset_names: list[str]) -> str:
+    names = ", ".join(asset_names)
+    return (
+        f"Meshy mesh prompt length exceeded the {CONFIGS.meshy_request.prompt_max_chars}-character limit for: {names}. "
+        "Planner should simplify the affected generated_mesh asset request once, especially purpose, simulation_role, "
+        "and texture_needs, then retry start_mesh_assets for those asset_names."
+    )
+
+
+def _prompt_length_asset_message(
+    request: dict[str, Any],
+    mesh_prompt: str,
+    exc: MeshyPromptLengthError,
+) -> str:
+    limit = exc.max_chars or CONFIGS.meshy_request.prompt_max_chars
+    prompt_len = exc.prompt_len or len(mesh_prompt)
+    name = str(request.get("name", "mesh_asset"))
+    return (
+        f"Meshy mesh prompt length exceeded ({prompt_len}>{limit}) for `{name}`. "
+        "Planner should simplify this generated_mesh asset request once, especially purpose, simulation_role, and "
+        "texture_needs, then retry mesh generation."
+    )
 
 
 def _load_json_dict(path: Path) -> dict[str, Any]:

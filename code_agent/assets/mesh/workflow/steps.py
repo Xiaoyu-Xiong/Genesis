@@ -21,6 +21,12 @@ from ..texture.obj_io import rewrite_mtl_base_color, rewrite_obj_mtllib
 from .meshy import MeshyClient
 
 
+MESHY_MANIFOLD_REQUIREMENT = (
+    "Make it one closed watertight manifold object with no open boundaries, loose fragments, thin shells, or "
+    "self-intersections. Prioritize simulation-ready geometry over fine detail."
+)
+
+
 def run_repair_pipeline(
     *,
     mesh_path: Path,
@@ -127,6 +133,7 @@ def run_texture_pipeline(
         return None
 
     texture_prompt = texture_config.texture_prompt.strip() if texture_config.texture_prompt else prompt.strip()
+    texture_prompt = fit_meshy_prompt(texture_prompt, max_chars=generation_config.prompt_max_chars)
     ai_model = texture_config.ai_model or generation_config.ai_model
     submit_response_path = output_dir / "meshy_texture_submit_response.json"
     final_response_path = output_dir / "meshy_texture_final_response.json"
@@ -266,12 +273,8 @@ def extract_task_id(payload: dict[str, object]) -> str:
     return result.strip()
 
 
-def augment_meshy_geometry_prompt(prompt: str) -> str:
+def augment_meshy_geometry_prompt(prompt: str, *, max_chars: int | None = None) -> str:
     base_prompt = prompt.strip()
-    manifold_requirement = (
-        "Make it one closed watertight manifold object with no open boundaries, loose fragments, thin shells, or "
-        "self-intersections. Prioritize simulation-ready geometry over fine detail."
-    )
     lowered = base_prompt.lower()
     manifold_markers = (
         "watertight",
@@ -282,8 +285,39 @@ def augment_meshy_geometry_prompt(prompt: str) -> str:
         "holes",
     )
     if any(marker in lowered for marker in manifold_markers):
-        return base_prompt
-    return f"{base_prompt}\n\n{manifold_requirement}"
+        return fit_meshy_prompt(base_prompt, max_chars=max_chars)
+    return fit_meshy_prompt(f"{base_prompt}\n\n{MESHY_MANIFOLD_REQUIREMENT}", max_chars=max_chars)
+
+
+def fit_meshy_prompt(prompt: str, *, max_chars: int | None) -> str:
+    normalized = " ".join(prompt.split())
+    if max_chars is None or len(normalized) <= max_chars:
+        return normalized
+
+    suffix = " ".join(MESHY_MANIFOLD_REQUIREMENT.split())
+    if normalized.endswith(suffix) and len(suffix) + 2 < max_chars:
+        prefix = normalized[: -len(suffix)].strip()
+        prefix_limit = max_chars - len(suffix) - 2
+        prefix = _truncate_prompt_text(prefix, prefix_limit)
+        if prefix:
+            return f"{prefix}\n\n{suffix}"
+
+    return _truncate_prompt_text(normalized, max_chars)
+
+
+def _truncate_prompt_text(text: str, max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+
+    cut = text[: max_chars - 3].rstrip()
+    word_cut = cut.rsplit(" ", 1)[0]
+    if len(word_cut) >= max_chars // 2:
+        cut = word_cut
+    return f"{cut.rstrip(' ,.;:')}..."
 
 
 def slugify_prompt(prompt: str) -> str:

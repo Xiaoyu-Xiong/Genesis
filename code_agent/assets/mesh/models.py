@@ -20,6 +20,26 @@ class MeshyRequestError(RuntimeError):
     pass
 
 
+class MeshyPromptLengthError(MeshyRequestError):
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        prompt_len: int | None = None,
+        max_chars: int | None = None,
+        detail: str | None = None,
+    ) -> None:
+        limit_text = f"{max_chars} characters" if max_chars is not None else "the provider character limit"
+        length_text = f" ({prompt_len} characters)" if prompt_len is not None else ""
+        base = message or f"Meshy prompt length exceeded {limit_text}{length_text}."
+        if detail:
+            base = f"{base} Provider detail: {detail}"
+        super().__init__(base)
+        self.prompt_len = prompt_len
+        self.max_chars = max_chars
+        self.detail = detail
+
+
 @dataclass(slots=True)
 class MeshyApiConfig:
     api_key: str
@@ -64,6 +84,7 @@ class MeshyApiConfig:
 class MeshyGenerationConfig:
     prompt: str
     output_dir: Path
+    prompt_max_chars: int = CONFIGS.meshy_request.prompt_max_chars
     mesh_format: str = CONFIGS.meshy_request.mesh_format
     ai_model: str = CONFIGS.meshy_request.ai_model
     art_style: str = CONFIGS.meshy_request.art_style
@@ -99,6 +120,8 @@ class MeshyGenerationConfig:
             raise ValueError("`target_polycount` must be > 0 when provided.")
         if self.origin_at is not None and self.origin_at not in {"bottom", "center"}:
             raise ValueError("`origin_at` must be one of: bottom, center.")
+        if self.prompt_max_chars <= 0:
+            raise ValueError("`prompt_max_chars` must be > 0.")
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

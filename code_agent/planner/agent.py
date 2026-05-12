@@ -10,6 +10,7 @@ from code_agent.utils.codex import CodexExecRequest, run_codex_exec
 from code_agent.utils.general_prompts import (
     FEM_MATERIAL_SELECTION_GUIDE,
     GENERATED_RESULT_QUALITY_GUIDE,
+    IPC_FAILURE_DIAGNOSTIC_GUIDE,
     PHYSICAL_CAUSALITY_CONTRACT,
     PLANNER_GENERAL_RULES,
     RIGID_IPC_COUPLING_GUIDE,
@@ -134,6 +135,8 @@ class EpisodePlanner:
               materials for contact-heavy rigid behavior.
               Use this coupling guide when choosing object roles and body/action contracts:
               {RIGID_IPC_COUPLING_GUIDE}
+              Use this IPC failure diagnostic guide when interpreting execution logs:
+              {IPC_FAILURE_DIAGNOSTIC_GUIDE}
             - If IPC is false, workers must not instantiate `gs.options.IPCCouplerOptions`.
             - All FEM, IPC, tet, precision, and FEM material-range defaults must come from `deformable_cfg` /
               contracts/deformable_config.json in generated code.
@@ -251,6 +254,9 @@ class EpisodePlanner:
               penetration/intersection/thickness/distance/sanity-check failure, choose request_repair for `body` with
               the concrete error details; treat this as an initial placement/clearance issue, not an
               execution-environment issue, unless the logs clearly show a missing dependency or runtime setup failure.
+              If this appears together with `IPC rigid state accessor feature is unavailable...`, treat the accessor
+              message as secondary to the invalid IPC world unless the same accessor failure is reproduced without any
+              initial-geometry or `World is not valid` diagnostics.
             - Prefer run_execution over generic run_python for generated simulations.
             - {GENERATED_RESULT_QUALITY_GUIDE}
 
@@ -297,6 +303,15 @@ class EpisodePlanner:
                     "choose wait_mesh_assets / wait_xml_assets before a manifest-dependent role/integration."
                 )
             elif asset_status == "failed":
+                failure_classes = assets.get("failure_classes")
+                if isinstance(failure_classes, list) and "mesh.prompt_length_exceeded" in failure_classes:
+                    guide.append(
+                        "mesh asset generation failed because the Meshy prompt exceeded the 800-character limit. "
+                        "Choose write_plan with the same plan but shorter affected generated_mesh asset_requests "
+                        "(simplify purpose, simulation_role, and texture_needs once), then retry start_mesh_assets "
+                        "for those asset_names."
+                    )
+                    return guide
                 guide.append(
                     "asset generation failed: restart the failed asset family, repair the plan, or finish fail."
                 )

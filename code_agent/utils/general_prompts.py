@@ -127,6 +127,22 @@ Rigid IPC coupling mode guide:
 """.strip()
 
 
+IPC_FAILURE_DIAGNOSTIC_GUIDE = """
+IPC failure diagnostic guide:
+- If stdout/stderr show libuipc/UIPC initial-geometry diagnostics such as `SimplicialSurfaceIntersectionCheck`,
+  `SimplicialSurfaceDistanceCheck`, thickness/distance/barrier failures, or `World is not valid`, and the later Python
+  exception says `IPC rigid state accessor feature is unavailable... requires rigid ABD state retrieval`, treat the
+  accessor exception as a downstream/secondary diagnostic from the invalid IPC world. Do not infer from that pattern
+  alone that the local libuipc build lacks rigid ABD accessor support.
+- For that combined pattern, route the repair to the source that owns initial placement, scale, spacing, orientation,
+  mesh clearance, or duplicate IPC contact geometry, usually `body`. Preserve the intended IPC contact/coupling model;
+  do not "fix" it by disabling IPC, setting `needs_coup=False`, changing the mechanism to hidden constraints, or
+  bypassing contact unless a clean no-penetration repro still proves IPC capability is missing.
+- Treat the rigid ABD accessor as an execution/libuipc capability issue only after a valid rigid IPC scene with no
+  initial penetration, distance/thickness, or `World is not valid` diagnostics still fails to expose the accessor.
+""".strip()
+
+
 DEFORMABLE_CRITIC_GUIDE = f"""
 When deformable_config["enabled"] is false, generated source must not use FEM materials, FEM entities, or
 deformation-only APIs. If the prompt fundamentally requires soft-body or deformation behavior while deformable is
@@ -152,6 +168,7 @@ required artifacts, plausible movement, physically coherent staging, and whether
 {PHYSICAL_CONTROL_METHOD_GUIDE}
 {PHYSICAL_CAUSALITY_CRITIC_GUIDE}
 {DEFORMABLE_CRITIC_GUIDE}
+{IPC_FAILURE_DIAGNOSTIC_GUIDE}
 """.strip()
 
 

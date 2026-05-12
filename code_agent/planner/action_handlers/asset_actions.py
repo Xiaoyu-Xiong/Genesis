@@ -27,6 +27,7 @@ class AssetActionHandler:
             running_status="mesh_assets_running",
             started_status="mesh_assets_started",
             report_path=self.session.case_dir / "reports" / "asset_generation_report.json",
+            short_circuit_ready=False,
         )
 
     def wait_mesh_assets(self, action: dict[str, Any]) -> dict[str, Any]:
@@ -56,6 +57,7 @@ class AssetActionHandler:
             running_status="xml_assets_running",
             started_status="xml_assets_started",
             report_path=self.session.case_dir / "reports" / "xml_asset_generation_report.json",
+            short_circuit_ready=True,
         )
 
     def wait_xml_assets(self, action: dict[str, Any]) -> dict[str, Any]:
@@ -137,6 +139,7 @@ class AssetActionHandler:
         running_status: str,
         started_status: str,
         report_path: Path,
+        short_circuit_ready: bool,
     ) -> dict[str, Any]:
         planner_output = self.session.current_planner_output()
         if planner_output is None:
@@ -150,7 +153,7 @@ class AssetActionHandler:
                 "asset_generation_report_path": self._asset_job_report_path_text(kind),
                 "background": True,
             }
-        if self._asset_job_ready(kind):
+        if short_circuit_ready and self._asset_job_ready(kind):
             return {
                 "ok": True,
                 "status": ready_status,
@@ -182,6 +185,8 @@ class AssetActionHandler:
             "skipped_asset_names": [],
             "num_assets": 0,
             "schema_errors": [],
+            "failure_classes": [],
+            "message": None,
             "started_at_unix": time.time(),
             "background": True,
         }
@@ -195,6 +200,8 @@ class AssetActionHandler:
                 "skipped_asset_names": self._collect_asset_names("skipped_asset_names"),
                 "num_assets": self._sum_asset_counts(),
                 "schema_errors": [],
+                "failure_classes": [],
+                "message": None,
                 "background": True,
                 "updated_at_unix": time.time(),
             }
@@ -229,6 +236,10 @@ class AssetActionHandler:
             "kind": kind,
             "asset_manifest_path": str(manifest_path),
             "asset_generation_report_path": result.get("asset_generation_report_path"),
+            "message": result.get("message"),
+            "recommended_owner": result.get("recommended_owner"),
+            "repair_summary": result.get("repair_summary"),
+            "failure_classes": result.get("failure_classes", []),
             "selected_asset_names": result.get("selected_asset_names", []),
             "skipped_asset_names": result.get("skipped_asset_names", []),
             "num_assets": result.get("num_assets", 0),
@@ -244,6 +255,10 @@ class AssetActionHandler:
             "asset_manifest_path": str(combined_path),
             "partial_asset_manifest_path": str(manifest_path),
             "asset_generation_report_path": result.get("asset_generation_report_path"),
+            "message": result.get("message"),
+            "recommended_owner": result.get("recommended_owner"),
+            "repair_summary": result.get("repair_summary"),
+            "failure_classes": result.get("failure_classes", []),
             "num_assets": result.get("num_assets", 0),
             "selected_asset_names": result.get("selected_asset_names", []),
             "skipped_asset_names": result.get("skipped_asset_names", []),
@@ -359,6 +374,14 @@ class AssetActionHandler:
             for job in job_values
             for error in (job.get("schema_errors", []) if isinstance(job.get("schema_errors"), list) else [])
         ]
+        failure_classes = [
+            str(failure_class)
+            for job in job_values
+            for failure_class in (
+                job.get("failure_classes", []) if isinstance(job.get("failure_classes"), list) else []
+            )
+            if failure_class
+        ]
         aggregate_ok = bool(job_values) and not has_running and all(bool(job.get("ok")) for job in job_values)
         aggregate_ok = aggregate_ok and not combined_schema_errors
         assets.update(
@@ -371,6 +394,8 @@ class AssetActionHandler:
                 "skipped_asset_names": self._collect_asset_names("skipped_asset_names"),
                 "num_assets": self._sum_asset_counts(),
                 "schema_errors": sorted(set(job_errors + combined_schema_errors)),
+                "failure_classes": sorted(set(failure_classes)),
+                "message": self._latest_asset_message(),
                 "updated_at_unix": time.time(),
                 "background": has_running,
             }
@@ -393,6 +418,23 @@ class AssetActionHandler:
                 latest_time = float(updated)
                 latest_path = report_path
         return latest_path
+
+    def _latest_asset_message(self) -> str | None:
+        assets = self._ensure_assets_state()
+        jobs = assets.get("jobs")
+        if not isinstance(jobs, dict):
+            return None
+        latest_time = -1.0
+        latest_message: str | None = None
+        for job in jobs.values():
+            if not isinstance(job, dict):
+                continue
+            message = job.get("message")
+            updated = job.get("updated_at_unix") or job.get("started_at_unix") or 0.0
+            if isinstance(message, str) and message and float(updated) >= latest_time:
+                latest_time = float(updated)
+                latest_message = message
+        return latest_message
 
     def _collect_asset_names(self, key: str) -> list[str]:
         assets = self._ensure_assets_state()
