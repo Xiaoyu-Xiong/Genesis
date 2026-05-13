@@ -7,6 +7,7 @@ Implemented:
 - suite CLI and per-case workspaces
 - Planner action loop with persisted state
 - background mesh and XML/MJCF asset jobs
+- ready asset inspection previews for mesh/XML debugging
 - parallel Scene, Body, Action, and Rendering writer dispatch
 - deterministic integration into `src/main.py`
 - local uv/GPU execution with serialized Genesis subprocesses

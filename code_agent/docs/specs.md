@@ -10,6 +10,7 @@ Current Planner actions:
 - `wait_mesh_assets`
 - `start_xml_assets`
 - `wait_xml_assets`
+- `inspect_assets`
 - `spawn_workers`
 - `run_integrator`
 - `run_execution`

@@ -19,9 +19,15 @@ def evaluate_visual_artifacts(*, run_dir: Path, output_path: Path | None = None)
     reports_dir = run_dir / "reports"
     output_path = output_path or (reports_dir / "visual_evaluation.json")
     contact_sheet_path = reports_dir / "visual_contact_sheet.jpg"
+    execution_report = _read_json(reports_dir / "execution_report.json")
     render_stats = _read_json(run_dir / "artifacts" / "render_stats.json")
     frames_dir = run_dir / "artifacts" / "frames"
     frame_paths = _sample_frame_paths(frames_dir, render_stats=render_stats)
+    diagnostic_frame_paths = _diagnostic_frame_paths(execution_report)
+    if not frame_paths:
+        frame_paths = diagnostic_frame_paths
+    else:
+        frame_paths = [*frame_paths, *[path for path in diagnostic_frame_paths if path not in frame_paths]]
     frame_summaries = [_summarize_image(path) for path in frame_paths]
     if frame_paths:
         _write_contact_sheet(frame_paths, contact_sheet_path, max_width=CONFIGS.critic.max_width)
@@ -42,6 +48,7 @@ def evaluate_visual_artifacts(*, run_dir: Path, output_path: Path | None = None)
         "schema_version": 1,
         "run_dir": str(run_dir),
         "sampled_frames": [str(path) for path in frame_paths],
+        "diagnostic_frames": [str(path) for path in diagnostic_frame_paths],
         "sampling": {
             "sample_every_sec": CONFIGS.critic.sample_every_sec,
             "max_frames": CONFIGS.critic.max_frames,
@@ -57,6 +64,22 @@ def evaluate_visual_artifacts(*, run_dir: Path, output_path: Path | None = None)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
+
+
+def _diagnostic_frame_paths(execution_report: dict[str, Any] | None) -> list[Path]:
+    if not isinstance(execution_report, dict):
+        return []
+    diagnostics = execution_report.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        return []
+    frames: list[Path] = []
+    for item in diagnostics.values():
+        if not isinstance(item, dict):
+            continue
+        image_path = item.get("image_path")
+        if isinstance(image_path, str) and Path(image_path).is_file():
+            frames.append(Path(image_path))
+    return frames
 
 
 def _sample_frame_paths(

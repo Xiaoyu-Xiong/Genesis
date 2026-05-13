@@ -34,6 +34,9 @@ def write_main(
             import json
             from pathlib import Path
 
+            import numpy as np
+            import trimesh
+
             from action import run_actions
             from body import create_bodies
             from rendering import finalize_rendering, setup_rendering
@@ -42,6 +45,99 @@ def write_main(
 
             TASK = {task!r}
             DEFAULT_DEFORMABLE_CFG = {default_deformable_cfg!r}
+
+
+            def _case_root() -> Path:
+                return Path(__file__).resolve().parents[1]
+
+
+            def _resolve_case_path(path_value):
+                path = Path(path_value)
+                if path.is_absolute():
+                    return path
+                for candidate in (Path.cwd() / path, _case_root() / path):
+                    if candidate.exists():
+                        return candidate
+                return _case_root() / path
+
+
+            def _mesh_edge_lengths(asset):
+                runtime_path = asset.get("runtime_path")
+                if not runtime_path:
+                    return np.empty(0, dtype=float)
+                mesh_path = _resolve_case_path(runtime_path)
+                if not mesh_path.is_file():
+                    return np.empty(0, dtype=float)
+                mesh = trimesh.load_mesh(str(mesh_path), force="mesh", process=False, skip_texture=True)
+                if hasattr(mesh, "dump"):
+                    dumped = mesh.dump(concatenate=True)
+                    if dumped is not None:
+                        mesh = dumped
+                vertices = np.asarray(mesh.vertices, dtype=float)
+                edges = np.asarray(mesh.edges_unique, dtype=np.int64)
+                if vertices.size == 0 or edges.size == 0:
+                    return np.empty(0, dtype=float)
+                scale = asset.get("scale")
+                if isinstance(scale, (list, tuple)) and len(scale) == 3:
+                    vertices = vertices * np.asarray(scale, dtype=float)
+                lengths = np.linalg.norm(vertices[edges[:, 0]] - vertices[edges[:, 1]], axis=1)
+                return lengths[np.isfinite(lengths) & (lengths > 0.0)]
+
+
+            def _adaptive_contact_d_hat_report():
+                manifest_path = _resolve_case_path("assets/asset_manifest.json")
+                if not manifest_path.is_file():
+                    return None
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                assets = manifest.get("assets")
+                if not isinstance(assets, list):
+                    return None
+                length_chunks = []
+                source_assets = []
+                for asset in assets:
+                    if not isinstance(asset, dict):
+                        continue
+                    if asset.get("source_type") != "generated_mesh" or asset.get("status") != "ready":
+                        continue
+                    lengths = _mesh_edge_lengths(asset)
+                    if lengths.size == 0:
+                        continue
+                    length_chunks.append(lengths)
+                    source_assets.append(str(asset.get("logical_name") or asset.get("runtime_path")))
+                if not length_chunks:
+                    return None
+                lengths = np.concatenate(length_chunks)
+                median_edge_length = float(np.median(lengths))
+                return {{
+                    "source": "assets/asset_manifest.json",
+                    "rule": "ipc_contact_d_hat = 0.75 * median generated-mesh edge length",
+                    "source_assets": source_assets,
+                    "edge_count": int(lengths.size),
+                    "median_edge_length": median_edge_length,
+                    "ipc_contact_d_hat": 0.75 * median_edge_length,
+                }}
+
+
+            def _apply_adaptive_contact_d_hat(deformable_cfg, out_dir: Path):
+                if not bool(deformable_cfg.get("ipc_contact_d_hat_adaptive", False)):
+                    return None
+                report = _adaptive_contact_d_hat_report()
+                if report is None:
+                    print("[adaptive-ipc] no ready generated mesh edges found; keeping configured ipc_contact_d_hat")
+                    return None
+                deformable_cfg["ipc_contact_d_hat"] = float(report["ipc_contact_d_hat"])
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / "adaptive_ipc_config.json").write_text(
+                    json.dumps(report, indent=2),
+                    encoding="utf-8",
+                )
+                print(
+                    "[adaptive-ipc] "
+                    f"ipc_contact_d_hat={{report['ipc_contact_d_hat']:.6g}} "
+                    f"from median_edge_length={{report['median_edge_length']:.6g}} "
+                    f"over {{report['edge_count']}} edges"
+                )
+                return report
 
 
             def main():
@@ -64,6 +160,7 @@ def write_main(
                 deformable_cfg = dict(DEFAULT_DEFORMABLE_CFG)
                 if args.deformable_config is not None:
                     deformable_cfg.update(json.loads(args.deformable_config.read_text(encoding="utf-8")))
+                _apply_adaptive_contact_d_hat(deformable_cfg, args.out_dir)
 
                 scene = create_scene(
                     args.backend,

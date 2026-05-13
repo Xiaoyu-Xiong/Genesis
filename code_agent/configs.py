@@ -17,9 +17,9 @@ class CodexConfigs:
     critic_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     worker_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
     ask_for_approval: Literal["untrusted", "on-request", "never"] = "never"
-    planner_timeout_sec: float = 900.0
-    worker_timeout_sec: float = 900.0
-    critic_timeout_sec: float = 900.0
+    planner_timeout_sec: float = 1500.0
+    worker_timeout_sec: float = 1500.0
+    critic_timeout_sec: float = 1500.0
 
 
 @dataclass(slots=True, frozen=True)
@@ -88,6 +88,7 @@ class IPCConfigs:
     ipc_linear_system_tolerance: float | None = None
     ipc_contact_enable: bool | None = None
     ipc_contact_d_hat: float = 0.01
+    ipc_contact_d_hat_adaptive: bool = True
     ipc_contact_friction_enable: bool = True
     ipc_contact_resistance: float = 3e6
     ipc_contact_eps_velocity: float = 0.01

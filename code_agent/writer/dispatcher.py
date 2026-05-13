@@ -243,12 +243,16 @@ def _worker_prompt(
     repair_context: str | None,
 ) -> str:
     mode = "repair the existing module source" if repair_context else "author the module source"
+    layout_context = _load_layout_context(case_dir)
     return textwrap.dedent(
         f"""
         {WORKER_COMMON_RULES}
 
         Task prompt:
         {task}
+
+        {"User-provided layout context:" if layout_context else ""}
+        {layout_context}
 
         Planner output:
         {json.dumps(planner_output, indent=2)}
@@ -269,6 +273,8 @@ def _worker_prompt(
           the bodies rigid/articulated and use IPC only for contact/coupling through `gs.options.IPCCouplerOptions` and
           `gs.materials.Rigid(...)` coupling fields.
         - If deformable_config["ipc_enabled"] is false, do not instantiate `gs.options.IPCCouplerOptions`.
+        - Do not pass deformable_config["ipc_contact_d_hat_adaptive"] to `gs.options.IPCCouplerOptions`; it is a
+          code-agent runtime switch. The generated entrypoint resolves it into `ipc_contact_d_hat` before scene setup.
         - All FEM, IPC, tet, precision, and FEM material-range defaults must come from deformable_config, not hardcoded
           local constants. FEM elastic bodies must still pass explicit task-appropriate `E`, `nu`, and `rho` values.
 
@@ -368,6 +374,13 @@ def _load_genesis_context(case_dir: Path) -> str:
             "- Prefer local Genesis source and examples over online docs if they disagree.",
         ]
     )
+
+
+def _load_layout_context(case_dir: Path) -> str:
+    path = case_dir / "inputs" / "layout_context.md"
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace").strip()
 
 
 def _parse_worker_report(path: Path) -> tuple[dict[str, object] | None, str | None]:

@@ -7,10 +7,8 @@ from typing import Any
 
 from code_agent.configs import CONFIGS
 from code_agent.evaluation.runner import evaluate_generated_run
-from code_agent.io_utils import dump_json
 from code_agent.utils.execution import run_generated_simulation
 from code_agent.utils.integrator import write_main
-from code_agent.utils.timing import resolve_timing
 
 
 class RuntimeActionHandler:
@@ -23,46 +21,19 @@ class RuntimeActionHandler:
         planner_output = action.get("planner_output")
         if not isinstance(planner_output, dict):
             return {"ok": False, "status": "invalid_action", "message": "write_plan requires planner_output object."}
-        errors = self.session.validate_json_schema(planner_output, Path("code_agent/specs/planner_output.schema.json"))
-        if errors:
-            return {
-                "ok": False,
-                "status": "invalid_planner_output",
-                "message": "planner_output failed schema validation.",
-                "errors": errors,
-            }
-        planner_output_path = self.session.contracts_dir / "planner_output.json"
-        dump_json(planner_output, planner_output_path)
-        self.session.write_deformable_config_contract()
-        timing = resolve_timing(
-            planner_output=planner_output,
-            steps=self.session.config.steps,
-            duration_sec=self.session.config.duration_sec,
-            render_fps=self.session.config.render_fps,
+        accepted = self.session.accept_planner_output(
+            planner_output,
+            rationale=str(action.get("rationale") or ""),
         )
-        self.session.timing = timing
-        dump_json(timing.to_dict(), self.session.contracts_dir / "timing.json")
-        self.session.state["planner_output_path"] = str(planner_output_path)
-        self.session.state["timing"] = timing.to_dict()
-        episode_plan_path = self.session.contracts_dir / "episode_plan.json"
-        dump_json(
-            {
-                "planner_output_path": str(planner_output_path),
-                "planner_output": planner_output,
-                "timing": timing.to_dict(),
-                "rationale": action.get("rationale"),
-                "created_at_unix": time.time(),
-            },
-            episode_plan_path,
-        )
-        self.session.state["episode_plan_path"] = str(episode_plan_path)
+        if not accepted.get("ok"):
+            return accepted
         return {
             "ok": True,
             "status": "planned",
             "message": "Planner output and timing were accepted.",
-            "planner_output_path": str(planner_output_path),
-            "episode_plan_path": str(episode_plan_path),
-            "timing": timing.to_dict(),
+            "planner_output_path": accepted.get("planner_output_path"),
+            "episode_plan_path": accepted.get("episode_plan_path"),
+            "timing": accepted.get("timing"),
         }
 
     def run_integrator(self) -> dict[str, Any]:

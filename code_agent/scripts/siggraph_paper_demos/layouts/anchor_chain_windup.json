@@ -1,0 +1,229 @@
+{
+  "schema_version": 1,
+  "layout_id": "anchor_chain_windup_rigid_ipc_source",
+  "title": "Rigid IPC source anchor-chain windup layout",
+  "intent": "Source-derived layout constraints for recreating the SIGGRAPH 2021 Rigid IPC anchor-chain example in Genesis. The checked-in Rigid IPC fixture is authoritative; Genesis code may adapt coordinate axes and visual styling, but should preserve the source spacing, interlock pattern, driven axle, gravity release, and contact-only load path.",
+  "sources": {
+    "paper_title": "Intersection-free Rigid Body Dynamics",
+    "venue": "ACM Transactions on Graphics (SIGGRAPH), 2021",
+    "project_page": "https://ipc-sim.github.io/rigid-ipc/",
+    "reference_repo": "https://github.com/ipc-sim/rigid-ipc",
+    "checked_in_fixture": "https://github.com/ipc-sim/rigid-ipc/blob/main/fixtures/3D/chain/anchor.json",
+    "fixture_generator": "https://github.com/ipc-sim/rigid-ipc/blob/main/tools/fixtures/3D/anchor.py",
+    "source_meshes": {
+      "spool": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/spool.obj",
+      "chain_link": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/link.obj",
+      "anchor": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/anchor.obj"
+    },
+    "notes": [
+      "The project page describes the scene as a heavy anchor attached to a chain that briefly falls under gravity before being lifted by rolling the chain around an axle, producing natural bunching and kinking.",
+      "The checked-in fixture differs from the older generator defaults: use the fixture values here for max_time, link count, anchor mesh, and axle angular velocity.",
+      "Reusable mesh assets below point to locally prepared copies under code_agent/scripts/siggraph_paper_demos/meshes/anchor rather than downloading the remote GitHub OBJ files at suite runtime."
+    ]
+  },
+  "reusable_assets": [
+    {
+      "logical_name": "rigid_ipc_source_spool",
+      "mesh": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/spool.obj",
+      "scale": [1.0, 1.0, 1.0],
+      "bbox": [6.125, 4.9939954, 4.9939954],
+      "file_meshes_are_zup": false,
+      "simulation_role": "Locally prepared Rigid IPC fixed kinematic winch spool mesh; use directly for collision/visualization when possible."
+    },
+    {
+      "logical_name": "rigid_ipc_source_chain_link",
+      "mesh": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/link.obj",
+      "scale": [1.0, 1.0, 1.0],
+      "bbox": [1.0, 1.493175, 0.190211],
+      "file_meshes_are_zup": false,
+      "simulation_role": "Locally prepared Rigid IPC independent chain-link mesh; instantiate one rigid body per link using this reusable mesh."
+    },
+    {
+      "logical_name": "rigid_ipc_source_anchor",
+      "mesh": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/anchor.obj",
+      "scale": [1.0, 1.0, 1.0],
+      "bbox": [8.2403698, 8.972403, 1.901379],
+      "file_meshes_are_zup": false,
+      "simulation_role": "Locally prepared Rigid IPC heavy passive anchor load mesh; use directly for collision/visualization when possible."
+    }
+  ],
+  "units": "source fixture units; treat as meters when porting to Genesis unless an explicit scale is introduced",
+  "coordinate_system": {
+    "source_up_axis": "+Y",
+    "source_gravity": [0.0, -9.8, 0.0],
+    "genesis_porting_hint": {
+      "target_up_axis": "+Z",
+      "position_mapping_source_xyz_to_genesis_xyz": "[x, z, y]",
+      "rotation_note": "The source fixture stores Euler rotations in degrees. Preserve the alternating 0/90 degree interlock pattern after remapping axes."
+    }
+  },
+  "simulation": {
+    "scene_type": "distance_barrier_rb_problem",
+    "solver": "ipc_solver",
+    "timestep": 0.01,
+    "max_time": 50.0,
+    "coefficient_restitution": -1,
+    "density_default": 7680.0,
+    "contact_model": "IPC distance barrier rigid-body contact",
+    "no_hidden_attachment": true,
+    "load_path": "The chain, axle, and anchor interact through rigid contact and interlocking geometry. Do not weld, constrain, or directly pose-write the passive chain links or anchor."
+  },
+  "mesh_prototypes": {
+    "chain_link": {
+      "source_mesh": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/link.obj",
+      "vertex_count": 1031,
+      "face_count": 2062,
+      "density": 7680.0,
+      "bbox_min": [-0.5, -0.746941, -0.095105],
+      "bbox_max": [0.5, 0.746234, 0.095106],
+      "outer_extents": {
+        "width_x": 1.0,
+        "height_y": 1.493175,
+        "through_thickness_z": 0.190211
+      },
+      "internal_structure": {
+        "topology": "one-piece closed torus-topology chain link, not a curve, capsule chain, plate, or open C-shape",
+        "centerline_shape": "rounded-rectangle or elongated oval loop in the source XY plane",
+        "outer_half_width_x": 0.5,
+        "outer_half_height_y": 0.75,
+        "actual_tube_diameter_approx": 0.190211,
+        "actual_tube_radius_approx": 0.0951055,
+        "generator_padded_link_thickness": 0.3,
+        "generator_link_width": 1.0,
+        "generator_link_height": 1.5,
+        "inferred_clear_slot_width_x_approx": 0.619789,
+        "inferred_clear_slot_height_y_approx": 1.119578,
+        "slot_axis": "+Z through the source mesh thickness",
+        "interlock_requirement": "Neighboring links alternate by 90 degrees so each link passes through the open slot of adjacent links with positive clearance."
+      },
+      "fixture_rotation_pattern_degrees": {
+        "even_link_index": [0.0, 90.0, 0.0],
+        "odd_link_index": [0.0, 0.0, 0.0],
+        "rotation_axis_used_by_fixture": "source +Y"
+      }
+    },
+    "spool": {
+      "source_mesh": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/spool.obj",
+      "vertex_count": 3000,
+      "face_count": 6000,
+      "density": 7680.0,
+      "bbox_min": [-3.0625, -2.2439954, -2.5],
+      "bbox_max": [3.0625, 2.75, 2.4939954],
+      "outer_extents": {
+        "axis_length_x": 6.125,
+        "diameter_y": 4.9939954,
+        "diameter_z": 4.9939954
+      },
+      "internal_structure": {
+        "role": "fixed-position rolling axle or spool that winds the chain by rotation around source +X",
+        "axis": [1.0, 0.0, 0.0],
+        "outer_radius_approx": 2.5,
+        "center_offset_in_mesh_bbox": [0.0, 0.25, 0.0],
+        "fixture_dof_fixed": [true, true, true, false, true, true],
+        "fixture_type": "kinematic"
+      }
+    },
+    "anchor": {
+      "source_mesh": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/anchor.obj",
+      "vertex_count": 1838,
+      "face_count": 3668,
+      "density": 7680.0,
+      "bbox_min": [-4.1201859, -8.1373348, -0.951355],
+      "bbox_max": [4.1201839, 0.8350682, 0.950024],
+      "outer_extents": {
+        "width_x": 8.2403698,
+        "height_y": 8.972403,
+        "depth_z": 1.901379
+      },
+      "internal_structure": {
+        "role": "heavy passive anchor load at the chain bottom",
+        "top_connector_envelope_y_0_to_0_8350682": {
+          "x_span_approx": [-0.685, 0.685],
+          "y_span_approx": [0.0, 0.8350682],
+          "z_span_approx": [-0.144, 0.132],
+          "note": "This is the upper connector region inferred from the source mesh vertices, not a separate authored parameter in the fixture."
+        },
+        "fluke_and_body_region_y_below_minus_6": {
+          "x_span_approx": [-3.583, 3.583],
+          "z_span_approx": [-0.951355, 0.950024]
+        },
+        "wide_crown_region_y_minus_6_to_minus_3": {
+          "x_span_approx": [-4.120186, 4.120184],
+          "z_span_approx": [-0.598, 0.596]
+        }
+      }
+    }
+  },
+  "source_layout": {
+    "spool": {
+      "body_index": 0,
+      "mesh": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/spool.obj",
+      "position": [0.0, 0.7894736842105263, 0.0],
+      "rotation_degrees": [0.0, 0.0, 0.0],
+      "is_dof_fixed": [true, true, true, false, true, true],
+      "angular_velocity": [-100.0, 0.0, 0.0],
+      "type": "kinematic",
+      "enabled": true
+    },
+    "chain": {
+      "mesh": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/link.obj",
+      "link_count": 21,
+      "pitch_y": 0.7894736842105263,
+      "pitch_formula": "position_i = [0, -i * (1.5 / 1.9), 0] for i in [0, 20]",
+      "rotation_formula": "rotation_i = [0, 90, 0] for even i, [0, 0, 0] for odd i",
+      "links": [
+        {"id": 0, "body_index": 1, "position": [0.0, 0.0, 0.0], "rotation_degrees": [0.0, 90.0, 0.0]},
+        {"id": 1, "body_index": 2, "position": [0.0, -0.7894736842105263, 0.0], "rotation_degrees": [0.0, 0.0, 0.0]},
+        {"id": 2, "body_index": 3, "position": [0.0, -1.5789473684210527, 0.0], "rotation_degrees": [0.0, 90.0, 0.0]},
+        {"id": 3, "body_index": 4, "position": [0.0, -2.368421052631579, 0.0], "rotation_degrees": [0.0, 0.0, 0.0]},
+        {"id": 4, "body_index": 5, "position": [0.0, -3.1578947368421053, 0.0], "rotation_degrees": [0.0, 90.0, 0.0]},
+        {"id": 5, "body_index": 6, "position": [0.0, -3.947368421052632, 0.0], "rotation_degrees": [0.0, 0.0, 0.0]},
+        {"id": 6, "body_index": 7, "position": [0.0, -4.736842105263158, 0.0], "rotation_degrees": [0.0, 90.0, 0.0]},
+        {"id": 7, "body_index": 8, "position": [0.0, -5.526315789473684, 0.0], "rotation_degrees": [0.0, 0.0, 0.0]},
+        {"id": 8, "body_index": 9, "position": [0.0, -6.315789473684211, 0.0], "rotation_degrees": [0.0, 90.0, 0.0]},
+        {"id": 9, "body_index": 10, "position": [0.0, -7.105263157894737, 0.0], "rotation_degrees": [0.0, 0.0, 0.0]},
+        {"id": 10, "body_index": 11, "position": [0.0, -7.894736842105264, 0.0], "rotation_degrees": [0.0, 90.0, 0.0]},
+        {"id": 11, "body_index": 12, "position": [0.0, -8.68421052631579, 0.0], "rotation_degrees": [0.0, 0.0, 0.0]},
+        {"id": 12, "body_index": 13, "position": [0.0, -9.473684210526317, 0.0], "rotation_degrees": [0.0, 90.0, 0.0]},
+        {"id": 13, "body_index": 14, "position": [0.0, -10.263157894736842, 0.0], "rotation_degrees": [0.0, 0.0, 0.0]},
+        {"id": 14, "body_index": 15, "position": [0.0, -11.052631578947368, 0.0], "rotation_degrees": [0.0, 90.0, 0.0]},
+        {"id": 15, "body_index": 16, "position": [0.0, -11.842105263157896, 0.0], "rotation_degrees": [0.0, 0.0, 0.0]},
+        {"id": 16, "body_index": 17, "position": [0.0, -12.631578947368421, 0.0], "rotation_degrees": [0.0, 90.0, 0.0]},
+        {"id": 17, "body_index": 18, "position": [0.0, -13.421052631578949, 0.0], "rotation_degrees": [0.0, 0.0, 0.0]},
+        {"id": 18, "body_index": 19, "position": [0.0, -14.210526315789474, 0.0], "rotation_degrees": [0.0, 90.0, 0.0]},
+        {"id": 19, "body_index": 20, "position": [0.0, -15.0, 0.0], "rotation_degrees": [0.0, 0.0, 0.0]},
+        {"id": 20, "body_index": 21, "position": [0.0, -15.789473684210527, 0.0], "rotation_degrees": [0.0, 90.0, 0.0]}
+      ]
+    },
+    "anchor": {
+      "body_index": 22,
+      "mesh": "/home/xxyfh/Genesis/code_agent/scripts/siggraph_paper_demos/meshes/anchor/anchor.obj",
+      "position": [0.0, -16.75, 0.0],
+      "rotation_degrees": [0.0, 0.0, 0.0],
+      "density": 7680.0,
+      "enabled": true
+    }
+  },
+  "genesis_adaptation_guidelines": {
+    "preserve_exactly": [
+      "separate rigid bodies for every link",
+      "90-degree alternating neighboring link orientations",
+      "contact-only chain-to-anchor load transfer",
+      "fixed-position axle/spool rotating around its local X axis",
+      "brief gravity-driven release before sustained winding",
+      "no ground plane when the case prompt asks for white-background no-ground rendering"
+    ],
+    "allowed_adaptations": [
+      "scale the source fixture down uniformly to fit the Genesis camera and IPC stability budget",
+      "replace the source axle mesh with a simple collision-enabled horizontal cylinder plus flanges if the source spool mesh is unavailable",
+      "add a collision guide eye only if the prompt requests it, but do not treat it as part of the original source fixture",
+      "extend the chain beyond 21 links only by continuing the same pitch and 90-degree alternation pattern, and document that extension as a Genesis adaptation"
+    ],
+    "forbidden_adaptations": [
+      "fusing the chain into one mesh",
+      "using a rope, tube, curve, cable, tendon, weld, or hidden joint for the chain",
+      "teleporting or directly driving passive links or the anchor after initialization",
+      "turning off rigid-rigid collision for the link, spool, or anchor load path"
+    ]
+  }
+}

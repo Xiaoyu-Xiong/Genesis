@@ -30,6 +30,8 @@ class EpisodeActionExecutor:
                 return self.assets.start_xml_assets(action)
             if name == "wait_xml_assets":
                 return self.assets.wait_xml_assets(action)
+            if name == "inspect_assets":
+                return self.assets.inspect_assets(action)
             if name == "spawn_workers":
                 return self.workers.spawn_workers(action)
             if name == "run_integrator":

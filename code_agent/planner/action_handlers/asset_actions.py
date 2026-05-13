@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from code_agent.assets.inspection import inspect_generated_assets
 from code_agent.assets.mesh.episode import generate_mesh_assets_for_episode
 from code_agent.assets.xml.episode import generate_xml_assets_for_episode
 from code_agent.io_utils import dump_json
@@ -78,6 +79,109 @@ class AssetActionHandler:
             "message": "No XML asset generation job is running.",
         }
 
+    def inspect_assets(self, action: dict[str, Any]) -> dict[str, Any]:
+        asset_names = self._asset_names_from_action(action)
+        report = inspect_generated_assets(self.session.case_dir, asset_names=asset_names)
+        assets_summary = [
+            {
+                "logical_name": asset.get("logical_name"),
+                "source_type": asset.get("source_type"),
+                "runtime_path": asset.get("runtime_path"),
+                "preview_paths": asset.get("preview_paths", []),
+                "geometry": asset.get("geometry"),
+                "errors": asset.get("errors", []),
+                "warnings": asset.get("warnings", []),
+            }
+            for asset in report.get("assets", [])
+            if isinstance(asset, dict)
+        ]
+        self.session.state["asset_inspection"] = {
+            "status": report.get("status"),
+            "ok": report.get("ok"),
+            "report_path": report.get("report_path"),
+            "output_dir": report.get("output_dir"),
+            "selected_asset_names": report.get("selected_asset_names", []),
+            "asset_error_count": report.get("asset_error_count", 0),
+            "asset_warning_count": report.get("asset_warning_count", 0),
+            "assets": assets_summary,
+        }
+        return {
+            "ok": report.get("status") != "precondition_failed",
+            "status": report.get("status", "asset_inspection_complete"),
+            "message": (
+                f"Inspected {len(assets_summary)} asset(s); "
+                f"asset_errors={report.get('asset_error_count', 0)}, "
+                f"asset_warnings={report.get('asset_warning_count', 0)}."
+            ),
+            "asset_inspection_report_path": report.get("report_path"),
+            "preview_dir": report.get("output_dir"),
+            "selected_asset_names": report.get("selected_asset_names", []),
+            "asset_error_count": report.get("asset_error_count", 0),
+            "asset_warning_count": report.get("asset_warning_count", 0),
+            "assets": assets_summary,
+            "errors": report.get("errors", []),
+            "warnings": report.get("warnings", []),
+        }
+
+    def adopt_layout_asset_manifest(self) -> dict[str, Any] | None:
+        """Register layout-declared reusable assets that were prepared before planning begins."""
+
+        manifest_path = self.session.case_dir / "assets" / "layout_asset_manifest.json"
+        if not manifest_path.exists():
+            return None
+        report_path = self.session.case_dir / "reports" / "layout_asset_report.json"
+        manifest = self.session.load_json(manifest_path)
+        if manifest is None:
+            schema_errors = [f"layout asset manifest was not readable: {manifest_path}"]
+            ok = False
+            num_assets = 0
+            unresolved = []
+        else:
+            schema_errors = self.session.validate_json_schema(
+                manifest,
+                Path("code_agent/specs/asset_manifest.schema.json"),
+            )
+            raw_assets = manifest.get("assets")
+            entries = raw_assets if isinstance(raw_assets, list) else []
+            unresolved = [
+                str(entry.get("logical_name"))
+                for entry in entries
+                if isinstance(entry, dict) and entry.get("status") != "ready" and entry.get("logical_name")
+            ]
+            num_assets = len(entries)
+            ok = not schema_errors and not unresolved
+        assets = self._ensure_assets_state()
+        jobs = assets.setdefault("jobs", {})
+        jobs["layout"] = {
+            "status": "ready" if ok else "failed",
+            "ok": ok,
+            "kind": "layout",
+            "asset_manifest_path": str(manifest_path),
+            "asset_generation_report_path": str(report_path) if report_path.exists() else None,
+            "message": None if ok else "One or more reusable layout assets failed validation.",
+            "failure_classes": [] if ok else ["layout_asset.validation_failed"],
+            "selected_asset_names": [],
+            "skipped_asset_names": [],
+            "num_assets": num_assets,
+            "schema_errors": schema_errors,
+            "unresolved_assets": unresolved,
+            "updated_at_unix": time.time(),
+            "background": False,
+        }
+        combined_path, combined_errors = self._write_combined_asset_manifest()
+        self._refresh_asset_state(combined_path=combined_path, combined_schema_errors=combined_errors)
+        return {
+            "ok": ok,
+            "status": "layout_assets_ready" if ok else "layout_asset_validation_failed",
+            "asset_manifest_path": str(combined_path),
+            "partial_asset_manifest_path": str(manifest_path),
+            "asset_generation_report_path": str(report_path) if report_path.exists() else None,
+            "num_assets": num_assets,
+            "schema_errors": schema_errors,
+            "combined_schema_errors": combined_errors,
+            "unresolved_assets": unresolved,
+        }
+
     def poll_asset_jobs(self, *, wait: bool) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         for kind in list(self._asset_futures):
@@ -141,9 +245,6 @@ class AssetActionHandler:
         report_path: Path,
         short_circuit_ready: bool,
     ) -> dict[str, Any]:
-        planner_output = self.session.current_planner_output()
-        if planner_output is None:
-            return {"ok": False, "status": "precondition_failed", "message": "planner_output is missing."}
         future = self._asset_futures.get(kind)
         if future is not None and not future.done():
             return {
@@ -153,7 +254,13 @@ class AssetActionHandler:
                 "asset_generation_report_path": self._asset_job_report_path_text(kind),
                 "background": True,
             }
-        if short_circuit_ready and self._asset_job_ready(kind):
+        planner_output, planner_update = self._planner_output_for_asset_action(action)
+        if planner_output is None:
+            return planner_update
+        planner_output_updated = bool(planner_update.get("updated"))
+        planner_output_path = planner_update.get("planner_output_path")
+        asset_names = self._asset_names_from_action(action)
+        if short_circuit_ready and self._asset_job_ready(kind) and not asset_names and not planner_output_updated:
             return {
                 "ok": True,
                 "status": ready_status,
@@ -162,7 +269,6 @@ class AssetActionHandler:
                 "asset_generation_report_path": self._asset_job_report_path_text(kind),
             }
         self._shutdown_asset_executor(kind)
-        asset_names = self._asset_names_from_action(action)
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"{kind}_asset_job")
         self._asset_executors[kind] = executor
         self._asset_futures[kind] = executor.submit(
@@ -187,6 +293,8 @@ class AssetActionHandler:
             "schema_errors": [],
             "failure_classes": [],
             "message": None,
+            "planner_output_updated": planner_output_updated,
+            "planner_output_path": planner_output_path,
             "started_at_unix": time.time(),
             "background": True,
         }
@@ -213,7 +321,40 @@ class AssetActionHandler:
             "asset_manifest_path": str(manifest_path),
             "asset_generation_report_path": str(report_path),
             "selected_asset_names": asset_names or [],
+            "planner_output_updated": planner_output_updated,
+            "planner_output_path": planner_output_path,
             "background": True,
+        }
+
+    def _planner_output_for_asset_action(self, action: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        action_planner_output = action.get("planner_output")
+        if action_planner_output is not None:
+            if not isinstance(action_planner_output, dict):
+                return None, {
+                    "ok": False,
+                    "status": "invalid_action",
+                    "message": "Asset start actions require planner_output to be an object or null.",
+                }
+            accepted = self.session.accept_planner_output(
+                action_planner_output,
+                rationale=str(action.get("rationale") or ""),
+            )
+            if not accepted.get("ok"):
+                return None, accepted
+            return action_planner_output, {
+                "ok": True,
+                "updated": True,
+                "planner_output_path": accepted.get("planner_output_path"),
+                "timing": accepted.get("timing"),
+            }
+
+        planner_output = self.session.current_planner_output()
+        if planner_output is None:
+            return None, {"ok": False, "status": "precondition_failed", "message": "planner_output is missing."}
+        return planner_output, {
+            "ok": True,
+            "updated": False,
+            "planner_output_path": self.session.state.get("planner_output_path"),
         }
 
     def _finalize_asset_result(self, kind: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -230,6 +371,7 @@ class AssetActionHandler:
         ok = bool(result.get("ok")) and not schema_errors
         assets = self._ensure_assets_state()
         jobs = assets.setdefault("jobs", {})
+        previous_job = jobs.get(kind) if isinstance(jobs.get(kind), dict) else {}
         jobs[kind] = {
             "status": "ready" if ok else "failed",
             "ok": ok,
@@ -244,6 +386,8 @@ class AssetActionHandler:
             "skipped_asset_names": result.get("skipped_asset_names", []),
             "num_assets": result.get("num_assets", 0),
             "schema_errors": schema_errors,
+            "planner_output_updated": previous_job.get("planner_output_updated", False),
+            "planner_output_path": previous_job.get("planner_output_path"),
             "updated_at_unix": time.time(),
             "background": False,
         }
@@ -264,6 +408,8 @@ class AssetActionHandler:
             "skipped_asset_names": result.get("skipped_asset_names", []),
             "schema_errors": schema_errors,
             "combined_schema_errors": combined_errors,
+            "planner_output_updated": previous_job.get("planner_output_updated", False),
+            "planner_output_path": previous_job.get("planner_output_path"),
         }
 
     def _ensure_assets_state(self) -> dict[str, Any]:

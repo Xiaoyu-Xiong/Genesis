@@ -152,6 +152,12 @@ def _build_env(overrides: dict[str, str]) -> dict[str, str]:
     return env
 
 
+def build_local_execution_env(overrides: dict[str, str] | None = None) -> dict[str, str]:
+    """Return the environment used for generated local Genesis runs."""
+
+    return _build_env({} if overrides is None else dict(overrides))
+
+
 def _prepend_existing_paths(current: str, candidates: tuple[str, ...]) -> str:
     existing = [path for path in candidates if Path(path).exists()]
     parts = [path for path in current.split(os.pathsep) if path]

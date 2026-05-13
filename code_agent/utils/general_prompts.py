@@ -39,9 +39,22 @@ teleportation as a repair for locomotion or mechanism motion.
 """.strip()
 
 
-GENERATED_RESULT_QUALITY_GUIDE = """
+RENDER_CLARITY_GUIDE = """
+Rendering clarity requirement:
+- Generated videos must clearly show the task-relevant scene, objects, contacts, and motion. Camera position, lookat,
+  field of view, clipping planes, lighting, background, capture cadence, and resolution should be chosen so the whole
+  requested behavior is readable without severe cropping, tiny objects, occlusion, blank frames, or confusing views.
+- If critic or visual evidence says the result is hard to inspect because the camera is too far, too close, poorly
+  aimed, poorly lit, cropped, static when tracking is needed, or otherwise unclear, actively repair the rendering module
+  and camera parameters. Do not treat unclear rendering as acceptable when the simulation behavior cannot be judged.
+- Record final camera parameters and rendering choices in render_stats.json so repairs can be source-aware.
+""".strip()
+
+
+GENERATED_RESULT_QUALITY_GUIDE = f"""
 The final simulation should not merely satisfy numeric proxies. It should match the input text prompt and look
 physically and visually reasonable, coherent, and logically staged.
+{RENDER_CLARITY_GUIDE}
 """.strip()
 
 
@@ -68,6 +81,195 @@ Do not overly compress planning details to save tokens; detailed instructions ar
 workers make correct source-level decisions.
 Include every schema field in every response. Use null for irrelevant scalar/object fields and [] for irrelevant array
 fields.
+""".strip()
+
+
+def planner_fem_ipc_capability_section(
+    *,
+    deformable_enabled: bool,
+    ipc_enabled: bool,
+    deformable_config_path: object,
+    deformable_config_text: str,
+) -> str:
+    return f"""
+FEM/IPC capability:
+- FEM deformable enabled: {deformable_enabled}
+- IPC contact/coupling enabled: {ipc_enabled} (forced on whenever FEM deformable is enabled)
+- Effective config contract: {deformable_config_path}
+- Effective config values:
+{deformable_config_text}
+- If FEM deformable is false and the task fundamentally requires soft-body, jelly, elastic, FEM, or visible
+  deformation behavior, choose finish with verdict inconclusive. Do not write a rigid-body substitute.
+- If FEM deformable is true and the task requires soft-body behavior, use FEM+IPC only. Do not use MPM, PBD, SPH,
+  cloth-only shortcuts, or rigid-only substitutes.
+- If FEM deformable is false but IPC is true, rigid/articulated contact scenes may use IPC. Tell workers to keep bodies
+  rigid/articulated, configure `gs.options.IPCCouplerOptions`, and use rigid IPC coupling materials for contact-heavy
+  rigid behavior.
+  Use this coupling guide when choosing object roles and body/action contracts:
+  {RIGID_IPC_COUPLING_GUIDE}
+  Use this IPC failure diagnostic guide when interpreting execution logs:
+  {IPC_FAILURE_DIAGNOSTIC_GUIDE}
+- If IPC is false, workers must not instantiate `gs.options.IPCCouplerOptions`.
+- All FEM, IPC, tet, precision, and FEM material-range defaults must come from `deformable_cfg` /
+  contracts/deformable_config.json in generated code.
+  `ipc_contact_d_hat_adaptive` is a code-agent runtime switch: when true, the generated entrypoint computes
+  `ipc_contact_d_hat = 0.75 * median_edge_length` from ready generated mesh assets at run time.
+- FEM elastic material choices must include explicit `E`, `nu`, and `rho` values selected from the `deformable_cfg`
+  ranges and defaults. Use this material guide when instructing body/action/critic work:
+  {FEM_MATERIAL_SELECTION_GUIDE}
+""".strip()
+
+
+def planner_available_actions_section(
+    *,
+    sim_dt: float,
+    sim_substeps: int,
+    render_every_n_steps: int,
+    render_fps: int,
+    render_res: tuple[int, int],
+) -> str:
+    return f"""
+Available actions:
+- write_plan: create planner_output for this case. Include a complete `planner_output` object matching
+  planner_output.schema.json. Infer duration from the task yourself. Use sim_dt={sim_dt},
+  sim_substeps={sim_substeps}, render_fps={render_fps}, render_every_n_steps={render_every_n_steps}, and
+  render_res={render_res} unless the task explicitly requires different values. Use mode local_gpu and backend gpu by
+  default.
+  Make the plan detailed enough that each writer can implement its part without guessing: describe desired layout,
+  entity identities, physical roles, timing, camera/render expectations, asset orientation/texture needs, success
+  criteria, likely failure modes, and per-module validation expectations.
+  For objects that genuinely require generated geometry, add `asset_requests` with asset_type=`generated_mesh` and set
+  dispatch_graph.wait_for_asset_manifest=true when writers should wait for generated mesh paths before writing code. In
+  each asset request, `scale` and `bbox` are positive XYZ dimensions in meters only; do not use them for position,
+  lower bounds, centers, or signed extents.
+  Meshy mesh generation accepts at most 800 characters in the final mesh-agent prompt. Keep each generated_mesh request
+  concise enough that the assembled prompt from name, purpose, simulation_role, dimensions, texture_needs, and the
+  automatic simulation-ready geometry suffix stays within that limit.
+  When mesh feedback requires a different prompt, rewrite the affected asset request into a new concise, integrated
+  description instead of appending repair text. Put the revised complete planner_output directly on the
+  start_mesh_assets action that retries generation; action rationale, notes, and repair_brief are not sent to the mesh
+  agent.
+  Mesh asset generation owns mesh validity. If a generated mesh's manifold, texture transfer, or Genesis FEM import
+  validation fails, regenerate that asset through the mesh asset action; do not ask body/scene workers to rewrite or
+  procedurally repair the mesh geometry.
+  For articulated robots, grippers, gates, latches, actuated mechanisms, or any task object that is best represented as
+  one self-contained primitive MJCF body tree with joints and actuators, add an XML/MJCF asset request with
+  asset_type=`generated_xml` or `mjcf`. Describe the required joints, actuator semantics, base behavior, approximate
+  dimensions, and control affordances in purpose/simulation_role. XML/MJCF asset requests are primitive-geom only; do
+  not use them for textured decorative mesh objects.
+  When the plan uses XML/MJCF actuators, make the body/action contracts explicit: body must expose stable actuator
+  names, joint names, DOF groups, or control handles in `actors`, and action must drive those handles with Genesis
+  actuator/DOF/force control APIs after initialization. Do not ask action to create motion for an XML articulated asset
+  by overwriting root pose, qpos, or velocities during the simulation. If the actuator contract is missing, the
+  generated code should fail clearly so critic can assign a source-aware body/action repair.
+  When XML/MJCF asset feedback requires a different asset prompt or actuator/body-tree specification, rewrite the
+  affected XML asset request in a revised complete planner_output and put it directly on the start_xml_assets action
+  that retries generation. Do not rely on rationale, notes, or repair_brief to reach the XML asset worker.
+  Across all task types, direct state writes such as setting entity pose, root qpos, DOF position, or DOF velocity are
+  initialization-only. After stepping begins, motion should be expressed through physically meaningful controls:
+  actuator commands, DOF controllers, motors, external forces/torques, or initial velocities set before the first step.
+  {PHYSICAL_CAUSALITY_CONTRACT}
+  Any object whose requested appearance depends on texture, patterned surface detail, decorative material variation,
+  image-like surface content, or nontrivial visual ornamentation must be represented by a Meshy-generated asset request,
+  even when the task does not explicitly say "mesh". Do not ask writers to fake those textured objects with plain
+  primitive colors or simple Genesis surfaces.
+  Prefer a dispatch_graph that enables the code-writing workers to run together after required assets are ready. Treat
+  scene, body, action, and rendering as parallel-capable by default when their contracts contain enough shared
+  layout/entity/timing detail; add serial edges only for concrete dependencies that truly require seeing another
+  worker's generated source or report.
+  Module contract required exports must match the current implementation interfaces exactly:
+  scene=`create_scene(backend, *, sim_dt, sim_substeps, deformable_cfg)`;
+  body=`create_bodies(scene, task, *, deformable_cfg)`;
+  action=`run_actions(scene, actors, *, out_dir, steps, render_state=None)`;
+  rendering=`setup_rendering(..., render_every_n_steps, render_res)`, `capture_frame`, and `finalize_rendering`.
+- start_mesh_assets: start Planner-requested generated mesh assets in the background and return immediately. Use
+  `asset_names` to restrict generation to specific asset request names, or null/[] to generate all generated_mesh
+  requests. Prefer this over blocking generation when any writer can make progress without the final manifest. If this
+  is a retry that changes the mesh prompt, include a complete revised `planner_output` in this action; preserve the
+  rest of the plan and rewrite only the affected asset_requests.
+- wait_mesh_assets: wait for a previously started background mesh asset job to finish and validate
+  assets/asset_manifest.json.
+- start_xml_assets: start Planner-requested XML/MJCF assets in the background and return immediately. Use `asset_names`
+  to restrict generation to specific XML/MJCF asset request names, or null/[] to generate all XML/MJCF requests. XML
+  asset workers are parallel-capable by default, and this asset job may overlap with mesh asset jobs and code-writing
+  workers that do not need the manifest yet. If this is a retry that changes the XML prompt or actuator/body-tree spec,
+  include a complete revised `planner_output` in this action; preserve the rest of the plan and rewrite only the
+  affected asset_requests.
+- wait_xml_assets: wait for a previously started background XML/MJCF asset job to finish and merge its partial manifest
+  into assets/asset_manifest.json.
+- inspect_assets: render/inspect selected ready mesh/XML assets from assets/asset_manifest.json and write
+  reports/asset_inspection_report.json plus preview images. Use `asset_names` to inspect specific logical assets, or
+  null/[] to inspect every manifest entry. This is a diagnostic action for deciding whether a geometry/contact failure
+  is caused by body placement/choreography or by unsuitable generated asset geometry/topology/scale.
+- spawn_workers: start one or more generation workers. Use `roles` from scene, body, action, rendering. Roles in a
+  single spawn_workers action are dispatched concurrently by the harness with no default cap beyond the number of
+  requested roles. Prefer maximal safe parallelism: after required assets are ready, usually spawn every missing writer
+  role together, because each worker can read planner_output, asset_manifest, repository code, and the case workspace.
+  Split dependent work across multiple Planner turns only when you can identify a concrete dependency that would make
+  parallel writing likely incorrect. If mesh or XML assets are still running, you may still spawn writer roles whose
+  module_contracts do not list asset_dependencies or asset_manifest input dependencies. Wait for the relevant asset jobs
+  only before spawning roles that need canonical generated mesh or XML paths.
+- run_integrator: wire generated modules into src/main.py.
+- run_execution: run generated code through the harness on the local GPU.
+- run_critic: ask the read-only critic to evaluate execution artifacts.
+- request_repair: send `repair_brief` to the owning worker when critic/execution evidence shows a fix.
+  {SOURCE_AWARE_REPAIR_GUIDE}
+- run_python: optional controlled `uv run python ...` command. Use `python_args` and cwd repo/case.
+- run_pytest: optional controlled `uv run pytest ...` command. Use `pytest_args` and cwd repo/case.
+- finish: end the episode with verdict pass, fail, or inconclusive.
+""".strip()
+
+
+PLANNER_ACTION_POLICY_GUIDE = f"""
+Action policy:
+- If `planner_output_path` is null, choose write_plan.
+- If planner_output dispatch_graph.wait_for_asset_manifest is true and assets.status is not_requested, start all
+  required asset families. Use start_mesh_assets for generated_mesh requests and start_xml_assets for generated_xml/mjcf
+  requests. You can start one family in one Planner turn and the other in the next while the first continues in the
+  background.
+- If one asset family is already running but another required family is absent from assets.jobs, start the absent family
+  before waiting, so independent mesh and XML work can overlap.
+- If assets.status is running, choose spawn_workers for non-asset-dependent missing roles, or wait_mesh_assets /
+  wait_xml_assets when the next useful writer/integration step requires the manifest.
+- If any generation worker is missing or failed, choose spawn_workers or request_repair for the relevant owner.
+- If assets/asset_manifest.json or reports/asset_generation_report.json show a generated_mesh entry with status failed,
+  failed manifold validation, failed Genesis FEM import validation, missing/corrupt texture, or an unsuitable generated
+  topology, choose start_mesh_assets for the affected asset_names with a complete revised planner_output whose affected
+  generated_mesh request has been rewritten to incorporate the failure feedback under the Meshy prompt limit. Do not
+  request body/scene/action/rendering repair for mesh-intrinsic defects; those workers should only fix placement,
+  material use, controls, or rendering around ready assets.
+- If reports/xml_asset_generation_report.json shows a generated_xml/mjcf request failed because the asset prompt,
+  primitive body tree, joints, or actuators were underspecified or wrong, choose start_xml_assets for the affected
+  asset_names with a complete revised planner_output whose affected XML/MJCF request integrates the concrete feedback.
+- Geometry failures such as initial intersections, invalid IPC worlds, impossible clearances, or repeated contact
+  explosions are not always choreography/body-placement bugs. They can also come from generated mesh defects such as a
+  filled hole, wrong topology, oversized scale, inverted volume, unintended extra components, or a link/anchor shape
+  that cannot physically interlock as planned. When the evidence is ambiguous and assets are ready, choose
+  inspect_assets for the suspicious asset_names before repeatedly asking body to repair placement. If inspection points
+  to a mesh/XML intrinsic issue, retry the affected asset family with a rewritten complete planner_output; if inspection
+  shows assets are usable, route the repair to body/action/scene as appropriate.
+- To improve speed, prefer grouping all currently missing writer roles into one spawn_workers action. Keep dependencies
+  serial only when a specific worker must inspect another worker's completed source/report before it can write a
+  correct module.
+- Only choose run_integrator after scene/body/action/rendering are all ok.
+- Only choose run_execution after integration is current.
+- Only choose run_critic after execution is current.
+- Only choose finish pass after the latest critic verdict is pass.
+- If the latest critic verdict is inconclusive because `codex_result.error_type` is `codex_usage_limit`, choose finish
+  with verdict inconclusive; do not request code repair from a missing/blocked critic review.
+- If critic fails and repair budget remains, choose request_repair for the most relevant generation owner.
+- If deterministic artifact checks, stderr, or stdout mention `ipc.initial_penetration`, libuipc initial
+  penetration/intersection/thickness/distance/sanity-check failure, first decide whether the concrete evidence points
+  to asset geometry/topology/scale or to body placement/clearance. Use inspect_assets when a ready generated asset could
+  be the source of the geometry error. Choose start_mesh_assets/start_xml_assets with a revised complete planner_output
+  for intrinsic asset defects, or request_repair for `body` when the assets are plausible and the issue is initial
+  placement, spacing, orientation, duplicate contact geometry, or choreography. Treat this as geometry repair work, not
+  an execution-environment issue, unless the logs clearly show a missing dependency or runtime setup failure.
+  If this appears together with `IPC rigid state accessor feature is unavailable...`, treat the accessor message as
+  secondary to the invalid IPC world unless the same accessor failure is reproduced without any initial-geometry or
+  `World is not valid` diagnostics.
+- Prefer run_execution over generic run_python for generated simulations.
+- {GENERATED_RESULT_QUALITY_GUIDE}
 """.strip()
 
 
@@ -120,10 +322,53 @@ Rigid IPC coupling mode guide:
   as a robot arm or gripper represented as one MJCF asset. It is stricter than `two_way_soft_constraint`: avoid
   post-build root/qpos teleports, drive motion through actuator/DOF controls, and be careful with initialization because
   some direct state-setting APIs are unsupported.
+- When `ipc_enable_rigid_rigid_contact` / `enable_rigid_rigid_contact` is true for a heavy rigid-contact scene, treat
+  the scene as pure IPC rigid-rigid contact: do not create any rigid body with
+  `coup_type="two_way_soft_constraint"`. Use `coup_type="ipc_only"` for free passive rigid bodies whose motion comes
+  from gravity/contact/friction/interlock, and use `coup_type="external_articulation"` for actively driven bodies that
+  must also contact IPC-owned rigid bodies.
+- Do not rely on Genesis rigid contact as a fallback for `ipc_only` objects. Genesis's rigid collider skips pairs
+  involving `ipc_only` links; rigid-rigid contact between such bodies must be handled by IPC. Avoid mixing
+  `two_way_soft_constraint` and `ipc_only` in heavy interlocking contact because the soft transform constraint and
+  Genesis/IPC state synchronization can create inconsistent states, sudden ejection, or crashes.
+- Passive IPC rigid bodies must not be pose-written, velocity-written, force-driven, hidden-welded, or directly
+  attached after initialization. Drive only the intended articulation DOFs of active mechanisms, not the passive rigid
+  payloads they contact.
 - `coup_links=(...)` is only for `two_way_soft_constraint`; use it to couple just the links that contact the task
   object, such as left/right gripper fingers, instead of putting an entire robot into IPC.
 - If `coup_type` is left as `None`, Genesis auto-selects a mode based on entity type, but generated code should choose
   an explicit mode when the task's contact behavior depends on it.
+""".strip()
+
+
+EXTERNAL_ARTICULATION_MJCF_GUIDE = """
+External-articulation MJCF/XML guide for IPC:
+- An MJCF/URDF entity used with `coup_type="external_articulation"` must be a fixed-base articulation, with a fixed
+  parent/body and a revolute or prismatic child/body for each driven mechanism.
+- Every link that participates in an external-articulation joint must have collision geometry. An empty logical parent
+  body can make IPC fail to create an ABD slot for that link.
+- If the fixed parent is only a logical mount, add a tiny dummy collision geometry to that parent. The dummy parent geom
+  does not have to be a mesh; a primitive MJCF geom such as `type="box"` is fine.
+- The dummy geom must be a real nonzero-volume collision geom, not a site, inertial, visual-only marker, zero-area
+  plane, line, or empty body. It must participate in collision semantics: do not set both `contype` and `conaffinity`
+  to zero. A useful pattern is `contype="1"` with `conaffinity="0"` so the geom remains a collision geom without
+  accepting ordinary contact pairs.
+- Place dummy mount geometry far from the real contact region so it cannot initially intersect the active mechanism,
+  passive rigid bodies, ground, chain links, anchors, or other task geometry. It may be invisible/transparent, but it
+  must still import as collision geometry.
+- Child/driven geoms, such as a spool or hinge tool, must have real collision geometry; do not provide only visual
+  geometry for IPC contact participants.
+- Keep XML mesh coordinates aligned with the layout/source mesh coordinates. If a fixed `euler` correction is required
+  on a geom, validate the resulting initial configuration with an IPC sanity or distance check before stepping.
+- Set joint axes and joint positions from the layout's physical drive axis and pivot. For a spool/anchor-chain style
+  scene, the hinge axis should match the spool's physical shaft axis, and the joint position should be at the shaft
+  center rather than at a flange or arbitrary bbox point.
+- Drive external articulations through actuator/DOF controllers such as `control_dofs_position_velocity`, not by
+  forcibly writing DOF velocity with `set_dofs_velocity` during the simulation.
+- Cap PD gains and actuator force ranges in heavy IPC contact scenes. Overly strong controllers can cause large
+  per-step joint-angle jumps that look like penetration and can destabilize contact.
+- For diagnostics, do not trust `get_dofs_velocity()` alone on external articulations whose qpos is recovered from IPC.
+  Estimate true angular velocity from step-to-step hinge angle differences when needed.
 """.strip()
 
 
@@ -135,9 +380,11 @@ IPC failure diagnostic guide:
   accessor exception as a downstream/secondary diagnostic from the invalid IPC world. Do not infer from that pattern
   alone that the local libuipc build lacks rigid ABD accessor support.
 - For that combined pattern, route the repair to the source that owns initial placement, scale, spacing, orientation,
-  mesh clearance, or duplicate IPC contact geometry, usually `body`. Preserve the intended IPC contact/coupling model;
-  do not "fix" it by disabling IPC, setting `needs_coup=False`, changing the mechanism to hidden constraints, or
-  bypassing contact unless a clean no-penetration repro still proves IPC capability is missing.
+  mesh clearance, duplicate IPC contact geometry, or generated asset topology. This is often `body`, but it may be a
+  generated mesh/XML asset when the asset has a filled hole, wrong scale, extra component, inverted/invalid volume, or a
+  shape that cannot physically interlock as requested. Preserve the intended IPC contact/coupling model; do not "fix"
+  it by disabling IPC, setting `needs_coup=False`, changing the mechanism to hidden constraints, or bypassing contact
+  unless a clean no-penetration repro still proves IPC capability is missing.
 - Treat the rigid ABD accessor as an execution/libuipc capability issue only after a valid rigid IPC scene with no
   initial penetration, distance/thickness, or `World is not valid` diagnostics still fails to expose the accessor.
 """.strip()
@@ -208,7 +455,10 @@ Genesis rigid primitive API constraints:
   `gs.Scene(..., coupler_options=gs.options.IPCCouplerOptions(...))` and mapping IPC values from `deformable_cfg`.
   Strip the config prefix when passing Genesis options, e.g. `ipc_contact_d_hat` -> `contact_d_hat` and
   `ipc_constraint_strength_translation` -> `constraint_strength_translation`.
+  Do not pass `ipc_contact_d_hat_adaptive` to Genesis; it is a code-agent runtime switch, and the generated entrypoint
+  resolves it into `ipc_contact_d_hat` before `create_scene`.
 {RIGID_IPC_COUPLING_GUIDE}
+{EXTERNAL_ARTICULATION_MJCF_GUIDE}
 - For rigid IPC scenes, set `enable_rigid_rigid_contact` from `deformable_cfg["ipc_enable_rigid_rigid_contact"]`.
   Keep it true when rigid bodies should collide with each other through IPC; keep it false when IPC should only handle
   rigid-soft contact or selected articulated contacts and Genesis's rigid solver should avoid delegated pairs.
@@ -255,6 +505,7 @@ Genesis FEM+IPC primitive API constraints:
   `ipc_cfl_enable`, `ipc_sanity_check_enable`, `ipc_constraint_strength_translation`,
   `ipc_constraint_strength_rotation`, `ipc_enable_rigid_ground_contact`, `ipc_enable_rigid_rigid_contact`,
   `ipc_two_way_coupling`, `ipc_enable_rigid_dofs_sync`, and `ipc_free_base_driven_by_ipc`.
+  Exclude `ipc_contact_d_hat_adaptive`; it is a code-agent runtime switch, not a Genesis option.
 - Use exactly one IPC ground/support surface for the same contact region. If scene.py creates a floor, store it as
   `scene.genesis_static_floor`; body.py should reference that entity in actors instead of adding another coincident
   plane. Duplicate overlapping IPC planes are invalid initial geometry.

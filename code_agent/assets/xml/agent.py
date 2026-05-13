@@ -195,6 +195,10 @@ def _xml_worker_prompt(
         - Do not use mesh or hfield assets. Use primitive MJCF geoms only.
         - Prefer named joints, named actuators, explicit joint ranges, collision-enabled primitive geoms, and sensible
           masses/inertias.
+        - If the asset may be used as a fixed-base IPC external articulation, every parent and child link participating
+          in a driven joint must have collision geometry. Do not leave a logical mount body empty. Add a tiny
+          nonzero-volume primitive dummy collision geom to a mount parent when needed; it must not have both `contype`
+          and `conaffinity` set to zero, and it should be placed away from the active contact region.
         - The result should satisfy the text prompt and also look physically coherent and visually understandable.
         - If the request implies grasping, gates, locks, buttons, hinges, sliders, latches, or tools, make the actuator
           interface explicit enough for an Action Worker to command it without reverse-engineering the XML.

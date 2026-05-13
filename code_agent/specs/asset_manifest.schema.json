@@ -22,6 +22,10 @@
           "bbox": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
           "file_meshes_are_zup": { "type": ["boolean", "null"] },
           "texture_path": { "type": ["string", "null"] },
+          "texture_paths": {
+            "type": "object",
+            "additionalProperties": { "type": "string", "minLength": 1 }
+          },
           "joints": { "type": "array", "items": { "type": "object" } },
           "actuators": { "type": "array", "items": { "type": "object" } },
           "control_interface": { "type": "object" },

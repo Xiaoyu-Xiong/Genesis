@@ -5,7 +5,11 @@ reports.
 
 The active runtime is Planner-led:
 
-1. `utils/suite.py` reads `case_id|prompt` cases and creates one workspace per case.
+1. `utils/suite.py` reads `case_id|prompt` cases and creates one workspace per case. A prompt may optionally contain
+   `@layout path/to/layout.json`; the path is resolved relative to the `cases.txt` file and injected into Planner and
+   worker prompts as source-derived layout context. JSON layouts can also declare `reusable_assets` that reference local
+   or GitHub mesh/texture files; those assets are copied or downloaded verbatim, sanity-checked once, and exposed as
+   `repo_asset` entries in `assets/asset_manifest.json`.
 2. `planner/session.py` runs Planner turns. Planner emits one JSON action at a time.
 3. `planner/action_handlers/` executes actions: start/wait asset jobs, spawn writers, integrate, run, evaluate, repair,
    or finish.
@@ -33,9 +37,14 @@ Planner can start mesh or XML/MJCF asset jobs in the background:
 
 - `start_mesh_assets` / `wait_mesh_assets`
 - `start_xml_assets` / `wait_xml_assets`
+- `inspect_assets` for ready asset previews and geometry summaries
 
 Ready assets are merged into `assets/asset_manifest.json`. Writers must use manifest paths and metadata rather than
 guessing filesystem locations.
+
+Layouts can provide ready reusable mesh assets without invoking text-to-mesh generation. These entries use
+`source_type="repo_asset"` and preserve the source file bytes; sanity-check results are reported in
+`reports/layout_asset_report.json` and embedded in each manifest entry.
 
 ## Run
 

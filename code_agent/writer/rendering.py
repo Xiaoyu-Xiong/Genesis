@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from code_agent.utils.general_prompts import RENDER_CLARITY_GUIDE
+
 from .common import WorkerSpec
 
 
@@ -8,7 +10,7 @@ SPEC = WorkerSpec(
     target_file="src/rendering.py",
     required_export="setup_rendering",
     responsibility="Genesis camera setup, render capture hooks, frame/video output, and visual validation signals",
-    prompt_body="""
+    prompt_body=f"""
     Write these exports:
     - `setup_rendering(
           scene,
@@ -26,6 +28,7 @@ SPEC = WorkerSpec(
     - `finalize_rendering(render_state: dict, *, event_log_path: Path | None = None, metrics_path: Path | None = None) -> dict`
 
     Rendering must use Genesis' native camera renderer. Do not implement a 2D event-log diagnostic renderer.
+    {RENDER_CLARITY_GUIDE}
     `setup_rendering` runs before `scene.build()` and must:
     - honor the supplied `steps`, `fps`, `duration_sec`, and `target_video_frames`; do not replace them with local
       magic defaults

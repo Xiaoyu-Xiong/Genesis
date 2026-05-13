@@ -15,6 +15,9 @@ Coverage:
 Files:
 
 - `cases.txt`: suite-style `title|prompt` entries, sorted alphabetically by title.
+- `layouts/`: optional source-derived layout JSON files referenced from prompts via `@layout <relative-path>`. Layouts
+  may include `reusable_assets` entries for original local/GitHub meshes and textures; those files are reused verbatim
+  after one read-only mesh sanity check.
 - `catalog.json`: source papers, original video paths, clipped segment paths, prompt text, and feasibility notes.
 - `videos/`: downloaded full MP4 reference videos.
 - `clips/`: cropped MP4 snippets named after each example title.

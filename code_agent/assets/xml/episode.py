@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 from pathlib import Path
 from typing import Any
 
@@ -24,44 +25,47 @@ def generate_xml_assets_for_episode(
     manifest_path = assets_dir / "xml_asset_manifest.json"
     report_path = case_dir / "reports" / "xml_asset_generation_report.json"
     selected_requests, skipped_names = select_xml_requests(planner_output, asset_names)
+    selected_names = [str(request.get("name", "")) for request in selected_requests]
+    mentioned_names = {name for name in selected_names if name} | {name for name in asset_names or [] if name}
+    preserved_entries = _preserved_ready_xml_manifest_entries(manifest_path, mentioned_names)
+    preserved_results = [_preserved_xml_result_entry(entry) for entry in preserved_entries]
+    preserved_names = [str(entry.get("logical_name", "")) for entry in preserved_entries if entry.get("logical_name")]
 
     if not selected_requests:
-        manifest = {
-            "assets": [],
-            "assumptions": ["No generated XML/MJCF asset requests were selected for this episode."],
-            "unresolved_risks": [
-                f"Requested asset name was not found or was not an XML/MJCF request: {name}" for name in skipped_names
-            ],
-        }
+        manifest = build_xml_manifest(preserved_entries, skipped_names=skipped_names)
+        manifest["assumptions"].append(
+            "No generated XML/MJCF asset requests were selected; ready unselected XML entries were preserved."
+        )
         report = {
             "ok": not skipped_names,
-            "status": "no_xml_requests",
+            "status": "xml_assets_ready" if preserved_entries and not skipped_names else "no_xml_requests",
             "asset_manifest_path": str(manifest_path),
             "asset_generation_report_path": str(report_path),
-            "num_assets": 0,
+            "num_assets": len(preserved_entries),
             "xml_parallel": False,
             "max_parallel_workers": 1,
             "selected_asset_names": [],
+            "preserved_asset_names": preserved_names,
             "skipped_asset_names": skipped_names,
-            "assets": [],
+            "assets": preserved_results,
         }
         dump_json(manifest, manifest_path)
         dump_json(report, report_path)
         return report
 
-    selected_names = [str(request.get("name", "")) for request in selected_requests]
     max_workers = _xml_max_workers(len(selected_requests))
     progress_report = {
         "ok": False,
         "status": "xml_asset_generation_running",
         "asset_manifest_path": str(manifest_path),
         "asset_generation_report_path": str(report_path),
-        "num_assets": len(selected_requests),
+        "num_assets": len(preserved_entries) + len(selected_requests),
         "xml_parallel": max_workers > 1,
         "max_parallel_workers": max_workers,
         "selected_asset_names": selected_names,
+        "preserved_asset_names": preserved_names,
         "skipped_asset_names": skipped_names,
-        "assets": [],
+        "assets": preserved_results,
     }
     dump_json(progress_report, report_path)
 
@@ -93,31 +97,33 @@ def generate_xml_assets_for_episode(
                 }
             results[index] = result
             completed = [item for item in results if item is not None]
-            progress_report["assets"] = completed
+            progress_report["assets"] = preserved_results + completed
             progress_report["completed_asset_names"] = [
                 str(item.get("request", {}).get("name", "")) for item in completed
             ]
             partial_manifest = build_xml_manifest(
-                [item["manifest_entry"] for item in completed],
+                _merge_xml_manifest_entries(preserved_entries, [item["manifest_entry"] for item in completed]),
                 skipped_names=skipped_names,
             )
             dump_json(partial_manifest, manifest_path)
             dump_json(progress_report, report_path)
 
     final_results = [item for item in results if item is not None]
-    manifest = build_xml_manifest([result["manifest_entry"] for result in final_results], skipped_names=skipped_names)
+    entries = _merge_xml_manifest_entries(preserved_entries, [result["manifest_entry"] for result in final_results])
+    manifest = build_xml_manifest(entries, skipped_names=skipped_names)
     ok = all(bool(result.get("ok")) for result in final_results) and not skipped_names
     report = {
         "ok": ok,
         "status": "xml_assets_generated" if ok else "xml_asset_generation_failed",
         "asset_manifest_path": str(manifest_path),
         "asset_generation_report_path": str(report_path),
-        "num_assets": len(final_results),
+        "num_assets": len(entries),
         "xml_parallel": max_workers > 1,
         "max_parallel_workers": max_workers,
         "selected_asset_names": selected_names,
+        "preserved_asset_names": preserved_names,
         "skipped_asset_names": skipped_names,
-        "assets": final_results,
+        "assets": preserved_results + final_results,
     }
     dump_json(manifest, manifest_path)
     dump_json(report, report_path)
@@ -217,6 +223,73 @@ def _generation_error(generation: dict[str, Any]) -> str:
             if isinstance(validation, dict) and validation.get("errors"):
                 return "; ".join(str(item) for item in validation["errors"])
     return "XML asset generation failed."
+
+
+def _preserved_ready_xml_manifest_entries(manifest_path: Path, selected_names: set[str]) -> list[dict[str, Any]]:
+    manifest = _load_json_dict(manifest_path)
+    raw_assets = manifest.get("assets")
+    if not isinstance(raw_assets, list):
+        return []
+    preserved: list[dict[str, Any]] = []
+    for raw_entry in raw_assets:
+        if not isinstance(raw_entry, dict):
+            continue
+        entry = dict(raw_entry)
+        name = str(entry.get("logical_name", ""))
+        if name in selected_names:
+            continue
+        if _is_ready_xml_manifest_entry(entry):
+            preserved.append(entry)
+    return preserved
+
+
+def _is_ready_xml_manifest_entry(entry: dict[str, Any]) -> bool:
+    if entry.get("source_type") != "mjcf" or entry.get("status") != "ready":
+        return False
+    return _manifest_file_available(entry.get("runtime_path"), required=True)
+
+
+def _manifest_file_available(value: Any, *, required: bool) -> bool:
+    if value is None:
+        return not required
+    if not isinstance(value, str) or not value or value == "unavailable":
+        return False
+    return Path(value).is_file()
+
+
+def _preserved_xml_result_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "preserved": True,
+        "request": {"name": entry.get("logical_name", "")},
+        "manifest_entry": entry,
+    }
+
+
+def _merge_xml_manifest_entries(
+    preserved_entries: list[dict[str, Any]],
+    generated_entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    entries_by_name: dict[str, dict[str, Any]] = {}
+    ordered_names: list[str] = []
+    for entry in [*preserved_entries, *generated_entries]:
+        name = str(entry.get("logical_name", ""))
+        if not name:
+            continue
+        if name not in entries_by_name:
+            ordered_names.append(name)
+        entries_by_name[name] = entry
+    return [entries_by_name[name] for name in ordered_names]
+
+
+def _load_json_dict(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _xml_max_workers(num_requests: int) -> int:

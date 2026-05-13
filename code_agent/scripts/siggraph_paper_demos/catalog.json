@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-05-05T12:56:42-04:00",
+  "updated_at": "2026-05-12T14:12:53-04:00",
   "purpose": "SIGGRAPH paper demo candidates for text-to-Genesis generation and tuning.",
   "selection_rules": [
     "No cloth, fluid, or RL/control-heavy examples.",
@@ -10,7 +10,10 @@
     "pure_rigid": [
       "anchor_chain_windup",
       "bike_chain_sprocket",
-      "expanding_lock_box"
+      "card_house_topple",
+      "chainmail_net_ball_drop",
+      "expanding_lock_box",
+      "wrecking_ball_block_pile"
     ],
     "soft_one_way_rigid": [
       "halloween_pumpkin_party",
@@ -80,7 +83,8 @@
       "clip_contact_sheet": "clip_contact_sheets/anchor_chain_windup.jpg",
       "clip_sha256": "cd13f2c3d125415b60315e50438ee08c20facbf8f4723d8cd221d084ce86188c",
       "clip_bytes": 7676555,
-      "prompt": "Create a pure rigid-body IPC contact scene with no ground against a pure white background: a gold heavy metal ship anchor hangs from a purple interlocking chain below a fixed gray motorized winch roller. The chain must not be a rope, tube, curve, or single fused mesh: instantiate about 25-35 independent rigid mesh link bodies. Each link should match the reference clip shape: an elongated torus-topology mesh with Euler characteristic 0, one continuous thick tubular ring rather than a solid plate; its two ends are semicircular arc caps, and its middle is stretched into two long nearly parallel rounded bars that form a long rounded slot for hanging and threading adjacent links. Every purple link must have a real open hole large enough for another link to pass through; alternate neighboring links by 90 degrees so each link physically passes through the previous and next link. Model the upper winch as a gray horizontal cylinder drum/roller with two large circular side flanges and a large gray rigid guide eye ring or pickup ring near the drum that is big enough for the chain links to thread through; this ring must be collision geometry, not just visual decoration. Model the gold anchor with a visible top shank/crown shackle eye ring, also large enough for the lowest chain link to pass through, so the anchor is carried by contact/interlock through this ring rather than by an invisible attachment. Let the anchor and slack chain release and drop under gravity at start, then rotate the winch so the drum winds the individual links upward; links should collide, interlock, bunch, kink, rattle, pile against the drum/flanges/guide ring, and lift the swinging anchor through contact. After the anchor has been fully reeled up near the drum, keep the winch rotating continuously so the bunched chain transmits angular momentum to the anchor and flings the anchor outward in a wide swinging arc; the anchor should be thrown by chain tension and contact, not by teleporting or directly setting its pose. Render fps has been set 0.25x real time, so render 15s real time / 60s video time / 1500 simulation (render) steps.",
+      "layout_path": "layouts/anchor_chain_windup.json",
+      "prompt": "@layout layouts/anchor_chain_windup.json Create a source-layout-guided pure rigid-body IPC contact scene with no ground against a pure white background: recreate the SIGGRAPH 2021 Rigid IPC anchor-chain windup using the supplied layout as authoritative geometry and initial-placement guidance. Reuse the layout-provided ready repo_asset meshes for the spool, chain link, and anchor instead of regenerating approximations when those manifest entries are ready. Use a gray fixed-position motorized rolling axle/spool above a hanging purple interlocking chain and a heavy gold anchor load at the bottom. The chain must not be a rope, tube, curve, cable, tendon, or single fused mesh: instantiate the layout's independent rigid chain-link mesh bodies, preserving the source count unless an explicitly documented Genesis scaling adaptation is needed. Each link should match the source link structure: one continuous closed elongated torus-topology ring with a real open slot, rounded ends, thick tube cross-section, and 90-degree alternating neighboring orientations so adjacent links physically pass through one another. Let the chain and anchor briefly release and fall under gravity, then rotate only the axle/spool so the individual links wind upward, collide, interlock, bunch, kink, and lift/swing the anchor through contact. Continue rotating after reel-up so the bunched chain transfers angular momentum and flings the anchor outward; the anchor must be thrown by chain tension/contact, not by teleporting, hidden constraints, pose writes, or direct anchor forces. Render fps has been set 0.25x real time, so render 15s real time / 60s video time / 1500 simulation (render) steps.",
       "pipeline_fit": "medium",
       "notes": "A complete rigid chain-and-winch demo; no deformable bodies, fluids, cloth, or learned control."
     },
@@ -102,6 +106,44 @@
       "prompt": "Create a pure rigid-body scene with a loop of interlocking chain links around two toothed sprockets; motorize one sprocket so the chain wraps, slides, and drives the other sprocket through tight contact, render 10s behavior.",
       "pipeline_fit": "medium",
       "notes": "A contact-rich rigid mechanism demo with a simple motorized sprocket control."
+    },
+    {
+      "title": "card_house_topple",
+      "coverage": "pure_rigid",
+      "paper": "Intersection-free Rigid Body Dynamics",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2021",
+      "project_page": "https://ipc-sim.github.io/rigid-ipc/",
+      "source_video_id": "rigid_ipc_2021_main",
+      "source_segment_sec": {
+        "start": 91.6,
+        "end": 98.8
+      },
+      "clip_path": "clips/card_house_topple.mp4",
+      "clip_contact_sheet": "clip_contact_sheets/card_house_topple.jpg",
+      "clip_sha256": "a78597790a3274edd79184e161ca2c9f848fa9f06e1c7d87a5ae9fbc85175260",
+      "clip_bytes": 1865526,
+      "prompt": "Create a pure rigid-body IPC scene of a delicate card-house collapse on a gray platform. Build an A-frame tower from 10-14 separate thin rigid rectangular planks in red, blue, tan, and dark gray, leaning in pairs with small contact gaps and cross bars. Drop two or three small rigid cubes onto the top so the tower buckles, planks slide, tip, collide, and settle into a messy pile. Treat every card as a rigid mesh with thickness and IPC contact; do not use cloth sheets or kinematic collapse animation; render 8s behavior.",
+      "pipeline_fit": "medium",
+      "notes": "Pure rigid codimensional-looking demo adapted to finite-thickness rigid planks."
+    },
+    {
+      "title": "chainmail_net_ball_drop",
+      "coverage": "pure_rigid",
+      "paper": "Intersection-free Rigid Body Dynamics",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2021",
+      "project_page": "https://ipc-sim.github.io/rigid-ipc/",
+      "source_video_id": "rigid_ipc_2021_supplemental",
+      "source_segment_sec": {
+        "start": 49.3,
+        "end": 58.9
+      },
+      "clip_path": "clips/chainmail_net_ball_drop.mp4",
+      "clip_contact_sheet": "clip_contact_sheets/chainmail_net_ball_drop.jpg",
+      "clip_sha256": "dcdb0d323e582014b3262a0b9f351eb4d6cdacd5a7996318bd4449aba8c15505",
+      "clip_bytes": 3283024,
+      "prompt": "Create a pure rigid-body IPC contact scene on a pure white background: a large dark-blue rigid ball drops into a suspended square chainmail net or basket made from many independent small pale-gold oval torus links. The net must not be cloth, a sheet, or a fused mesh; instantiate a grid of separate rigid ring links with real holes, each interlocked with neighboring rings so the net can sag through contact. Hold or anchor only the four outer corners/edges, then release the ball above the center. The ball should push the linked rings downward, make the net bowl deeply, cause local rings to rotate, bunch, and tighten around the ball, then settle while all motion comes from rigid IPC contact and gravity. Render 10s behavior.",
+      "pipeline_fit": "stretch",
+      "notes": "Anchor-like many-link rigid contact scene; approximates the Rigid IPC chainmail net as a finite grid of independent torus links, not cloth."
     },
     {
       "title": "expanding_lock_box",
@@ -175,7 +217,7 @@
       "clip_contact_sheet": "clip_contact_sheets/soft_toys_squeeze_through_tube.jpg",
       "clip_sha256": "52c267a8b3dcd9836914758ae879b40eae66ed3036121707da9aa95ae0c8543d",
       "clip_bytes": 860933,
-      "prompt": "Create a rigid-soft two-way coupled squeeze-out scene inside a fixed transparent container whose upper part is a vertical cylindrical tube and whose lower part is a tapered conical funnel with a small flat-cut circular opening at the very bottom. Pack the container with several soft FEM toy meshes: a red soft ball, a green lizard or dinosaur, a blue spider or crab-like toy, a tan bumpy plush animal, and a purple teardrop toy. A heavy dynamic rigid cylindrical plunger descends from above and physically presses the toys downward; every toy including the ball visibly squashes, bulges, jams against other toys and the transparent wall, squeezes through the small bottom opening, rebounds, and separates into a soft pile below, render 10s behavior.",
+      "prompt": "Create a rigid-soft coupled squeeze-out scene inside a fixed transparent mesh container whose upper part is a vertical cylindrical tube and whose lower part is a tapered conical funnel with an extremely tiny flat-cut circular opening (much smaller than the following objects) at the very bottom. Pack the container with the following medium-hard deformable FEM toy meshes with top-down sequence: a heavy red soft ball, a crab toy, a dinosaur, a squatting lion, and an alien-shaped toy. The size of these meshes should be closed to but a little bit smaller than the top radius of the container. All meshes above drops downward and visibly squashes, bulges, jams against each other and the transparent wall, partly squeezes through the small bottom opening, rebounds, but keep inside the container without fully dropping down. Render fps has been set 0.25x real time, so render 7.5s real time / 30s video time / 750 simulation (render) steps.",
       "pipeline_fit": "medium",
       "notes": "A complete IPC squeeze-out demo adapted to two-way coupling by making the plunger a physical rigid participant."
     },
@@ -216,6 +258,25 @@
       "prompt": "Create a rigid-soft coupled scene where a deformable woven basket made from elastic soft ring or lattice elements supports rigid branch-like objects and soft foliage; the objects fall into the basket, deform it deeply, and settle together through two-way contact, render 10s behavior.",
       "pipeline_fit": "stretch",
       "notes": "A more complete mixed rigid/deformable demo without fabric. Approximate the woven structure with generated soft lattice or soft torus/ring elements."
+    },
+    {
+      "title": "wrecking_ball_block_pile",
+      "coverage": "pure_rigid",
+      "paper": "Intersection-free Rigid Body Dynamics",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2021",
+      "project_page": "https://ipc-sim.github.io/rigid-ipc/",
+      "source_video_id": "rigid_ipc_2021_supplemental",
+      "source_segment_sec": {
+        "start": 78.0,
+        "end": 87.2
+      },
+      "clip_path": "clips/wrecking_ball_block_pile.mp4",
+      "clip_contact_sheet": "clip_contact_sheets/wrecking_ball_block_pile.jpg",
+      "clip_sha256": "bbca22b5154b317eccf97f5fdc6e5725fd1040ec43517683e577ed478e43e442",
+      "clip_bytes": 614352,
+      "prompt": "Create a pure rigid-body IPC contact scene on a white background with a gray platform, a compact stack or pile of many small pink rigid cubes, and a heavy gold wrecking ball hanging from a short chain of separate dark metal oval links. The chain should be made from individual interlocked rigid mesh rings, not a rope or curve. Release the ball from the side so it swings under gravity into the cube pile, punches through the stack, scatters dozens of cubes outward, then swings back while cubes collide, tumble, and settle on the platform. Use only rigid IPC contact/friction and gravity; do not teleport the ball or cubes; render 10s behavior.",
+      "pipeline_fit": "medium",
+      "notes": "Combines the anchor-style chain with card-house-style many-rigid-body collapse; no soft bodies, cloth, fluid, or learned control."
     }
   ]
 }

@@ -41,6 +41,19 @@ SPEC = WorkerSpec(
     for Genesis-driven bodies or selected articulated contact links, and `coup_type="external_articulation"` for
     fixed-base articulated MJCF/URDF bodies that should couple at the DOF level. Keep all such objects rigid; do not
     fake soft deformation.
+    If `deformable_cfg["ipc_enable_rigid_rigid_contact"]` is true for a heavy rigid-contact scene, treat the scene as
+    pure IPC rigid-rigid contact: do not generate any `coup_type="two_way_soft_constraint"` body. Use `ipc_only` for
+    passive free rigid bodies moved by IPC gravity/contact/friction/interlock, and use `external_articulation` for
+    actively driven bodies that also contact IPC-owned rigid bodies. Do not rely on Genesis rigid contact to catch
+    `ipc_only` objects; Genesis skips rigid-collider pairs involving `ipc_only` links. Passive IPC rigid bodies must not
+    be directly pose-written, velocity-written, force-driven, hidden-welded, or attached after initialization.
+    For an MJCF/URDF body that will be loaded as `coup_type="external_articulation"`, ensure it is a fixed-base
+    articulation and every parent/child link that participates in a driven joint has collision geometry. If the fixed
+    parent is only a logical mount, add a tiny nonzero-volume dummy collision geom to that parent. The dummy geom may be
+    an MJCF primitive such as `type="box"`; it does not have to be a mesh. It must import as collision geometry and must
+    not have both `contype` and `conaffinity` set to zero; `contype="1"` with `conaffinity="0"` is acceptable. Place the
+    dummy geom far from real task contact so it cannot initially intersect active or passive bodies. Child/driven links
+    must also have real collision geometry, with joint axes and pivots aligned to the physical layout.
     For FEM primitive soft-body tasks, create the requested soft primitive count when reasonable, but keep tet
     resolution from `deformable_cfg["tet_resolution"]` and avoid extra decorative dynamic bodies. A 10-soft-cube stack
     is acceptable for the primitive-first deformable suite.

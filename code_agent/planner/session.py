@@ -140,12 +140,59 @@ class PlannerSession:
         for path in (self.contracts_dir, self.reports_dir, self.logs_dir, self.command_dir):
             path.mkdir(parents=True, exist_ok=True)
         self.write_deformable_config_contract()
+        self.actions.assets.adopt_layout_asset_manifest()
         for path in (self.action_history_path, self.dispatch_history_path):
             if path.exists():
                 path.unlink()
 
     def write_deformable_config_contract(self) -> None:
         dump_json(self.deformable_config, self.deformable_config_path)
+
+    def accept_planner_output(self, planner_output: dict[str, Any], *, rationale: str | None = None) -> dict[str, Any]:
+        errors = self.validate_json_schema(planner_output, Path("code_agent/specs/planner_output.schema.json"))
+        if errors:
+            return {
+                "ok": False,
+                "status": "invalid_planner_output",
+                "message": "planner_output failed schema validation.",
+                "errors": errors,
+            }
+
+        planner_output_path = self.contracts_dir / "planner_output.json"
+        dump_json(planner_output, planner_output_path)
+        self.write_deformable_config_contract()
+
+        timing = resolve_timing(
+            planner_output=planner_output,
+            steps=self.config.steps,
+            duration_sec=self.config.duration_sec,
+            render_fps=self.config.render_fps,
+        )
+        self.timing = timing
+        dump_json(timing.to_dict(), self.contracts_dir / "timing.json")
+
+        self.state["planner_output_path"] = str(planner_output_path)
+        self.state["timing"] = timing.to_dict()
+
+        episode_plan_path = self.contracts_dir / "episode_plan.json"
+        dump_json(
+            {
+                "planner_output_path": str(planner_output_path),
+                "planner_output": planner_output,
+                "timing": timing.to_dict(),
+                "rationale": rationale,
+                "created_at_unix": time.time(),
+            },
+            episode_plan_path,
+        )
+        self.state["episode_plan_path"] = str(episode_plan_path)
+        return {
+            "ok": True,
+            "status": "planner_output_accepted",
+            "planner_output_path": str(planner_output_path),
+            "episode_plan_path": str(episode_plan_path),
+            "timing": timing.to_dict(),
+        }
 
     def record_worker_results(self, results: list[WorkerDispatchResult]) -> None:
         for item in results:
@@ -205,6 +252,12 @@ class PlannerSession:
             return f"owner={result['owner']}, all_workers_ok={result.get('all_workers_ok')}"
         if "asset_manifest_path" in result:
             return f"assets={result.get('num_assets')}, manifest={result.get('asset_manifest_path')}"
+        if "asset_inspection_report_path" in result:
+            return (
+                f"asset_errors={result.get('asset_error_count')}, "
+                f"asset_warnings={result.get('asset_warning_count')}, "
+                f"report={result.get('asset_inspection_report_path')}"
+            )
         if "verdict" in result:
             return f"verdict={result['verdict']}"
         return str(result.get("status"))
@@ -337,6 +390,12 @@ class PlannerSession:
                 "- Prefer local Genesis source and examples over online docs if they disagree.",
             ]
         )
+
+    def layout_context_prompt(self) -> str:
+        layout_context = self.case_dir / "inputs" / "layout_context.md"
+        if not layout_context.exists():
+            return ""
+        return layout_context.read_text(encoding="utf-8", errors="replace")
 
     def append_jsonl(self, path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

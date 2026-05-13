@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from code_agent.configs import CONFIGS
+from code_agent.assets.layout_reuse import prepare_layout_reusable_assets
 from code_agent.context.genesis import GenesisContextPack, build_genesis_context_pack, install_genesis_context_pack
 from code_agent.io_utils import dump_json
 from code_agent.planner.session import PlannerSession, PlannerSessionConfig
@@ -17,6 +19,10 @@ from code_agent.planner.session import PlannerSession, PlannerSessionConfig
 class Case:
     case_id: str
     task: str
+    layout_path: Path | None = None
+
+
+_LAYOUT_DIRECTIVE_RE = re.compile(r"@layout\s+(?P<path>\S+)")
 
 
 def load_cases(path: Path) -> list[Case]:
@@ -28,14 +34,73 @@ def load_cases(path: Path) -> list[Case]:
         if "|" not in line:
             raise ValueError(f"Invalid case line, expected case_id|prompt: {line}")
         case_id, task = line.split("|", 1)
-        cases.append(Case(case_id.strip(), task.strip()))
+        task, layout_path = _extract_layout_directive(task.strip(), base_dir=path.parent)
+        cases.append(Case(case_id.strip(), task, layout_path=layout_path))
     return cases
+
+
+def _extract_layout_directive(task: str, *, base_dir: Path) -> tuple[str, Path | None]:
+    match = _LAYOUT_DIRECTIVE_RE.search(task)
+    if match is None:
+        return task, None
+
+    raw_path = match.group("path")
+    layout_path = Path(raw_path)
+    if not layout_path.is_absolute():
+        layout_path = base_dir / layout_path
+    layout_path = layout_path.resolve()
+    if not layout_path.is_file():
+        raise ValueError(f"Layout file referenced by @layout does not exist: {layout_path}")
+
+    cleaned_task = (task[: match.start()] + task[match.end() :]).strip()
+    if not cleaned_task:
+        raise ValueError(f"Case prompt became empty after removing @layout directive for {layout_path}")
+    return cleaned_task, layout_path
 
 
 def _write_case_inputs(case_dir: Path, case: Case, *, deformable_enabled: bool, ipc_enabled: bool) -> None:
     inputs = case_dir / "inputs"
     inputs.mkdir(parents=True, exist_ok=True)
     (inputs / "user_prompt.md").write_text(case.task + "\n", encoding="utf-8")
+    if case.layout_path is not None:
+        layout_text = case.layout_path.read_text(encoding="utf-8", errors="replace")
+        layout_copy = inputs / f"layout{case.layout_path.suffix or '.txt'}"
+        layout_copy.write_text(layout_text, encoding="utf-8")
+        layout_asset_report = prepare_layout_reusable_assets(case_dir=case_dir, layout_path=case.layout_path)
+        layout_asset_lines: list[str] = []
+        if layout_asset_report is not None:
+            layout_asset_lines = [
+                "",
+                "Reusable layout assets:",
+                f"- Status: `{layout_asset_report.get('status')}`",
+                f"- Partial manifest: `{layout_asset_report.get('asset_manifest_path')}`",
+                f"- Report: `{layout_asset_report.get('asset_generation_report_path')}`",
+                "- Planner and workers should reuse ready `repo_asset` manifest entries instead of regenerating the "
+                "same mesh.",
+            ]
+        language = case.layout_path.suffix.lstrip(".") or "text"
+        (inputs / "layout_context.md").write_text(
+            "\n".join(
+                [
+                    "# User-Provided Layout",
+                    "",
+                    f"- Original layout path: `{case.layout_path}`",
+                    f"- Workspace copy: `{layout_copy}`",
+                    "",
+                    "Planner and workers should treat this layout as explicit scene-structure input. Preserve the",
+                    "layout's source-derived dimensions, initial placements, axes, timing, and stated approximations",
+                    "unless they are impossible in Genesis; when adapting coordinate systems or asset scales, document",
+                    "the mapping and keep the original contact/interlock intent.",
+                    *layout_asset_lines,
+                    "",
+                    f"```{language}",
+                    layout_text.rstrip(),
+                    "```",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
     if deformable_enabled:
         capability_line = (
             "FEM deformable generation is ENABLED for this case, and IPC contact is forced ON. Use only FEM+IPC for "
@@ -81,7 +146,9 @@ def run_suite(
     if max_cases is not None:
         cases = cases[:max_cases]
 
-    effective_deformable_enabled = CONFIGS.deformable.enabled if deformable_enabled is None else bool(deformable_enabled)
+    effective_deformable_enabled = (
+        CONFIGS.deformable.enabled if deformable_enabled is None else bool(deformable_enabled)
+    )
     effective_ipc_enabled = effective_deformable_enabled or (
         CONFIGS.ipc.enabled if ipc_enabled is None else bool(ipc_enabled)
     )
