@@ -8,11 +8,12 @@ from typing import Any
 from code_agent.assets.mesh.workflow.steps import slugify_prompt
 from code_agent.assets.xml.actuation import run_actuator_response_check
 from code_agent.assets.xml.preview import render_xml_preview
-from code_agent.assets.xml.validation import manifest_entry_from_xml_validation, validate_xml_asset
+from code_agent.assets.xml.validation import validate_xml_asset
+from code_agent.assets.xml.validation_core.manifest import manifest_entry_from_xml_validation
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import dump_json
-from code_agent.utils.codex import CodexExecRequest, run_codex_exec
-from code_agent.utils.general_prompts import PHYSICAL_CAUSALITY_CONTRACT
+from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
+from code_agent.utils.general_prompts import PHYSICAL_CAUSALITY_CONTRACT, SCALE_POLICY_GUIDE
 
 
 def generate_xml_asset(
@@ -50,7 +51,7 @@ def generate_xml_asset(
             CodexExecRequest(
                 role=f"xml_asset_worker_attempt_{attempt_index}",
                 prompt=prompt,
-                cwd=Path.cwd(),
+                cwd=DEFAULT_REPO_ROOT,
                 sandbox=CONFIGS.codex.worker_sandbox,
                 model=CONFIGS.codex.worker_model,
                 output_schema_path=Path("code_agent/specs/xml_worker_report.schema.json"),
@@ -203,6 +204,7 @@ def _xml_worker_prompt(
         - If the request implies grasping, gates, locks, buttons, hinges, sliders, latches, or tools, make the actuator
           interface explicit enough for an Action Worker to command it without reverse-engineering the XML.
         {PHYSICAL_CAUSALITY_CONTRACT}
+        {SCALE_POLICY_GUIDE}
 
         Final response requirements:
         - Return JSON matching code_agent/specs/xml_worker_report.schema.json.
@@ -242,15 +244,20 @@ def _resolve_generated_xml_path(
 
     output_root = output_dir.resolve()
     for candidate in candidates:
-        path = candidate if candidate.is_absolute() else (Path.cwd() / candidate)
-        path = path.resolve()
-        if not path.exists() or path.suffix.lower() != ".xml":
-            continue
-        try:
-            path.relative_to(output_root)
-        except ValueError:
-            continue
-        return path
+        candidate_paths = (
+            [candidate]
+            if candidate.is_absolute()
+            else [output_dir / candidate, DEFAULT_REPO_ROOT / candidate]
+        )
+        for candidate_path in candidate_paths:
+            path = candidate_path.resolve()
+            if not path.exists() or path.suffix.lower() != ".xml":
+                continue
+            try:
+                path.relative_to(output_root)
+            except ValueError:
+                continue
+            return path
     return None
 
 

@@ -27,8 +27,8 @@ _LAYOUT_DIRECTIVE_RE = re.compile(r"@layout\s+(?P<path>\S+)")
 
 def load_cases(path: Path) -> list[Case]:
     cases: list[Case] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
         if "|" not in line:
@@ -141,6 +141,8 @@ def run_suite(
     deformable_enabled: bool | None = None,
     ipc_enabled: bool | None = None,
 ) -> dict[str, object]:
+    tasks_file = tasks_file.resolve()
+    out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     cases = load_cases(tasks_file)
     if max_cases is not None:
@@ -208,7 +210,7 @@ def run_suite(
             case_dir = out_dir / case.case_id
             try:
                 result = future.result()
-            except Exception as exc:  # noqa: BLE001 - keep a suite-level failure from hiding other cases.
+            except Exception as exc:
                 result = _case_exception_summary(case=case, case_dir=case_dir, exc=exc)
             results_by_index[index] = result
             partial_results = [item for item in results_by_index if item is not None]

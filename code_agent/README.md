@@ -30,6 +30,8 @@ Supported modes:
 - FEM deformable + IPC: deformable on, IPC forced on
 
 Generated code receives the effective contract at `contracts/deformable_config.json` as `deformable_cfg`.
+That contract provides FEM material ranges/defaults for `E`, `nu`, and `rho`; FEM `friction_mu` is chosen explicitly by
+the generated body code per material rather than being overridden by a global config key.
 
 ## Assets
 

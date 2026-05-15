@@ -15,7 +15,6 @@ from code_agent.assets.xml.validation_core.collectors import (
     single_child,
     tag,
 )
-from code_agent.assets.xml.validation_core.manifest import manifest_entry_from_xml_validation
 from code_agent.assets.xml.validation_core.rules import (
     base_contract,
     control_interface,
@@ -170,7 +169,7 @@ def _run_mujoco_import(xml_path: Path, report: dict[str, Any], errors: list[str]
         import mujoco
 
         model = mujoco.MjModel.from_xml_path(str(xml_path))
-    except Exception as exc:  # noqa: BLE001 - MuJoCo parser errors should be preserved in the report.
+    except Exception as exc:
         errors.append(f"MuJoCo import error: {type(exc).__name__}: {exc}")
         return
 

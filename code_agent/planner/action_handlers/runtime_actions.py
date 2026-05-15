@@ -7,6 +7,8 @@ from typing import Any
 
 from code_agent.configs import CONFIGS
 from code_agent.evaluation.runner import evaluate_generated_run
+from code_agent.io_utils import decode_process_stream
+from code_agent.utils.codex import DEFAULT_REPO_ROOT
 from code_agent.utils.execution import run_generated_simulation
 from code_agent.utils.integrator import write_main
 
@@ -125,7 +127,7 @@ class RuntimeActionHandler:
         if not isinstance(raw_args, list) or not all(isinstance(item, str) for item in raw_args):
             return {"ok": False, "status": "invalid_action", "message": f"{label} requires {arg_key} string array."}
         cwd_choice = action.get("cwd") or "repo"
-        cwd = Path.cwd() if cwd_choice == "repo" else self.session.case_dir
+        cwd = DEFAULT_REPO_ROOT if cwd_choice == "repo" else self.session.case_dir
         timeout_sec = float(
             action.get("timeout_sec") or min(self.session.config.timeout_sec, CONFIGS.harness.command_timeout_sec)
         )
@@ -150,8 +152,8 @@ class RuntimeActionHandler:
         except subprocess.TimeoutExpired as exc:
             timed_out = True
             returncode = 124
-            stdout = _decode_timeout_stream(exc.stdout)
-            stderr = _decode_timeout_stream(exc.stderr)
+            stdout = decode_process_stream(exc.stdout)
+            stderr = decode_process_stream(exc.stderr)
         duration = time.time() - started
         stdout_path.write_text(stdout, encoding="utf-8")
         stderr_path.write_text(stderr, encoding="utf-8")
@@ -198,11 +200,3 @@ def planner_requires_asset_manifest(planner_output: dict[str, Any] | None) -> bo
     if not isinstance(dispatch_graph, dict):
         return False
     return bool(dispatch_graph.get("wait_for_asset_manifest"))
-
-
-def _decode_timeout_stream(stream: bytes | str | None) -> str:
-    if stream is None:
-        return ""
-    if isinstance(stream, bytes):
-        return stream.decode("utf-8", errors="replace")
-    return stream

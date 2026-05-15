@@ -13,7 +13,6 @@ MESHY_AI_MODEL_VALUES = ("meshy-5", "meshy-6", "latest")
 MESHY_ART_STYLE_VALUES = ("realistic", "sculpture")
 MESHY_TOPOLOGY_VALUES = ("triangle", "quad")
 MESHY_SYMMETRY_VALUES = ("off", "auto", "on")
-MESHY_TEXTURE_MAP_KEYS = ("base_color", "metallic", "normal", "roughness")
 
 
 class MeshyRequestError(RuntimeError):
@@ -54,7 +53,7 @@ class MeshyApiConfig:
         api_key_env: str = "MESHY_API_KEY",
         base_url_env: str = "MESHY_API_BASE_URL",
         timeout_sec: float | None = None,
-    ) -> "MeshyApiConfig":
+    ) -> MeshyApiConfig:
         api_key = os.getenv(api_key_env)
         if not api_key:
             raise MeshyRequestError(

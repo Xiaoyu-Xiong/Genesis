@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import socket
 import time
 from pathlib import Path
 from urllib import error, parse, request
@@ -189,7 +188,7 @@ class MeshyClient:
             raise MeshyRequestError(f"Meshy {label} HTTP {exc.code}: {detail}") from exc
         except error.URLError as exc:
             raise MeshyRequestError(f"Meshy {label} request failed: {exc.reason}") from exc
-        except (TimeoutError, socket.timeout) as exc:
+        except TimeoutError as exc:
             raise MeshyRequestError(f"Meshy {label} request timed out after {self.config.timeout_sec:.1f}s.") from exc
 
         try:
@@ -210,7 +209,7 @@ class MeshyClient:
             raise MeshyRequestError(f"Meshy download HTTP {exc.code}: {detail}") from exc
         except error.URLError as exc:
             raise MeshyRequestError(f"Meshy download failed: {exc.reason}") from exc
-        except (TimeoutError, socket.timeout) as exc:
+        except TimeoutError as exc:
             raise MeshyRequestError(
                 f"Meshy download timed out after {self.config.timeout_sec:.1f}s."
             ) from exc

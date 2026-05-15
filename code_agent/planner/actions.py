@@ -4,7 +4,7 @@ from typing import Any
 
 from code_agent.planner.action_handlers.asset_actions import AssetActionHandler
 from code_agent.planner.action_handlers.runtime_actions import RuntimeActionHandler
-from code_agent.planner.action_handlers.worker_actions import WORKER_ROLES, WorkerActionHandler
+from code_agent.planner.action_handlers.worker_actions import WorkerActionHandler
 
 
 class EpisodeActionExecutor:
@@ -26,6 +26,8 @@ class EpisodeActionExecutor:
                 return self.assets.start_mesh_assets(action)
             if name == "wait_mesh_assets":
                 return self.assets.wait_mesh_assets(action)
+            if name == "update_mesh_asset_metadata":
+                return self.assets.update_mesh_asset_metadata(action)
             if name == "start_xml_assets":
                 return self.assets.start_xml_assets(action)
             if name == "wait_xml_assets":
@@ -48,6 +50,6 @@ class EpisodeActionExecutor:
                 return self.runtime.run_command(action, turn, label="pytest", executable=("uv", "run", "pytest"))
             if name == "finish":
                 return self.runtime.finish(action)
-        except Exception as exc:  # noqa: BLE001 - convert tool exceptions into planner-visible observations.
+        except Exception as exc:
             return {"ok": False, "status": "error", "message": f"{type(exc).__name__}: {exc}"}
         return {"ok": False, "status": "invalid_action", "message": f"Unsupported action: {name!r}"}

@@ -13,8 +13,10 @@ except ImportError:  # pragma: no cover - the uv environment normally has jsonsc
 
 from code_agent.configs import deformable_config_dict
 from code_agent.io_utils import dump_json
+from code_agent.utils.codex import DEFAULT_REPO_ROOT
 from code_agent.utils.timing import TimingPlan, resolve_timing
-from code_agent.planner.actions import EpisodeActionExecutor, WORKER_ROLES
+from code_agent.planner.actions import EpisodeActionExecutor
+from code_agent.planner.action_handlers.worker_actions import WORKER_ROLES
 from code_agent.planner.agent import EpisodePlanner
 from code_agent.writer.common import WorkerDispatchResult
 
@@ -317,7 +319,7 @@ class PlannerSession:
         if not isinstance(assets, dict) or not assets.get("ok"):
             return False
         manifest_path = assets.get("asset_manifest_path")
-        return isinstance(manifest_path, str) and Path(manifest_path).exists()
+        return isinstance(manifest_path, str) and self._stable_path(Path(manifest_path)).exists()
 
     def recommended_owner(self) -> str:
         critic = self.state.get("critic")
@@ -343,6 +345,7 @@ class PlannerSession:
         dump_json(self.json_safe(self.state), self.state_path)
 
     def load_json(self, path: Path) -> dict[str, Any] | None:
+        path = self._stable_path(path)
         if not path.exists():
             return None
         try:
@@ -354,13 +357,14 @@ class PlannerSession:
     def validate_json_schema(self, payload: dict[str, Any], schema_path: Path) -> list[str]:
         if Draft202012Validator is None:
             return []
-        schema = self.load_json(schema_path)
+        schema = self.load_json(self._stable_path(schema_path))
         if schema is None:
             return [f"schema missing or invalid: {schema_path}"]
         validator = Draft202012Validator(schema)
         return [error.message for error in sorted(validator.iter_errors(payload), key=lambda item: item.path)]
 
     def read_text(self, path: Path) -> str:
+        path = self._stable_path(path)
         if not path.exists():
             return f"<missing {path}>"
         return path.read_text(encoding="utf-8", errors="replace")
@@ -398,9 +402,15 @@ class PlannerSession:
         return layout_context.read_text(encoding="utf-8", errors="replace")
 
     def append_jsonl(self, path: Path, payload: dict[str, Any]) -> None:
+        path = self._stable_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as file:
             file.write(json.dumps(self.json_safe(payload), ensure_ascii=False) + "\n")
+
+    def _stable_path(self, path: Path) -> Path:
+        if path.is_absolute():
+            return path
+        return DEFAULT_REPO_ROOT / path
 
     def json_safe(self, value: Any) -> Any:
         if isinstance(value, Path):

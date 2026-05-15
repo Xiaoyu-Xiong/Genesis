@@ -5,7 +5,8 @@ import json
 import textwrap
 from pathlib import Path
 
-from code_agent.utils.codex import CodexExecRequest, run_codex_exec
+from code_agent.io_utils import load_json_object
+from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
 from code_agent.configs import CONFIGS
 
 from . import action, body, rendering, scene
@@ -200,7 +201,7 @@ def _run_worker(
         CodexExecRequest(
             role=invocation_role,
             prompt=prompt,
-            cwd=Path.cwd(),
+            cwd=DEFAULT_REPO_ROOT,
             sandbox=CONFIGS.codex.worker_sandbox,
             model=CONFIGS.codex.worker_model,
             output_schema_path=schema_path,
@@ -275,14 +276,16 @@ def _worker_prompt(
         - If deformable_config["ipc_enabled"] is false, do not instantiate `gs.options.IPCCouplerOptions`.
         - Do not pass deformable_config["ipc_contact_d_hat_adaptive"] to `gs.options.IPCCouplerOptions`; it is a
           code-agent runtime switch. The generated entrypoint resolves it into `ipc_contact_d_hat` before scene setup.
-        - All FEM, IPC, tet, precision, and FEM material-range defaults must come from deformable_config, not hardcoded
-          local constants. FEM elastic bodies must still pass explicit task-appropriate `E`, `nu`, and `rho` values.
+        - All FEM `E`/`nu`/`rho` material-range defaults, IPC, tet, and precision defaults must come from
+          deformable_config, not hardcoded local constants. FEM elastic bodies must still pass explicit
+          task-appropriate `E`, `nu`, `rho`, and `friction_mu` values. `friction_mu` is chosen by the worker per FEM
+          material; do not read `deformable_config["fem_friction_mu"]`.
 
         Genesis documentation and local-code context:
         {genesis_context}
 
         Context roots:
-        - Repository root: {Path.cwd()}
+        - Repository root: {DEFAULT_REPO_ROOT}
         - Case workspace root: {case_dir}
         - Generated source directory: {case_dir / "src"}
         - Contracts directory: {case_dir / "contracts"}
@@ -317,35 +320,27 @@ def _worker_prompt(
 
 def _load_planner_output(case_dir: Path) -> dict[str, object]:
     path = case_dir / "contracts" / "planner_output.json"
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    return load_json_object(path) or {}
 
 
 def _load_asset_manifest(case_dir: Path) -> dict[str, object]:
     path = case_dir / "assets" / "asset_manifest.json"
     if not path.exists():
         return {"assets": [], "assumptions": [], "unresolved_risks": []}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+    payload = load_json_object(path)
+    if payload is None:
         return {"assets": [], "assumptions": [], "unresolved_risks": [f"Invalid asset manifest JSON: {path}"]}
-    return payload if isinstance(payload, dict) else {"assets": [], "assumptions": [], "unresolved_risks": []}
+    return payload
 
 
 def _load_deformable_config(case_dir: Path) -> dict[str, object]:
     path = case_dir / "contracts" / "deformable_config.json"
     if not path.exists():
         return {"enabled": False, "ipc_enabled": False, "unresolved_risks": [f"Missing deformable config contract: {path}"]}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+    payload = load_json_object(path)
+    if payload is None:
         return {"enabled": False, "ipc_enabled": False, "unresolved_risks": [f"Invalid deformable config JSON: {path}"]}
-    return payload if isinstance(payload, dict) else {"enabled": False, "ipc_enabled": False, "unresolved_risks": []}
+    return payload
 
 
 def _load_genesis_context(case_dir: Path) -> str:
@@ -354,10 +349,7 @@ def _load_genesis_context(case_dir: Path) -> str:
     docs_dir = "<see context JSON>"
     catalog_path = "<see context JSON>"
     if context_json.exists():
-        try:
-            payload = json.loads(context_json.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            payload = {}
+        payload = load_json_object(context_json) or {}
         if isinstance(payload, dict):
             docs_dir = str(payload.get("docs_dir") or docs_dir)
             catalog_path = str(payload.get("catalog_path") or catalog_path)

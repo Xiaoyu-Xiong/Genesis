@@ -1,0 +1,376 @@
+{
+  "updated_at": "2026-05-14T13:50:00-04:00",
+  "purpose": "Moderate-complexity SIGGRAPH / SIGGRAPH-Asia style reference clips sorted by boundary motion and supported body types.",
+  "selection_rules": [
+    "Use only rigid or articulated rigid bodies, volumetric deformable bodies, and fixed or scripted rigid boundaries.",
+    "Exclude cloth, hair, fluids, granular media, thin rods/cables, pneumatic soft actuators, and fragile precision-placement examples.",
+    "Prefer examples that can run from gravity/contact/simple scripted boundaries rather than tight parameter tuning.",
+    "Prefer thick-body geometry with wide contact tolerances, similar in complexity to soft_toys_squeeze_through_tube.",
+    "Do not include card_house_topple, chainmail_net_ball_drop, halloween_pumpkin_party, or user-reviewed rejected entries."
+  ],
+  "category_definition": "Boundary means fixed or prescribed geometry. Rigid/articulated bodies listed in a category are dynamic or contact-participating rigid bodies beyond that boundary.",
+  "rejected_after_review": [
+    "spiky_soft_balls_pinball",
+    "woven_basket_soft_impact",
+    "rolling_cylinder_pin_field",
+    "wrecking_ball_block_pile",
+    "soft_lattice_cube_press",
+    "soft_gripper_rigid_ball",
+    "anchor_chain_windup",
+    "bike_chain_sprocket",
+    "expanding_lock_box",
+    "screw_bolt_press"
+  ],
+  "source_videos": [
+    {
+      "id": "ipc_2020_supplemental",
+      "path": "../siggraph_paper_demos/videos/ipc_2020_supplemental.mp4",
+      "source_url": "https://ipc-sim.github.io/file/IPC-supplemental-video.mp4",
+      "paper": "Incremental Potential Contact: Intersection- and Inversion-Free, Large-Deformation Dynamics",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2020"
+    },
+    {
+      "id": "pd_ipc_gpu_2022",
+      "path": "../siggraph_paper_demos/videos/pd_ipc_gpu_2022.mp4",
+      "source_url": "https://www.youtube.com/watch?v=acEplzIIOEs",
+      "paper": "Penetration-free Projective Dynamics on the GPU",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2022"
+    },
+    {
+      "id": "sos_hyperelasticity_2023",
+      "path": "../siggraph_paper_demos/videos/sos_hyperelasticity_2023.mp4",
+      "source_url": "https://www.youtube.com/watch?v=CqudChzrgQ8",
+      "paper": "Second-Order Stencil Descent for Interior-Point Hyperelasticity",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2023"
+    },
+    {
+      "id": "fast_gpu_two_way_cch_2023",
+      "path": "videos/fast_gpu_two_way_cch_2023.mp4",
+      "source_url": "https://wanghmin.github.io/publication/wang-2023-fgb/",
+      "paper": "Fast GPU-Based Two-Way Continuous Collision Handling",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 42(5), 2023"
+    },
+    {
+      "id": "non_smooth_newton_2019",
+      "path": "videos/non_smooth_newton_2019.mp4",
+      "source_url": "https://di.ku.dk/english/research/groups/simulation/research-results/non-smooth-newton-methods-for-deformable-multi-body-dynamics/",
+      "paper": "Non-Smooth Newton Methods for Deformable Multi-Body Dynamics",
+      "venue": "ACM Transactions on Graphics, 2019"
+    },
+    {
+      "id": "adaptive_rigidification_2022",
+      "path": "videos/adaptive_rigidification_supplemental.mp4",
+      "source_url": "https://www.alexandremercieraubin.com/Work/papers/AdaptiveRigidification/",
+      "paper": "Adaptive Rigidification of Elastic Solids",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2022"
+    },
+    {
+      "id": "adaptive_merging_2020",
+      "path": "videos/adaptive_merging_rigid_2020.mp4",
+      "source_url": "https://papertalk.org/papertalks/26978",
+      "paper": "Adaptive Merging for Rigid Body Simulation",
+      "venue": "SIGGRAPH, 2020"
+    },
+    {
+      "id": "trading_spaces_2024",
+      "path": "videos/trading_spaces_2024.mp4",
+      "source_url": "https://www.dgp.toronto.edu/projects/trading-spaces/",
+      "paper": "Trading Spaces: Adaptive Subspace Time Integration for Contacting Elastodynamics",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH Asia), 2024"
+    },
+    {
+      "id": "contact_centric_deformation_2022",
+      "path": "videos/contact_centric_deformation_2022.mp4",
+      "source_url": "https://mslab.es/projects/ContactCentricLearning/",
+      "paper": "Contact-Centric Deformation Learning",
+      "venue": "ACM Transactions on Graphics (Proc. of SIGGRAPH), 2022"
+    },
+    {
+      "id": "two_way_rigid_deformable_2008",
+      "path": "videos/two_way_rigid_deformable_2008.mov",
+      "source_url": "https://diglib.eg.org/items/54af7e32-56a8-42f0-be42-4b5363f5f232",
+      "paper": "Two-way Coupling of Rigid and Deformable Bodies",
+      "venue": "Eurographics/SIGGRAPH Symposium on Computer Animation, 2008"
+    }
+  ],
+  "categories": {
+    "fixed_boundary_rigid_only": [
+      "rigid_block_stack_nudge"
+    ],
+    "moving_boundary_rigid_only": [
+      "swinging_tray_rigid_balls"
+    ],
+    "fixed_boundary_deformable_only": [
+      "rubber_helicopters_box",
+      "soft_balls_u_trap",
+      "soft_dragon_obstacle_course",
+      "soft_blob_pair_collision",
+      "soft_capsules_shelf_tumble",
+      "soft_toy_iceberg_slide"
+    ],
+    "moving_boundary_deformable_only": [
+      "soft_toys_squeeze_through_tube",
+      "twisted_soft_tube",
+      "mushroom_toys_foot_crush",
+      "jello_anvil_press",
+      "soft_head_spring_fist"
+    ],
+    "fixed_boundary_rigid_deformable": [
+      "heavy_cube_soft_column",
+      "rigid_balls_soft_pad_impact",
+      "soft_ducks_rigid_obstacle_fall",
+      "rigid_soft_box_stack_topple",
+      "mixed_rigid_soft_ball_line_impact",
+      "deformable_bar_rigid_blocks",
+      "soft_floater_rigid_shell_drop",
+      "soft_capsules_rigid_rings_bowl"
+    ],
+    "moving_boundary_rigid_deformable": [
+      "allegro_hand_soft_ball",
+      "robot_flexible_beam_insertion",
+      "soft_c_clamp_rigid_ball_squeeze"
+    ]
+  },
+  "examples": [
+    {
+      "title": "rigid_block_stack_nudge",
+      "category": "fixed_boundary_rigid_only",
+      "cases_path": "fixed_boundary_rigid_only/cases.txt",
+      "source_video_id": "adaptive_merging_2020",
+      "source_segment_sec": {"start": 53.0, "end": 66.0},
+      "clip_path": "fixed_boundary_rigid_only/clips/rigid_block_stack_nudge.mp4",
+      "clip_contact_sheet": "fixed_boundary_rigid_only/clip_contact_sheets/rigid_block_stack_nudge.jpg",
+      "fit_notes": "Chunky block-stack contact with a broad slider; retained as the only fixed rigid-only candidate because it avoids card-house thinness and exact mesh interlock."
+    },
+    {
+      "title": "swinging_tray_rigid_balls",
+      "category": "moving_boundary_rigid_only",
+      "cases_path": "moving_boundary_rigid_only/cases.txt",
+      "source_video_id": "adaptive_merging_2020",
+      "source_segment_sec": {"start": 207.0, "end": 215.0},
+      "clip_path": "moving_boundary_rigid_only/clips/swinging_tray_rigid_balls.mp4",
+      "clip_contact_sheet": "moving_boundary_rigid_only/clip_contact_sheets/swinging_tray_rigid_balls.jpg",
+      "fit_notes": "Prescribed tray motion plus a few rigid balls; avoids chains, gears, and precise moving mechanisms."
+    },
+    {
+      "title": "rubber_helicopters_box",
+      "category": "fixed_boundary_deformable_only",
+      "cases_path": "fixed_boundary_deformable_only/cases.txt",
+      "source_video_id": "pd_ipc_gpu_2022",
+      "source_segment_sec": {"start": 157.0, "end": 166.5},
+      "clip_path": "fixed_boundary_deformable_only/clips/rubber_helicopters_box.mp4",
+      "clip_contact_sheet": "fixed_boundary_deformable_only/clip_contact_sheets/rubber_helicopters_box.jpg",
+      "fit_notes": "Soft volumetric toys in a fixed box; broad blades are treated as thick deformable geometry, not cloth."
+    },
+    {
+      "title": "soft_balls_u_trap",
+      "category": "fixed_boundary_deformable_only",
+      "cases_path": "fixed_boundary_deformable_only/cases.txt",
+      "source_video_id": "sos_hyperelasticity_2023",
+      "source_segment_sec": {"start": 18.0, "end": 31.0},
+      "clip_path": "fixed_boundary_deformable_only/clips/soft_balls_u_trap.mp4",
+      "clip_contact_sheet": "fixed_boundary_deformable_only/clip_contact_sheets/soft_balls_u_trap.jpg",
+      "fit_notes": "Soft bodies settling into a fixed U-shaped trough; robust geometry and contact."
+    },
+    {
+      "title": "soft_dragon_obstacle_course",
+      "category": "fixed_boundary_deformable_only",
+      "cases_path": "fixed_boundary_deformable_only/cases.txt",
+      "source_video_id": "pd_ipc_gpu_2022",
+      "source_segment_sec": {"start": 196.0, "end": 223.0},
+      "clip_path": "fixed_boundary_deformable_only/clips/soft_dragon_obstacle_course.mp4",
+      "clip_contact_sheet": "fixed_boundary_deformable_only/clip_contact_sheets/soft_dragon_obstacle_course.jpg",
+      "fit_notes": "Single soft volumetric creature through fixed chunky posts; no dynamic rigid bodies."
+    },
+    {
+      "title": "soft_blob_pair_collision",
+      "category": "fixed_boundary_deformable_only",
+      "cases_path": "fixed_boundary_deformable_only/cases.txt",
+      "source_video_id": "adaptive_rigidification_2022",
+      "source_segment_sec": {"start": 145.0, "end": 178.0},
+      "clip_path": "fixed_boundary_deformable_only/clips/soft_blob_pair_collision.mp4",
+      "clip_contact_sheet": "fixed_boundary_deformable_only/clip_contact_sheets/soft_blob_pair_collision.jpg",
+      "fit_notes": "Two thick soft solids colliding on a floor; no thin appendages or layout sensitivity."
+    },
+    {
+      "title": "soft_capsules_shelf_tumble",
+      "category": "fixed_boundary_deformable_only",
+      "cases_path": "fixed_boundary_deformable_only/cases.txt",
+      "source_video_id": "adaptive_rigidification_2022",
+      "source_segment_sec": {"start": 251.0, "end": 272.0},
+      "clip_path": "fixed_boundary_deformable_only/clips/soft_capsules_shelf_tumble.mp4",
+      "clip_contact_sheet": "fixed_boundary_deformable_only/clip_contact_sheets/soft_capsules_shelf_tumble.jpg",
+      "fit_notes": "Multiple thick soft capsules tumble across fixed shelves; geometry is robust and non-hairlike."
+    },
+    {
+      "title": "soft_toy_iceberg_slide",
+      "category": "fixed_boundary_deformable_only",
+      "cases_path": "fixed_boundary_deformable_only/cases.txt",
+      "source_video_id": "trading_spaces_2024",
+      "source_segment_sec": {"start": 145.0, "end": 153.0},
+      "clip_path": "fixed_boundary_deformable_only/clips/soft_toy_iceberg_slide.mp4",
+      "clip_contact_sheet": "fixed_boundary_deformable_only/clip_contact_sheets/soft_toy_iceberg_slide.jpg",
+      "fit_notes": "Single soft thick toy slides on a fixed iceberg-like obstacle; simple but still contact-rich enough for sanity checks."
+    },
+    {
+      "title": "soft_toys_squeeze_through_tube",
+      "category": "moving_boundary_deformable_only",
+      "cases_path": "moving_boundary_deformable_only/cases.txt",
+      "source_video_id": "ipc_2020_supplemental",
+      "source_segment_sec": {"start": 126.0, "end": 157.0},
+      "clip_path": "moving_boundary_deformable_only/clips/soft_toys_squeeze_through_tube.mp4",
+      "clip_contact_sheet": "moving_boundary_deformable_only/clip_contact_sheets/soft_toys_squeeze_through_tube.jpg",
+      "fit_notes": "Reference style target: moving plunger boundary and multiple deformable toys in a tube/funnel."
+    },
+    {
+      "title": "twisted_soft_tube",
+      "category": "moving_boundary_deformable_only",
+      "cases_path": "moving_boundary_deformable_only/cases.txt",
+      "source_video_id": "fast_gpu_two_way_cch_2023",
+      "source_segment_sec": {"start": 100.0, "end": 130.0},
+      "clip_path": "moving_boundary_deformable_only/clips/twisted_soft_tube.mp4",
+      "clip_contact_sheet": "moving_boundary_deformable_only/clip_contact_sheets/twisted_soft_tube.jpg",
+      "fit_notes": "Thick volumetric tube twisted by prescribed end collars; not a cloth strip or rope."
+    },
+    {
+      "title": "mushroom_toys_foot_crush",
+      "category": "moving_boundary_deformable_only",
+      "cases_path": "moving_boundary_deformable_only/cases.txt",
+      "source_video_id": "trading_spaces_2024",
+      "source_segment_sec": {"start": 10.0, "end": 55.0},
+      "clip_path": "moving_boundary_deformable_only/clips/mushroom_toys_foot_crush.mp4",
+      "clip_contact_sheet": "moving_boundary_deformable_only/clip_contact_sheets/mushroom_toys_foot_crush.jpg",
+      "fit_notes": "Scripted foot boundary crushes a loose cluster of thick soft mushroom toys; prompt explicitly reduces layout precision."
+    },
+    {
+      "title": "jello_anvil_press",
+      "category": "moving_boundary_deformable_only",
+      "cases_path": "moving_boundary_deformable_only/cases.txt",
+      "source_video_id": "trading_spaces_2024",
+      "source_segment_sec": {"start": 84.0, "end": 92.0},
+      "clip_path": "moving_boundary_deformable_only/clips/jello_anvil_press.mp4",
+      "clip_contact_sheet": "moving_boundary_deformable_only/clip_contact_sheets/jello_anvil_press.jpg",
+      "fit_notes": "Single deformable gelatin mold compressed by a scripted anvil boundary; useful low-layout moving-boundary baseline."
+    },
+    {
+      "title": "soft_head_spring_fist",
+      "category": "moving_boundary_deformable_only",
+      "cases_path": "moving_boundary_deformable_only/cases.txt",
+      "source_video_id": "trading_spaces_2024",
+      "source_segment_sec": {"start": 100.0, "end": 140.0},
+      "clip_path": "moving_boundary_deformable_only/clips/soft_head_spring_fist.mp4",
+      "clip_contact_sheet": "moving_boundary_deformable_only/clip_contact_sheets/soft_head_spring_fist.jpg",
+      "fit_notes": "Thick soft actuator-like fist and soft head driven by a prescribed base; prompt avoids rods/cables and dynamic rigid bodies."
+    },
+    {
+      "title": "heavy_cube_soft_column",
+      "category": "fixed_boundary_rigid_deformable",
+      "cases_path": "fixed_boundary_rigid_deformable/cases.txt",
+      "source_video_id": "non_smooth_newton_2019",
+      "source_segment_sec": {"start": 155.0, "end": 170.0},
+      "clip_path": "fixed_boundary_rigid_deformable/clips/heavy_cube_soft_column.mp4",
+      "clip_contact_sheet": "fixed_boundary_rigid_deformable/clip_contact_sheets/heavy_cube_soft_column.jpg",
+      "fit_notes": "A single rigid cube impacts a single soft support; broad, tolerant contact."
+    },
+    {
+      "title": "rigid_balls_soft_pad_impact",
+      "category": "fixed_boundary_rigid_deformable",
+      "cases_path": "fixed_boundary_rigid_deformable/cases.txt",
+      "source_video_id": "adaptive_rigidification_2022",
+      "source_segment_sec": {"start": 132.0, "end": 143.0},
+      "clip_path": "fixed_boundary_rigid_deformable/clips/rigid_balls_soft_pad_impact.mp4",
+      "clip_contact_sheet": "fixed_boundary_rigid_deformable/clip_contact_sheets/rigid_balls_soft_pad_impact.jpg",
+      "fit_notes": "Small rigid balls impact a thick soft pad; no moving boundary and no precise impact point."
+    },
+    {
+      "title": "soft_ducks_rigid_obstacle_fall",
+      "category": "fixed_boundary_rigid_deformable",
+      "cases_path": "fixed_boundary_rigid_deformable/cases.txt",
+      "source_video_id": "contact_centric_deformation_2022",
+      "source_segment_sec": {"start": 150.0, "end": 185.0},
+      "clip_path": "fixed_boundary_rigid_deformable/clips/soft_ducks_rigid_obstacle_fall.mp4",
+      "clip_contact_sheet": "fixed_boundary_rigid_deformable/clip_contact_sheets/soft_ducks_rigid_obstacle_fall.jpg",
+      "fit_notes": "Soft rubber-duck solids contact simple rigid colliders; prompt keeps obstacles sparse and layout-insensitive."
+    },
+    {
+      "title": "rigid_soft_box_stack_topple",
+      "category": "fixed_boundary_rigid_deformable",
+      "cases_path": "fixed_boundary_rigid_deformable/cases.txt",
+      "source_video_id": "two_way_rigid_deformable_2008",
+      "source_segment_sec": {"start": 65.0, "end": 72.0},
+      "clip_path": "fixed_boundary_rigid_deformable/clips/rigid_soft_box_stack_topple.mp4",
+      "clip_contact_sheet": "fixed_boundary_rigid_deformable/clip_contact_sheets/rigid_soft_box_stack_topple.jpg",
+      "fit_notes": "The source labels the scene as rigid bodies plus deformable boxes. Prompt keeps the stack chunky and driven by a free rigid sphere."
+    },
+    {
+      "title": "mixed_rigid_soft_ball_line_impact",
+      "category": "fixed_boundary_rigid_deformable",
+      "cases_path": "fixed_boundary_rigid_deformable/cases.txt",
+      "source_video_id": "two_way_rigid_deformable_2008",
+      "source_segment_sec": {"start": 80.0, "end": 94.0},
+      "clip_path": "fixed_boundary_rigid_deformable/clips/mixed_rigid_soft_ball_line_impact.mp4",
+      "clip_contact_sheet": "fixed_boundary_rigid_deformable/clip_contact_sheets/mixed_rigid_soft_ball_line_impact.jpg",
+      "fit_notes": "The source labels silver balls as rigid and yellow balls as deformable; prompt avoids exact Newton-cradle tuning by using a loose short line."
+    },
+    {
+      "title": "deformable_bar_rigid_blocks",
+      "category": "fixed_boundary_rigid_deformable",
+      "cases_path": "fixed_boundary_rigid_deformable/cases.txt",
+      "source_video_id": "two_way_rigid_deformable_2008",
+      "source_segment_sec": {"start": 96.0, "end": 104.0},
+      "clip_path": "fixed_boundary_rigid_deformable/clips/deformable_bar_rigid_blocks.mp4",
+      "clip_contact_sheet": "fixed_boundary_rigid_deformable/clip_contact_sheets/deformable_bar_rigid_blocks.jpg",
+      "fit_notes": "Dynamic rigid blocks contact a thick deformable bar resting on supports; no cloth, cables, or fine topology."
+    },
+    {
+      "title": "soft_floater_rigid_shell_drop",
+      "category": "fixed_boundary_rigid_deformable",
+      "cases_path": "fixed_boundary_rigid_deformable/cases.txt",
+      "source_video_id": "contact_centric_deformation_2022",
+      "source_segment_sec": {"start": 186.0, "end": 195.0},
+      "clip_path": "fixed_boundary_rigid_deformable/clips/soft_floater_rigid_shell_drop.mp4",
+      "clip_contact_sheet": "fixed_boundary_rigid_deformable/clip_contact_sheets/soft_floater_rigid_shell_drop.jpg",
+      "fit_notes": "A free rigid shell interacts with a soft floater body; prompt uses a single robust shell and rounded soft body."
+    },
+    {
+      "title": "soft_capsules_rigid_rings_bowl",
+      "category": "fixed_boundary_rigid_deformable",
+      "cases_path": "fixed_boundary_rigid_deformable/cases.txt",
+      "source_video_id": "two_way_rigid_deformable_2008",
+      "source_segment_sec": {"start": 256.0, "end": 267.0},
+      "clip_path": "fixed_boundary_rigid_deformable/clips/soft_capsules_rigid_rings_bowl.mp4",
+      "clip_contact_sheet": "fixed_boundary_rigid_deformable/clip_contact_sheets/soft_capsules_rigid_rings_bowl.jpg",
+      "fit_notes": "Rigid torus rings and thick deformable capsule bodies settle in a fixed bowl. Prompt lowers source object count for robustness."
+    },
+    {
+      "title": "allegro_hand_soft_ball",
+      "category": "moving_boundary_rigid_deformable",
+      "cases_path": "moving_boundary_rigid_deformable/cases.txt",
+      "source_video_id": "non_smooth_newton_2019",
+      "source_segment_sec": {"start": 104.0, "end": 130.0},
+      "clip_path": "moving_boundary_rigid_deformable/clips/allegro_hand_soft_ball.mp4",
+      "clip_contact_sheet": "moving_boundary_rigid_deformable/clip_contact_sheets/allegro_hand_soft_ball.jpg",
+      "fit_notes": "Scripted articulated rigid hand squeezes a single soft ball; no RL or pneumatic soft fingers."
+    },
+    {
+      "title": "robot_flexible_beam_insertion",
+      "category": "moving_boundary_rigid_deformable",
+      "cases_path": "moving_boundary_rigid_deformable/cases.txt",
+      "source_video_id": "non_smooth_newton_2019",
+      "source_segment_sec": {"start": 16.0, "end": 42.0},
+      "clip_path": "moving_boundary_rigid_deformable/clips/robot_flexible_beam_insertion.mp4",
+      "clip_contact_sheet": "moving_boundary_rigid_deformable/clip_contact_sheets/robot_flexible_beam_insertion.jpg",
+      "fit_notes": "Open-loop articulated robot pushes a thick flexible beam; avoids cable/rod formulation by using volumetric beam prompt."
+    },
+    {
+      "title": "soft_c_clamp_rigid_ball_squeeze",
+      "category": "moving_boundary_rigid_deformable",
+      "cases_path": "moving_boundary_rigid_deformable/cases.txt",
+      "source_video_id": "adaptive_rigidification_2022",
+      "source_segment_sec": {"start": 28.0, "end": 45.0},
+      "clip_path": "moving_boundary_rigid_deformable/clips/soft_c_clamp_rigid_ball_squeeze.mp4",
+      "clip_contact_sheet": "moving_boundary_rigid_deformable/clip_contact_sheets/soft_c_clamp_rigid_ball_squeeze.jpg",
+      "fit_notes": "Simple moving jaw, one soft C-shaped solid, and one rigid ball; replaces unsupported pneumatic soft gripper style."
+    }
+  ]
+}

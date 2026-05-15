@@ -42,8 +42,8 @@ def _repair_mesh_with_ftetwild_attempt(
 ) -> MeshRepairResult:
 
     mesh = _load_mesh(mesh_path)
-    before_vertices = int(len(mesh.vertices))
-    before_faces = int(len(mesh.faces))
+    before_vertices = len(mesh.vertices)
+    before_faces = len(mesh.faces)
     before_components = _component_count(mesh, face_cap=config.component_count_face_cap)
     operations: list[str] = []
     stage_durations: dict[str, float] = {}
@@ -107,10 +107,9 @@ def _repair_mesh_with_ftetwild_attempt(
             stage_start = _now()
             components = repaired_mesh.split(only_watertight=False)
             kept = [component for component in components if len(component.faces) >= config.min_component_faces]
-            if kept:
-                if len(kept) != len(components):
-                    repaired_mesh = trimesh.util.concatenate(kept)
-                    operations.append("drop_small_components")
+            if kept and len(kept) != len(components):
+                repaired_mesh = trimesh.util.concatenate(kept)
+                operations.append("drop_small_components")
             stage_durations["drop_small_components"] = _now() - stage_start
         else:
             stage_durations["drop_small_components"] = 0.0
@@ -165,8 +164,8 @@ def _repair_mesh_with_ftetwild_attempt(
             operations.append("orient_positive_volume")
         stage_durations["orient_positive_volume"] = _now() - stage_start
 
-        after_vertices = int(len(repaired_mesh.vertices))
-        after_faces = int(len(repaired_mesh.faces))
+        after_vertices = len(repaired_mesh.vertices)
+        after_faces = len(repaired_mesh.faces)
         after_components = _component_count(repaired_mesh, face_cap=config.component_count_face_cap)
         return MeshRepairResult(
             ok=True,
@@ -276,7 +275,7 @@ def _extract_boundary_faces(tet_elems: np.ndarray) -> np.ndarray:
         axis=0,
     )
     sorted_faces = np.sort(faces, axis=1)
-    _, first_idx, inverse, counts = np.unique(
+    _, _first_idx, inverse, counts = np.unique(
         sorted_faces,
         axis=0,
         return_index=True,

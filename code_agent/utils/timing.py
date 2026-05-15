@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from code_agent.configs import CONFIGS
 
@@ -66,7 +67,7 @@ def resolve_timing(
         resolved_steps = _require_non_negative_int(steps, "steps")
         source_parts.append("cli_steps")
     elif resolved_duration is not None:
-        resolved_steps = max(1, int(math.ceil(resolved_duration / sim_dt)))
+        resolved_steps = max(1, math.ceil(resolved_duration / sim_dt))
         source_parts.append("duration_to_steps")
     elif planned_steps is not None:
         resolved_steps = planned_steps
@@ -82,7 +83,7 @@ def resolve_timing(
     if target_video_frames is not None:
         source_parts.append("planner_render_budget")
     if resolved_duration is not None:
-        target_video_frames = max(1, int(round(resolved_duration * fps)))
+        target_video_frames = max(1, round(resolved_duration * fps))
         source_parts.append("duration_to_frames")
 
     return TimingPlan(

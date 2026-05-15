@@ -9,6 +9,7 @@ Planner asset actions are:
 
 - `start_mesh_assets`
 - `wait_mesh_assets`
+- `update_mesh_asset_metadata`
 - `start_xml_assets`
 - `wait_xml_assets`
 - `inspect_assets`
@@ -31,9 +32,15 @@ Mesh writers must instantiate the manifest entry directly:
 - `runtime_path`: simulation/collision mesh
 - `visual_path`: textured render mesh for the same Genesis entity
 - `texture_path`: evidence metadata
-- `scale` and `file_meshes_are_zup`: pass through to `gs.morphs.Mesh`
+- `scale` and `file_meshes_are_zup`: pass through to `gs.morphs.Mesh`; generated mesh `scale` should normally be a
+  scalar uniform runtime factor
+- `bbox`: runtime bbox after scale, for placement and sizing checks
+- `asset_request`: source request used for safe metadata-only updates
 
 Do not create separate simulation and visual entities for one generated object.
+If only generated mesh sizing metadata is wrong, Planner should use `update_mesh_asset_metadata`. That action reuses the
+ready mesh entry, updates scalar uniform scale/bbox metadata, and reruns Genesis FEM import validation without another
+Meshy request. Prompt, geometry, texture, or role changes should still regenerate through `start_mesh_assets`.
 
 ## XML / MJCF
 

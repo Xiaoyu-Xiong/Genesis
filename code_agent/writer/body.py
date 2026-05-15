@@ -76,7 +76,8 @@ SPEC = WorkerSpec(
     include initial layout, bbox, and clearance metadata in returned actors so repair can inspect placement.
     Use `gs.materials.FEM.Elastic(...)` for soft primitives when `deformable_cfg["enabled"]` is true. Follow the common
     FEM material selection guide: pass explicit `E`, `nu`, and `rho`, keep them within the config ranges, and use config
-    defaults when the task does not justify a special material. Read FEM model, hydroelastic modulus, friction, contact
+    defaults when the task does not justify a special material. Choose explicit task-appropriate `friction_mu` values
+    for FEM materials; do not read `deformable_cfg["fem_friction_mu"]`. Read FEM model, hydroelastic modulus, contact
     resistance, and hessian-invariant settings from deformable_cfg.
     Use morph `tet_resolution=deformable_cfg["tet_resolution"]` for FEM Box/Sphere/Cylinder primitives.
     If deformable_cfg is disabled and the task fundamentally requires soft-body deformation, fail clearly instead of

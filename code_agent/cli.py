@@ -9,9 +9,10 @@ from code_agent.utils.suite import run_suite
 
 
 def _cmd_run_suite(args: argparse.Namespace) -> None:
+    out_dir = args.out_dir.resolve()
     summary = run_suite(
-        tasks_file=args.tasks_file,
-        out_dir=args.out_dir,
+        tasks_file=args.tasks_file.resolve(),
+        out_dir=out_dir,
         backend=args.backend,
         max_cases=args.max_cases,
         timeout_sec=args.timeout_sec,
@@ -24,7 +25,7 @@ def _cmd_run_suite(args: argparse.Namespace) -> None:
         deformable_enabled=args.deformable_enabled,
         ipc_enabled=args.ipc_enabled,
     )
-    summary_path = args.out_dir / "summary.json"
+    summary_path = out_dir / "summary.json"
     print(f"Done. {summary['num_passed']}/{summary['num_cases']} cases passed. Summary: {summary_path}")
 
 

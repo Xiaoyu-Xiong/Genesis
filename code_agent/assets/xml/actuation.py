@@ -26,14 +26,14 @@ def run_actuator_response_check(
     try:
         import mujoco
         import numpy as np
-    except Exception as exc:  # noqa: BLE001 - keep environment failures in report.
+    except Exception as exc:
         report["errors"].append(f"Actuator response check imports failed: {type(exc).__name__}: {exc}")
         return report
 
     try:
         model = mujoco.MjModel.from_xml_path(str(xml_path))
         data = mujoco.MjData(model)
-    except Exception as exc:  # noqa: BLE001 - preserve MuJoCo errors.
+    except Exception as exc:
         report["errors"].append(f"MuJoCo model setup failed: {type(exc).__name__}: {exc}")
         return report
 
@@ -56,7 +56,7 @@ def run_actuator_response_check(
         for _ in range(max(1, int(steps))):
             mujoco.mj_step(model, data)
         final_qpos = data.qpos.copy()
-    except Exception as exc:  # noqa: BLE001 - preserve simulation failures.
+    except Exception as exc:
         report["errors"].append(f"Actuator response step failed: {type(exc).__name__}: {exc}")
         return report
 

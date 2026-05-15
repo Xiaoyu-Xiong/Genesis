@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from code_agent.assets.inspection import inspect_generated_assets
-from code_agent.assets.mesh.episode import generate_mesh_assets_for_episode
+from code_agent.assets.mesh.episode import generate_mesh_assets_for_episode, update_mesh_asset_metadata_for_episode
 from code_agent.assets.xml.episode import generate_xml_assets_for_episode
 from code_agent.io_utils import dump_json
 
@@ -48,6 +48,51 @@ class AssetActionHandler:
             "status": "precondition_failed",
             "message": "No mesh asset generation job is running.",
         }
+
+    def update_mesh_asset_metadata(self, action: dict[str, Any]) -> dict[str, Any]:
+        future = self._asset_futures.get("mesh")
+        if future is not None and not future.done():
+            return {
+                "ok": False,
+                "status": "precondition_failed",
+                "message": "Cannot update mesh metadata while mesh asset generation is running.",
+                "asset_generation_report_path": self._asset_job_report_path_text("mesh"),
+                "background": True,
+            }
+        planner_output, planner_update = self._planner_output_for_asset_action(action)
+        if planner_output is None:
+            return planner_update
+        planner_output_updated = bool(planner_update.get("updated"))
+        planner_output_path = planner_update.get("planner_output_path")
+        asset_names = self._asset_names_from_action(action)
+        result = update_mesh_asset_metadata_for_episode(
+            case_dir=self.session.case_dir,
+            task=self.session.config.task,
+            planner_output=planner_output,
+            asset_names=asset_names,
+        )
+        assets = self._ensure_assets_state()
+        jobs = assets.setdefault("jobs", {})
+        jobs["mesh"] = {
+            "status": "metadata_update",
+            "ok": False,
+            "kind": "mesh",
+            "asset_manifest_path": result.get("asset_manifest_path"),
+            "asset_generation_report_path": result.get("asset_generation_report_path"),
+            "selected_asset_names": result.get("selected_asset_names", []),
+            "skipped_asset_names": result.get("skipped_asset_names", []),
+            "num_assets": result.get("num_assets", 0),
+            "schema_errors": [],
+            "failure_classes": result.get("failure_classes", []),
+            "message": result.get("message"),
+            "planner_output_updated": planner_output_updated,
+            "planner_output_path": planner_output_path,
+            "updated_at_unix": time.time(),
+            "background": False,
+        }
+        payload = self._finalize_asset_result("mesh", result)
+        payload["metadata_updated_asset_names"] = result.get("metadata_updated_asset_names", [])
+        return payload
 
     def start_xml_assets(self, action: dict[str, Any]) -> dict[str, Any]:
         return self._start_asset_job(
@@ -198,7 +243,7 @@ class AssetActionHandler:
             return None
         try:
             result = future.result() if wait else future.result(timeout=0)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._asset_futures.pop(kind, None)
             payload = {
                 "ok": False,
@@ -333,7 +378,7 @@ class AssetActionHandler:
                 return None, {
                     "ok": False,
                     "status": "invalid_action",
-                    "message": "Asset start actions require planner_output to be an object or null.",
+                    "message": "Asset actions require planner_output to be an object or null.",
                 }
             accepted = self.session.accept_planner_output(
                 action_planner_output,
@@ -430,7 +475,7 @@ class AssetActionHandler:
         if not isinstance(job, dict) or not job.get("ok"):
             return False
         manifest_path = job.get("asset_manifest_path")
-        return isinstance(manifest_path, str) and Path(manifest_path).exists()
+        return isinstance(manifest_path, str) and self.session.load_json(Path(manifest_path)) is not None
 
     def _asset_job_report_path_text(self, kind: str) -> str | None:
         assets = self._ensure_assets_state()

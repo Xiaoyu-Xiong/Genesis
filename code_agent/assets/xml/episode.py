@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import json
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +8,7 @@ from code_agent.assets.mesh.workflow.steps import slugify_prompt
 from code_agent.assets.xml.agent import generate_xml_asset
 from code_agent.assets.xml.request_adapter import select_xml_requests, xml_prompt_from_request, xml_requested_bbox
 from code_agent.configs import CONFIGS
-from code_agent.io_utils import dump_json
+from code_agent.io_utils import dump_json, load_json_object
 
 
 def generate_xml_assets_for_episode(
@@ -28,7 +27,10 @@ def generate_xml_assets_for_episode(
     selected_names = [str(request.get("name", "")) for request in selected_requests]
     mentioned_names = {name for name in selected_names if name} | {name for name in asset_names or [] if name}
     preserved_entries = _preserved_ready_xml_manifest_entries(manifest_path, mentioned_names)
-    preserved_results = [_preserved_xml_result_entry(entry) for entry in preserved_entries]
+    preserved_results = [
+        {"ok": True, "preserved": True, "request": {"name": entry.get("logical_name", "")}, "manifest_entry": entry}
+        for entry in preserved_entries
+    ]
     preserved_names = [str(entry.get("logical_name", "")) for entry in preserved_entries if entry.get("logical_name")]
 
     if not selected_requests:
@@ -53,7 +55,12 @@ def generate_xml_assets_for_episode(
         dump_json(report, report_path)
         return report
 
-    max_workers = _xml_max_workers(len(selected_requests))
+    configured_workers = CONFIGS.xml_asset.max_parallel_workers
+    max_workers = (
+        max(1, len(selected_requests))
+        if configured_workers is None or configured_workers <= 0
+        else max(1, min(len(selected_requests), configured_workers))
+    )
     progress_report = {
         "ok": False,
         "status": "xml_asset_generation_running",
@@ -86,7 +93,7 @@ def generate_xml_assets_for_episode(
             index = futures[future]
             try:
                 result = future.result()
-            except Exception as exc:  # noqa: BLE001 - keep one failed XML worker visible in the aggregate report.
+            except Exception as exc:
                 request = selected_requests[index]
                 result = {
                     "ok": False,
@@ -226,7 +233,7 @@ def _generation_error(generation: dict[str, Any]) -> str:
 
 
 def _preserved_ready_xml_manifest_entries(manifest_path: Path, selected_names: set[str]) -> list[dict[str, Any]]:
-    manifest = _load_json_dict(manifest_path)
+    manifest = load_json_object(manifest_path) or {}
     raw_assets = manifest.get("assets")
     if not isinstance(raw_assets, list):
         return []
@@ -246,24 +253,10 @@ def _preserved_ready_xml_manifest_entries(manifest_path: Path, selected_names: s
 def _is_ready_xml_manifest_entry(entry: dict[str, Any]) -> bool:
     if entry.get("source_type") != "mjcf" or entry.get("status") != "ready":
         return False
-    return _manifest_file_available(entry.get("runtime_path"), required=True)
-
-
-def _manifest_file_available(value: Any, *, required: bool) -> bool:
-    if value is None:
-        return not required
-    if not isinstance(value, str) or not value or value == "unavailable":
+    runtime_path = entry.get("runtime_path")
+    if not isinstance(runtime_path, str) or not runtime_path or runtime_path == "unavailable":
         return False
-    return Path(value).is_file()
-
-
-def _preserved_xml_result_entry(entry: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "ok": True,
-        "preserved": True,
-        "request": {"name": entry.get("logical_name", "")},
-        "manifest_entry": entry,
-    }
+    return Path(runtime_path).is_file()
 
 
 def _merge_xml_manifest_entries(
@@ -280,20 +273,3 @@ def _merge_xml_manifest_entries(
             ordered_names.append(name)
         entries_by_name[name] = entry
     return [entries_by_name[name] for name in ordered_names]
-
-
-def _load_json_dict(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def _xml_max_workers(num_requests: int) -> int:
-    configured = CONFIGS.xml_asset.max_parallel_workers
-    if configured is None or configured <= 0:
-        return max(1, num_requests)
-    return max(1, min(num_requests, configured))

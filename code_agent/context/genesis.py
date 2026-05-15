@@ -385,8 +385,7 @@ def _render_markdown(payload: dict[str, Any]) -> str:
         "## Required Scope",
         "",
     ]
-    for item in _scope_policy():
-        lines.append(f"- {item}")
+    lines.extend(f"- {item}" for item in _scope_policy())
     lines.extend(
         [
             "",
@@ -485,7 +484,7 @@ class _TextParser(HTMLParser):
         self.parts: list[str] = []
         self._skip_depth = 0
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+    def handle_starttag(self, tag: str, _attrs: list[tuple[str, str | None]]) -> None:
         if tag in {"script", "style", "svg"}:
             self._skip_depth += 1
             return

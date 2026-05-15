@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from code_agent.configs import CONFIGS
+from code_agent.io_utils import decode_process_stream
 
 
 DEFAULT_ARTIFACT_DIR_NAMES = ("artifacts", "outputs", "renders", "frames")
@@ -96,8 +97,8 @@ def run_local(config: LocalRunConfig) -> dict[str, Any]:
     except subprocess.TimeoutExpired as exc:
         timed_out = True
         exit_code = 124
-        stdout = _decode_timeout_stream(exc.stdout)
-        stderr = _decode_timeout_stream(exc.stderr)
+        stdout = decode_process_stream(exc.stdout)
+        stderr = decode_process_stream(exc.stderr)
         stderr = (stderr + "\n" if stderr else "") + f"Timed out after {config.timeout_sec:.3f} seconds."
 
     duration_sec = time.time() - started_at
@@ -236,14 +237,6 @@ def _status(exit_code: int, timed_out: bool) -> str:
     if timed_out:
         return "timed_out"
     return "passed" if exit_code == 0 else "failed"
-
-
-def _decode_timeout_stream(stream: bytes | str | None) -> str:
-    if stream is None:
-        return ""
-    if isinstance(stream, bytes):
-        return stream.decode("utf-8", errors="replace")
-    return stream
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

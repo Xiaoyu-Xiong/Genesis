@@ -181,7 +181,7 @@ def _prepare_one_layout_asset(
             "request": spec,
             "manifest_entry": entry,
         }
-    except Exception as exc:  # noqa: BLE001 - keep one bad layout asset from hiding the rest.
+    except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         entry = {
             "logical_name": logical_name,
@@ -204,7 +204,7 @@ def _prepare_one_layout_asset(
             },
             "simulation_role": str(spec.get("simulation_role") or spec.get("role") or "layout reusable mesh asset"),
             "status": "failed",
-            "notes": notes + [error],
+            "notes": [*notes, error],
         }
         return {
             "ok": False,
@@ -237,10 +237,7 @@ def _layout_asset_specs(layout_payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _texture_refs(spec: dict[str, Any]) -> list[tuple[str, Any]]:
-    refs: list[tuple[str, Any]] = []
-    for key in ("material", "mtl"):
-        if spec.get(key) is not None:
-            refs.append((key, spec[key]))
+    refs = [(key, spec[key]) for key in ("material", "mtl") if spec.get(key) is not None]
     texture = spec.get("texture") or spec.get("texture_path")
     if texture is not None:
         refs.append(("primary", texture))
@@ -399,7 +396,7 @@ def _target_path(asset_dir: Path, filename: str) -> Path:
 def _download_file(url: str, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     request = Request(url, headers={"User-Agent": "Genesis-code-agent-layout-assets/1.0"})
-    with urlopen(request, timeout=120) as response, target.open("wb") as file:  # noqa: S310 - explicit user layout URL.
+    with urlopen(request, timeout=120) as response, target.open("wb") as file:
         shutil.copyfileobj(response, file)
 
 

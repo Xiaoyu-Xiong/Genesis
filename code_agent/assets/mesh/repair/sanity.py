@@ -44,8 +44,8 @@ def run_mesh_manifold_check(mesh_path: Path, *, face_cap_for_full_check: int = 1
         return MeshManifoldCheckResult(
             ok=ok,
             mesh_path=mesh_path,
-            vertex_count=int(len(mesh.vertices)),
-            face_count=int(len(mesh.faces)),
+            vertex_count=len(mesh.vertices),
+            face_count=len(mesh.faces),
             component_count=component_count,
             is_watertight=topo_ok if topo_ok else bool(mesh.is_watertight),
             is_winding_consistent=bool(mesh.is_winding_consistent),
@@ -113,6 +113,7 @@ print('TETGEN_OK')
         [sys.executable, "-c", probe, str(mesh_path)],
         text=True,
         capture_output=True,
+        check=False,
         timeout=CONFIGS.mesh_repair.tetgen_sanity_timeout_sec,
     )
     combined = "\n".join(part for part in (result.stdout, result.stderr) if part)

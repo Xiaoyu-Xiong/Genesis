@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from code_agent.configs import CONFIGS
-from code_agent.utils.codex import CodexExecRequest, run_codex_exec
+from code_agent.io_utils import load_json_object
+from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
 from code_agent.utils.general_prompts import (
     PLANNER_ACTION_POLICY_GUIDE,
     PLANNER_GENERAL_RULES,
@@ -25,7 +26,7 @@ class EpisodePlanner:
             CodexExecRequest(
                 role=f"planner_turn_{turn:03d}",
                 prompt=self._planner_prompt(),
-                cwd=Path.cwd(),
+                cwd=DEFAULT_REPO_ROOT,
                 sandbox=CONFIGS.codex.planner_sandbox,
                 model=CONFIGS.codex.planner_model,
                 output_schema_path=Path("code_agent/specs/planner_action.schema.json"),
@@ -85,7 +86,7 @@ class EpisodePlanner:
                 "verdict": "fail",
                 "summary": f"Planner failed; see {result.stderr_path}.",
             }
-        payload = self._load_json(Path(result.final_message_path))
+        payload = load_json_object(Path(result.final_message_path))
         if payload is None:
             return {
                 "action": "finish",
@@ -241,15 +242,6 @@ class EpisodePlanner:
                     blockers.append(f"{role}_worker")
         return blockers
 
-    def _load_json(self, path: Path) -> dict[str, Any] | None:
-        if not path.exists():
-            return None
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return None
-        return payload if isinstance(payload, dict) else None
-
     def _asset_manifest(self) -> dict[str, Any] | None:
         assets = self.session.state.get("assets")
         if not isinstance(assets, dict):
@@ -257,7 +249,7 @@ class EpisodePlanner:
         manifest_path = assets.get("asset_manifest_path")
         if not isinstance(manifest_path, str):
             return None
-        manifest = self._load_json(Path(manifest_path))
+        manifest = load_json_object(Path(manifest_path))
         if manifest is None:
             return None
         raw_assets = manifest.get("assets")

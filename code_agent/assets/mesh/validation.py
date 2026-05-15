@@ -48,6 +48,7 @@ def run_genesis_fem_import_validation(
             [sys.executable, "-c", _GENESIS_FEM_IMPORT_PROBE, json.dumps(payload)],
             text=True,
             capture_output=True,
+            check=False,
             timeout=timeout_sec,
         )
     except subprocess.TimeoutExpired as exc:
@@ -80,7 +81,7 @@ def run_genesis_fem_import_validation(
 
     try:
         probe = _last_json_object(result.stdout)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return MeshGenesisFEMImportResult(
             ok=False,
             runtime_path=runtime_path,
@@ -117,6 +118,9 @@ def run_genesis_fem_import_validation(
 
 
 def _scale_tuple(value: object) -> tuple[float, float, float] | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        scale = float(value)
+        return (scale, scale, scale) if scale > 0.0 else None
     if not isinstance(value, list | tuple) or len(value) != 3:
         return None
     try:

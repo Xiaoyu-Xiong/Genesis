@@ -42,9 +42,9 @@ def bake_texture_from_source_mesh(
 
     distances = np.asarray(baked["distances"], dtype=np.float64)
     return {
-        "target_vertex_count": int(len(target_obj.vertices)),
-        "target_face_count": int(len(target_obj.face_vertex_indices)),
-        "source_face_hit_count": int(len(np.unique(np.asarray(baked["face_indices"], dtype=np.int64)))),
+        "target_vertex_count": len(target_obj.vertices),
+        "target_face_count": len(target_obj.face_vertex_indices),
+        "source_face_hit_count": len(np.unique(np.asarray(baked["face_indices"], dtype=np.int64))),
         "distance_min": float(np.min(distances)) if len(distances) else 0.0,
         "distance_mean": float(np.mean(distances)) if len(distances) else 0.0,
         "distance_max": float(np.max(distances)) if len(distances) else 0.0,
@@ -61,7 +61,7 @@ def read_bake_texture_size(texture_path: Path) -> tuple[int, int]:
     if max_dim <= limit:
         return width, height
     scale = float(limit) / float(max_dim)
-    return max(1, int(round(width * scale))), max(1, int(round(height * scale)))
+    return max(1, round(width * scale)), max(1, round(height * scale))
 
 
 def read_texture_size(texture_path: Path) -> tuple[int, int]:
@@ -201,7 +201,7 @@ def _rasterize_source_uv_to_texture(
         "image": np.clip(np.round(texture * 255.0), 0, 255).astype(np.uint8),
         "distances": np.concatenate(all_distances, axis=0),
         "face_indices": np.concatenate(all_face_indices, axis=0),
-        "texel_count": int(len(all_points)),
+        "texel_count": len(all_points),
     }
 
 
@@ -214,7 +214,7 @@ def _barycentric_2d(points: np.ndarray, triangle: np.ndarray) -> np.ndarray:
     v2 = points - a
     denom = v0[0] * v1[1] - v1[0] * v0[1]
     if abs(float(denom)) < 1e-12:
-        return np.full(points.shape[:-1] + (3,), -1.0, dtype=np.float32)
+        return np.full((*points.shape[:-1], 3), -1.0, dtype=np.float32)
     inv = 1.0 / denom
     w1 = (v2[..., 0] * v1[1] - v1[0] * v2[..., 1]) * inv
     w2 = (v0[0] * v2[..., 1] - v2[..., 0] * v0[1]) * inv

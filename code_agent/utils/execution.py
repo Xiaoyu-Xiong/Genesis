@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from code_agent.io_utils import decode_process_stream, load_json_object
 from code_agent.utils.local_execution import LocalRunConfig, build_local_execution_env, run_local
 
 
@@ -117,7 +118,7 @@ def run_generated_simulation(
     initial = diagnostics.get("initial_no_ipc_render") if isinstance(diagnostics, dict) else None
     if isinstance(initial, dict) and isinstance(initial.get("image_path"), str):
         artifacts["initial_no_ipc_render"] = initial["image_path"]
-    report = ExecutionReport(
+    return ExecutionReport(
         command=list(raw_report["command"]),
         returncode=int(raw_report["exit_code"]),
         duration_sec=float(raw_report["duration_sec"]),
@@ -128,7 +129,6 @@ def run_generated_simulation(
         lock_wait_sec=float(lock_info["wait_sec"]),
         lock_path=str(lock_info["path"]),
     )
-    return report
 
 
 def _maybe_render_initial_without_ipc(
@@ -189,15 +189,15 @@ def _maybe_render_initial_without_ipc(
         stderr = completed.stderr
         returncode = completed.returncode
     except subprocess.TimeoutExpired as exc:
-        stdout = _decode_timeout_stream(exc.stdout)
-        stderr = _decode_timeout_stream(exc.stderr)
+        stdout = decode_process_stream(exc.stdout)
+        stderr = decode_process_stream(exc.stderr)
         stderr = (stderr + "\n" if stderr else "") + "Timed out after 240.000 seconds."
         returncode = 124
 
     diagnostic_stdout.write_text(stdout, encoding="utf-8")
     diagnostic_stderr.write_text(stderr, encoding="utf-8")
     report_path = out_dir / "initial_no_ipc_render_report.json"
-    report = _read_json(report_path) or {
+    report = load_json_object(report_path) or {
         "ok": False,
         "diagnostic": "initial_no_ipc_render",
         "out_dir": str(out_dir),
@@ -280,7 +280,7 @@ def _looks_like_ipc_build_failure(text: str) -> bool:
 
 
 def _sim_dt_from_timing(run_dir: Path) -> float:
-    timing = _read_json(run_dir / "contracts" / "timing.json")
+    timing = load_json_object(run_dir / "contracts" / "timing.json")
     if isinstance(timing, dict):
         try:
             return float(timing.get("sim_dt", 0.01))
@@ -290,31 +290,13 @@ def _sim_dt_from_timing(run_dir: Path) -> float:
 
 
 def _sim_substeps_from_timing(run_dir: Path) -> int:
-    timing = _read_json(run_dir / "contracts" / "timing.json")
+    timing = load_json_object(run_dir / "contracts" / "timing.json")
     if isinstance(timing, dict):
         try:
             return int(timing.get("sim_substeps", 1))
         except (TypeError, ValueError):
             pass
     return 1
-
-
-def _read_json(path: Path) -> dict[str, object] | None:
-    if not path.is_file():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _decode_timeout_stream(stream: bytes | str | None) -> str:
-    if stream is None:
-        return ""
-    if isinstance(stream, bytes):
-        return stream.decode("utf-8", errors="replace")
-    return stream
 
 
 @contextlib.contextmanager
@@ -324,11 +306,10 @@ def _exclusive_genesis_execution_lock():
     lock_path = Path(tempfile.gettempdir()) / f"genesis_code_agent_{os.getuid()}_execution.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.time()
-    with _GENESIS_EXECUTION_THREAD_LOCK:
-        with lock_path.open("a+", encoding="utf-8") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            wait_sec = time.time() - started
-            try:
-                yield {"path": lock_path, "wait_sec": wait_sec}
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    with _GENESIS_EXECUTION_THREAD_LOCK, lock_path.open("a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        wait_sec = time.time() - started
+        try:
+            yield {"path": lock_path, "wait_sec": wait_sec}
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)

@@ -19,6 +19,21 @@ Physical causality contract:
 """.strip()
 
 
+SCALE_POLICY_GUIDE = """
+Scale policy:
+- Avoid non-uniform scale by default. Unless the input task prompt explicitly requests an exceptional anisotropic
+  scaling operation, do not use per-axis scale values such as `scale=(sx, sy, sz)` with unequal components for meshes,
+  primitives, imported assets, MJCF/XML assets, or generated asset manifest requests.
+- When an object needs a long, flat, thick, thin, or otherwise non-cubic shape, model that shape directly with primitive
+  dimensions (`size`, `radius`, `height`), generated-asset geometry, XML primitive geom sizes, or a regenerated asset
+  with the intended proportions. Do not create the intended proportions by stretching an already generated/imported
+  mesh with non-uniform scale.
+- Uniform scalar scale is acceptable for unit conversion, global sizing, and layout fitting. If a rare task genuinely
+  requires non-uniform scale, document the reason in the plan or worker report and keep it isolated to that explicit
+  requirement.
+""".strip()
+
+
 PHYSICAL_CAUSALITY_CRITIC_GUIDE = """
 Audit physical causality. Identify which entities are controlled, which entities are passive task objects, and which
 APIs modify them during simulation. Fail the result if a passive task object reaches the goal mainly through direct
@@ -70,7 +85,7 @@ instead of asking scene/body/action/rendering workers to patch, reshape, retopol
 """.strip()
 
 
-PLANNER_GENERAL_RULES = """
+PLANNER_GENERAL_RULES = f"""
 You are the Planner Agent for one Genesis code-generation episode.
 The full repository and current case workspace are available for context. You may inspect files, source, reports, logs,
 assets, and generated artifacts when deciding the next action. You may run lightweight read-only inspection commands
@@ -81,6 +96,7 @@ Do not overly compress planning details to save tokens; detailed instructions ar
 workers make correct source-level decisions.
 Include every schema field in every response. Use null for irrelevant scalar/object fields and [] for irrelevant array
 fields.
+{SCALE_POLICY_GUIDE}
 """.strip()
 
 
@@ -110,10 +126,17 @@ FEM/IPC capability:
   Use this IPC failure diagnostic guide when interpreting execution logs:
   {IPC_FAILURE_DIAGNOSTIC_GUIDE}
 - If IPC is false, workers must not instantiate `gs.options.IPCCouplerOptions`.
-- All FEM, IPC, tet, precision, and FEM material-range defaults must come from `deformable_cfg` /
-  contracts/deformable_config.json in generated code.
+- All FEM `E`/`nu`/`rho` material-range defaults, IPC, tet, and precision defaults must come from `deformable_cfg` /
+  contracts/deformable_config.json in generated code. FEM `friction_mu` is intentionally not a config hyperparameter:
+  generated body code must choose explicit task-appropriate FEM friction values instead of reading a
+  `deformable_cfg["fem_friction_mu"]` override.
   `ipc_contact_d_hat_adaptive` is a code-agent runtime switch: when true, the generated entrypoint computes
-  `ipc_contact_d_hat = 0.75 * median_edge_length` from ready generated mesh assets at run time.
+  `clamp(min(0.2 * median_mesh_edge_or_bbox_feature), 1e-5 * max_bbox_diag, 2e-3 * max_bbox_diag)` at run time, where
+  `max_bbox_diag` is the largest bbox diagonal among all adaptive candidates. It considers generated meshes,
+  user/repo-provided meshes, primitive-derived meshes, collision-enabled MJCF/XML primitive geoms, direct
+  `gs.morphs.Box/Cylinder/Sphere` primitives written in `src/body.py` or `src/scene.py`, and bbox-only primitive/XML/URDF
+  assets that are present in `assets/asset_manifest.json`, with `contracts/planner_output.json` asset_requests as a bbox
+  fallback for assets that have no manifest entry yet.
 - FEM elastic material choices must include explicit `E`, `nu`, and `rho` values selected from the `deformable_cfg`
   ranges and defaults. Use this material guide when instructing body/action/critic work:
   {FEM_MATERIAL_SELECTION_GUIDE}
@@ -139,9 +162,16 @@ Available actions:
   entity identities, physical roles, timing, camera/render expectations, asset orientation/texture needs, success
   criteria, likely failure modes, and per-module validation expectations.
   For objects that genuinely require generated geometry, add `asset_requests` with asset_type=`generated_mesh` and set
-  dispatch_graph.wait_for_asset_manifest=true when writers should wait for generated mesh paths before writing code. In
-  each asset request, `scale` and `bbox` are positive XYZ dimensions in meters only; do not use them for position,
-  lower bounds, centers, or signed extents.
+  dispatch_graph.wait_for_asset_manifest=true when writers should wait for generated mesh paths before writing code.
+  In each asset request, `bbox` is the approximate positive XYZ size in meters used to guide mesh generation and
+  downstream size checks; do not use it for position, lower bounds, centers, or signed extents. `scale` is an optional
+  runtime uniform scale factor only: use null unless you have a specific scalar factor, and if you use an array it must
+  have three equal positive components. Do not put target dimensions in `scale`; use `bbox` for approximate dimensions.
+  The mesh asset pipeline may compute a scalar uniform runtime scale from the generated mesh bbox and requested `bbox`,
+  then write that fixed factor to assets/asset_manifest.json for workers to pass to Genesis. If a ready generated mesh's
+  geometry is acceptable and only its runtime size metadata is wrong, use update_mesh_asset_metadata with a complete
+  revised planner_output instead of retrying mesh generation.
+  {SCALE_POLICY_GUIDE}
   Meshy mesh generation accepts at most 800 characters in the final mesh-agent prompt. Keep each generated_mesh request
   concise enough that the assembled prompt from name, purpose, simulation_role, dimensions, texture_needs, and the
   automatic simulation-ready geometry suffix stays within that limit.
@@ -189,6 +219,12 @@ Available actions:
   rest of the plan and rewrite only the affected asset_requests.
 - wait_mesh_assets: wait for a previously started background mesh asset job to finish and validate
   assets/asset_manifest.json.
+- update_mesh_asset_metadata: synchronously update ready generated mesh manifest metadata without modifying or
+  regenerating mesh files. Use this when inspection/execution shows that mesh geometry is acceptable but runtime
+  `scale`/`bbox` metadata is wrong. Include a complete revised `planner_output` whose affected generated_mesh
+  asset_requests have the corrected uniform `scale` or `bbox`, and use `asset_names` to restrict the update to those
+  assets. Do not use this for changed mesh prompt, purpose, texture, topology, or simulation role; use start_mesh_assets
+  for those.
 - start_xml_assets: start Planner-requested XML/MJCF assets in the background and return immediately. Use `asset_names`
   to restrict generation to specific XML/MJCF asset request names, or null/[] to generate all XML/MJCF requests. XML
   asset workers are parallel-capable by default, and this asset job may overlap with mesh asset jobs and code-writing
@@ -238,6 +274,10 @@ Action policy:
   generated_mesh request has been rewritten to incorporate the failure feedback under the Meshy prompt limit. Do not
   request body/scene/action/rendering repair for mesh-intrinsic defects; those workers should only fix placement,
   material use, controls, or rendering around ready assets.
+- If asset inspection or execution shows a ready generated_mesh has acceptable geometry but the runtime scale/bbox
+  metadata is wrong, choose update_mesh_asset_metadata for the affected asset_names with a complete revised
+  planner_output whose affected generated_mesh request has the corrected uniform scale/bbox. Do not use
+  start_mesh_assets for metadata-only sizing fixes.
 - If reports/xml_asset_generation_report.json shows a generated_xml/mjcf request failed because the asset prompt,
   primitive body tree, joints, or actuators were underspecified or wrong, choose start_xml_assets for the affected
   asset_names with a complete revised planner_output whose affected XML/MJCF request integrates the concrete feedback.
@@ -246,8 +286,9 @@ Action policy:
   filled hole, wrong topology, oversized scale, inverted volume, unintended extra components, or a link/anchor shape
   that cannot physically interlock as planned. When the evidence is ambiguous and assets are ready, choose
   inspect_assets for the suspicious asset_names before repeatedly asking body to repair placement. If inspection points
-  to a mesh/XML intrinsic issue, retry the affected asset family with a rewritten complete planner_output; if inspection
-  shows assets are usable, route the repair to body/action/scene as appropriate.
+  to a mesh scale/bbox metadata issue with otherwise acceptable geometry, use update_mesh_asset_metadata. If inspection
+  points to a mesh/XML intrinsic geometry issue, retry the affected asset family with a rewritten complete
+  planner_output; if inspection shows assets are usable, route the repair to body/action/scene as appropriate.
 - To improve speed, prefer grouping all currently missing writer roles into one spawn_workers action. Keep dependencies
   serial only when a specific worker must inspect another worker's completed source/report before it can write a
   correct module.
@@ -261,10 +302,11 @@ Action policy:
 - If deterministic artifact checks, stderr, or stdout mention `ipc.initial_penetration`, libuipc initial
   penetration/intersection/thickness/distance/sanity-check failure, first decide whether the concrete evidence points
   to asset geometry/topology/scale or to body placement/clearance. Use inspect_assets when a ready generated asset could
-  be the source of the geometry error. Choose start_mesh_assets/start_xml_assets with a revised complete planner_output
-  for intrinsic asset defects, or request_repair for `body` when the assets are plausible and the issue is initial
-  placement, spacing, orientation, duplicate contact geometry, or choreography. Treat this as geometry repair work, not
-  an execution-environment issue, unless the logs clearly show a missing dependency or runtime setup failure.
+  be the source of the geometry error. Choose update_mesh_asset_metadata when evidence points only to generated mesh
+  scale/bbox metadata. Choose start_mesh_assets/start_xml_assets with a revised complete planner_output for intrinsic
+  asset defects, or request_repair for `body` when the assets are plausible and the issue is initial placement, spacing,
+  orientation, duplicate contact geometry, or choreography. Treat this as geometry repair work, not an
+  execution-environment issue, unless the logs clearly show a missing dependency or runtime setup failure.
   If this appears together with `IPC rigid state accessor feature is unavailable...`, treat the accessor message as
   secondary to the invalid IPC world unless the same accessor failure is reproduced without any initial-geometry or
   `World is not valid` diagnostics.
@@ -301,6 +343,9 @@ FEM material selection guide:
   is nearly incompressible, volume-preserving rubber and can be numerically harder.
 - `rho` is density in kg/m^3. Around `300` is light foam-like material; `1000` is a water-like gel/rubber default; `3000`
   is a heavy dense soft solid.
+- Choose explicit `friction_mu` values for each FEM material. Do not read FEM friction from `deformable_cfg`. Around
+  `0.0` to `0.1` is slippery or nearly frictionless contact, `0.2` to `0.5` is typical soft rubber/plastic contact, and
+  `0.6` to `1.0` is high-friction sticky contact; use values outside that range only when the task clearly justifies it.
 """.strip()
 
 
@@ -398,11 +443,12 @@ When deformable_config["ipc_enabled"] is false, generated source must not instan
 When deformable_config["enabled"] is false and deformable_config["ipc_enabled"] is true, IPC is allowed only for
 rigid/articulated contact; fail any fake deformable behavior.
 When deformable_config["enabled"] is true and the prompt asks for soft-body behavior, require real FEM+IPC evidence:
-FEM material/entity construction, explicit `E`, `nu`, and `rho` material choices within the deformable config bounds,
-config-driven FEM/IPC/tet parameters, plausible deformation metrics, and video or event evidence of wobble, compression,
-collapse, bending, or other requested deformation. Fail rigid-only substitutes, MPM/PBD/SPH implementations, missing
-`E`/`nu`/`rho` on FEM elastic materials, hardcoded FEM/IPC defaults, or mid-simulation FEM position/velocity writes that
-fake the deformation.
+FEM material/entity construction, explicit `E`, `nu`, `rho`, and agent-selected `friction_mu` material choices, with
+`E`/`nu`/`rho` within the deformable config bounds, config-driven FEM/IPC/tet parameters, plausible deformation metrics,
+and video or event evidence of wobble, compression, collapse, bending, or other requested deformation. Fail rigid-only
+substitutes, MPM/PBD/SPH implementations, missing `E`/`nu`/`rho` or missing `friction_mu` on FEM elastic materials,
+hardcoded FEM/IPC defaults, attempts to read `deformable_cfg["fem_friction_mu"]`, or mid-simulation FEM
+position/velocity writes that fake the deformation.
 {FEM_MATERIAL_SELECTION_GUIDE}
 """.strip()
 
@@ -416,6 +462,7 @@ required artifacts, plausible movement, physically coherent staging, and whether
 {PHYSICAL_CAUSALITY_CRITIC_GUIDE}
 {DEFORMABLE_CRITIC_GUIDE}
 {IPC_FAILURE_DIAGNOSTIC_GUIDE}
+{SCALE_POLICY_GUIDE}
 """.strip()
 
 
@@ -440,6 +487,7 @@ Use ASCII only. Keep code compact and robust for local GPU execution.
 The generated code will run through the repository uv environment on the dedicated local GPU later, but you must not
 execute it yourself.
 {PHYSICAL_CAUSALITY_CONTRACT}
+{SCALE_POLICY_GUIDE}
 """.strip()
 
 
@@ -517,11 +565,13 @@ Genesis FEM+IPC primitive API constraints:
 {FEM_MATERIAL_SELECTION_GUIDE}
 - The same FEM material should also use `model=deformable_cfg["fem_model"]`,
   `hydroelastic_modulus=deformable_cfg["fem_hydroelastic_modulus"]`,
-  `friction_mu=deformable_cfg["fem_friction_mu"]`,
   `contact_resistance=deformable_cfg["fem_contact_resistance"]`, and
   `hessian_invariant=deformable_cfg["fem_hessian_invariant"]`.
+  It must also pass an explicit task-appropriate `friction_mu` chosen by body.py; do not read FEM friction from
+  `deformable_cfg`.
 - Rigid participants in IPC scenes should use `gs.materials.Rigid(...)` with appropriate IPC coupling fields such as
-  `coup_type` and `coup_friction`; use deformable config defaults for coupling friction when relevant.
+  `coup_type` and `coup_friction`; the generic `deformable_cfg["friction"]` may be used as a rigid coupling fallback
+  when relevant.
 - FEM initialization may call `entity.set_velocity(...)` before stepping. After stepping starts, do not fake soft-body
   behavior with repeated `set_position` or `set_velocity` writes. Use gravity, contact, IPC coupling, explicit vertex
   constraints, actuator-driven mechanisms, or clearly requested physical force fields.

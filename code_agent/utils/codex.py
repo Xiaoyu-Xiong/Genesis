@@ -4,7 +4,7 @@ import json
 import shutil
 import subprocess
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -127,6 +127,7 @@ def run_codex_exec(request: CodexExecRequest) -> CodexExecResult:
 
 
 def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
+    request = _normalize_request_paths(request)
     started = time.time()
     resolved_codex = resolve_codex_binary(request.codex_bin)
     command = build_codex_exec_command(request, resolved_codex=resolved_codex)
@@ -248,6 +249,30 @@ def _result(
     )
 
 
+def _normalize_request_paths(request: CodexExecRequest) -> CodexExecRequest:
+    """Resolve paths before native mesh libraries can perturb process cwd.
+
+    Suite cases run in threads. Some native mesh-processing bindings briefly
+    change the process-global cwd, so all Codex IO paths must be absolute before
+    mkdir/open/subprocess calls happen.
+    """
+
+    return replace(
+        request,
+        cwd=_repo_path(request.cwd),
+        output_jsonl_path=_repo_path(request.output_jsonl_path),
+        final_message_path=_repo_path(request.final_message_path),
+        output_schema_path=None if request.output_schema_path is None else _repo_path(request.output_schema_path),
+        image_paths=tuple(_repo_path(path) for path in request.image_paths),
+    )
+
+
+def _repo_path(path: Path) -> Path:
+    if path.is_absolute():
+        return path.resolve()
+    return (DEFAULT_REPO_ROOT / path).resolve()
+
+
 def _read_codex_version(codex_bin: str) -> str | None:
     try:
         completed = subprocess.run(
@@ -291,8 +316,8 @@ def _classify_codex_failure(*, jsonl_path: Path, stderr_path: Path) -> tuple[str
         if not path.exists():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        for line in text.splitlines():
-            line = line.strip()
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
             if not line:
                 continue
             message = _json_event_message(line) or line

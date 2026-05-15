@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from code_agent.configs import CONFIGS
-from code_agent.utils.codex import CodexExecRequest, run_codex_exec
+from code_agent.io_utils import load_json_object
+from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
 from code_agent.utils.general_prompts import (
     CRITIC_DECISION_GUIDE,
     CRITIC_EVIDENCE_READING_GUIDE,
@@ -25,7 +26,7 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
         CodexExecRequest(
             role="critic",
             prompt=prompt,
-            cwd=Path.cwd(),
+            cwd=DEFAULT_REPO_ROOT,
             sandbox=CONFIGS.codex.critic_sandbox,
             model=CONFIGS.codex.critic_model,
             output_schema_path=Path("code_agent/specs/critic_report.schema.json"),
@@ -35,7 +36,7 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
             timeout_sec=CONFIGS.codex.critic_timeout_sec,
         )
     )
-    report = _load_json(Path(result.final_message_path))
+    report = load_json_object(Path(result.final_message_path))
     if report is None:
         if result.error_type == "codex_usage_limit":
             observations = ["Codex critic was blocked by usage limits and did not evaluate the run."]
@@ -182,7 +183,7 @@ def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, An
         "source_rendering": run_dir / "src" / "rendering.py",
         "source_main": run_dir / "src" / "main.py",
     }
-    visual_report = _load_json(paths["visual_evaluation"])
+    visual_report = load_json_object(paths["visual_evaluation"])
     contact_sheet_path = None
     sampled_frames: list[str] = []
     if isinstance(visual_report, dict):
@@ -252,7 +253,7 @@ def _genesis_context_pointer(run_dir: Path) -> str:
     context_json = run_dir / "contracts" / "genesis_context.json"
     docs_dir = "<see context JSON>"
     catalog_path = "<see context JSON>"
-    payload = _load_json(context_json)
+    payload = load_json_object(context_json)
     if isinstance(payload, dict):
         docs_dir = str(payload.get("docs_dir") or docs_dir)
         catalog_path = str(payload.get("catalog_path") or catalog_path)
@@ -280,8 +281,7 @@ def _file_block(path: Path) -> str:
 def _read_text(path: Path) -> str:
     if not path.exists():
         return f"<missing: {path}>"
-    text = path.read_text(encoding="utf-8", errors="replace")
-    return text
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def _file_size(path: Path) -> int | None:
@@ -289,14 +289,3 @@ def _file_size(path: Path) -> int | None:
         return path.stat().st_size
     except OSError:
         return None
-
-
-def _load_json(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    text = path.read_text(encoding="utf-8", errors="replace")
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None

@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from code_agent.assets.mesh.request_adapter import vector3
 from code_agent.assets.xml.preview import render_xml_preview
-from code_agent.io_utils import dump_json
+from code_agent.io_utils import dump_json, load_json_object
 
 
 MESH_EXTENSIONS = {".obj", ".stl", ".ply", ".glb", ".gltf"}
@@ -31,7 +32,7 @@ def inspect_generated_assets(case_dir: Path, *, asset_names: list[str] | None = 
         "warnings": [],
     }
 
-    manifest = _load_manifest(manifest_path)
+    manifest = load_json_object(manifest_path)
     if manifest is None:
         report["status"] = "precondition_failed"
         report["errors"].append(f"Asset manifest missing or invalid JSON: {manifest_path}")
@@ -70,34 +71,27 @@ def inspect_generated_assets(case_dir: Path, *, asset_names: list[str] | None = 
     return report
 
 
-def _load_manifest(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        import json
-
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001 - report caller-facing invalid manifest state.
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
 def _inspect_entry(entry: dict[str, Any], output_dir: Path) -> dict[str, Any]:
     logical_name = str(entry.get("logical_name") or "asset")
     source_type = str(entry.get("source_type") or "")
-    asset_dir = output_dir / _safe_name(logical_name)
+    safe_name = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in logical_name.strip())
+    asset_dir = output_dir / (safe_name or "asset")
     asset_dir.mkdir(parents=True, exist_ok=True)
-    runtime_path = Path(str(entry.get("runtime_path") or ""))
+    runtime_path_value = entry.get("runtime_path")
+    runtime_path = Path(str(runtime_path_value)) if runtime_path_value else None
     report = {
         "logical_name": logical_name,
         "source_type": source_type,
-        "runtime_path": str(runtime_path),
+        "runtime_path": str(runtime_path) if runtime_path is not None else None,
         "status": entry.get("status"),
         "preview_paths": [],
         "geometry": None,
         "errors": [],
         "warnings": [],
     }
+    if runtime_path is None:
+        report["warnings"].append(f"No preview renderer for source_type={source_type!r} without runtime_path.")
+        return report
     if not runtime_path.exists():
         report["errors"].append(f"runtime_path does not exist: {runtime_path}")
         return report
@@ -116,7 +110,7 @@ def _inspect_mesh_entry(entry: dict[str, Any], runtime_path: Path, asset_dir: Pa
     try:
         import numpy as np
         import trimesh
-    except Exception as exc:  # noqa: BLE001 - optional inspection support.
+    except Exception as exc:
         report["errors"].append(f"Mesh inspection imports failed: {type(exc).__name__}: {exc}")
         return
 
@@ -124,16 +118,17 @@ def _inspect_mesh_entry(entry: dict[str, Any], runtime_path: Path, asset_dir: Pa
         mesh = _load_as_trimesh(runtime_path, trimesh)
         vertices = np.asarray(mesh.vertices, dtype=np.float64)
         faces = np.asarray(mesh.faces, dtype=np.int64)
-        file_meshes_are_zup = _manifest_bool(entry.get("file_meshes_are_zup"), default=True)
+        raw_zup = entry.get("file_meshes_are_zup")
+        file_meshes_are_zup = True if raw_zup is None else bool(raw_zup)
         vertices = _vertices_in_genesis_frame(vertices, file_meshes_are_zup)
-        scale = _vector3(entry.get("scale")) or [1.0, 1.0, 1.0]
+        scale = _scale_vector(entry.get("scale")) or [1.0, 1.0, 1.0]
         vertices = vertices * np.asarray(scale, dtype=np.float64)
         bounds = _bounds(vertices)
         extents = bounds[1] - bounds[0] if bounds is not None else np.zeros(3, dtype=np.float64)
         components = _component_count(mesh)
         geometry = {
-            "vertex_count": int(len(vertices)),
-            "face_count": int(len(faces)),
+            "vertex_count": len(vertices),
+            "face_count": len(faces),
             "bounds_min": bounds[0].tolist() if bounds is not None else None,
             "bounds_max": bounds[1].tolist() if bounds is not None else None,
             "extents": extents.tolist(),
@@ -163,7 +158,7 @@ def _inspect_mesh_entry(entry: dict[str, Any], runtime_path: Path, asset_dir: Pa
         report["renderer"] = "genesis.Rasterizer"
         report["preview_paths"].extend(genesis_views.values())
         report["preview_views"] = genesis_views
-    except Exception as exc:  # noqa: BLE001 - keep planner-visible diagnostics.
+    except Exception as exc:
         report["errors"].append(f"Mesh inspection failed: {type(exc).__name__}: {exc}")
 
 
@@ -173,7 +168,7 @@ def _inspect_xml_entry(runtime_path: Path, asset_dir: Path, report: dict[str, An
         return
     try:
         preview_report = render_xml_preview(runtime_path, asset_dir / "xml_preview")
-    except Exception as exc:  # noqa: BLE001 - keep planner-visible diagnostics.
+    except Exception as exc:
         report["errors"].append(f"XML preview failed: {type(exc).__name__}: {exc}")
         return
     report["geometry"] = preview_report.get("model_summary")
@@ -214,10 +209,10 @@ def _bounds(vertices: Any) -> Any:
 
 def _component_count(mesh: Any) -> int | None:
     try:
-        if int(len(mesh.faces)) > 200_000:
+        if len(mesh.faces) > 200_000:
             return None
-        return int(len(mesh.split(only_watertight=False)))
-    except Exception:  # noqa: BLE001
+        return len(mesh.split(only_watertight=False))
+    except Exception:
         return None
 
 
@@ -247,7 +242,7 @@ def _render_genesis_mesh_views(
 def _write_contact_sheet(views: dict[str, str], output_path: Path) -> Path | None:
     try:
         from PIL import Image, ImageDraw
-    except Exception:  # noqa: BLE001 - contact sheet is optional.
+    except Exception:
         return None
 
     ordered_names = [name for name in ("front", "side", "top", "iso") if name in views]
@@ -274,13 +269,11 @@ def _write_contact_sheet(views: dict[str, str], output_path: Path) -> Path | Non
     return output_path
 
 
-def _vector3(value: Any) -> list[float] | None:
-    if not isinstance(value, (list, tuple)) or len(value) != 3:
-        return None
-    try:
-        return [float(item) for item in value]
-    except (TypeError, ValueError):
-        return None
+def _scale_vector(value: Any) -> list[float] | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        scale = float(value)
+        return [scale, scale, scale] if scale > 0.0 else None
+    return vector3(value)
 
 
 def _existing_path(value: Any) -> Path | None:
@@ -288,12 +281,6 @@ def _existing_path(value: Any) -> Path | None:
         return None
     path = Path(value)
     return path if path.exists() else None
-
-
-def _manifest_bool(value: Any, *, default: bool) -> bool:
-    if value is None:
-        return default
-    return bool(value)
 
 
 def _safe_float(value: Any) -> float | None:
@@ -308,8 +295,3 @@ def _safe_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _safe_name(value: str) -> str:
-    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in value.strip())
-    return cleaned or "asset"

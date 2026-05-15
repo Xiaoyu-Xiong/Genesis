@@ -7,6 +7,8 @@
 - `suite.py`: loads cases, creates workspaces, builds Genesis context, starts `PlannerSession`, and writes suite
   summaries.
 - `integrator.py`: writes stable `src/main.py` and passes runtime defaults plus `deformable_cfg` to generated modules.
+- `adaptive_ipc.py`: computes the runtime adaptive IPC `contact_d_hat` report used by generated `src/main.py`, including
+  mesh, primitive, MJCF/XML, and bbox fallback candidates.
 - `execution.py`: runs generated projects through uv and serializes local Genesis subprocesses with a process lock.
 - `local_execution.py`: captures stdout/stderr, execution metadata, and artifact paths.
 - `timing.py`: resolves Planner timing plus CLI overrides.

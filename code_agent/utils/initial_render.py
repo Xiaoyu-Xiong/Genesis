@@ -100,7 +100,7 @@ def render_initial_without_ipc(
                 "duration_sec": time.time() - started,
             }
         )
-    except Exception as exc:  # noqa: BLE001 - diagnostic failure should be reported, not hidden.
+    except Exception as exc:
         report.update(
             {
                 "ok": False,

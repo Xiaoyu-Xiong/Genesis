@@ -125,7 +125,7 @@ def mesh_prompt_from_request(request: dict[str, Any], task: str) -> str:
 
 
 def request_size(request: dict[str, Any]) -> list[float] | None:
-    return positive_vector3(request.get("scale")) or positive_vector3(request.get("bbox"))
+    return positive_vector3(request.get("bbox"))
 
 
 def vector3(value: object) -> list[float] | None:

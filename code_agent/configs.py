@@ -40,7 +40,7 @@ class RuntimeConfigs:
 
     sim_dt: float = 0.01
     sim_substeps: int = 1
-    render_every_n_steps: int = 1
+    render_every_n_steps: int = 4
     render_fps: int = 25
     render_res: tuple[int, int] = (640, 480)
 
@@ -49,7 +49,7 @@ class RuntimeConfigs:
 class DeformableConfigs:
     """FEM deformable defaults for generated simulations."""
 
-    enabled: bool = False
+    enabled: bool = True
     friction: float = 0.3
     tet_resolution: int = 2
     genesis_precision: str = "32"
@@ -64,7 +64,6 @@ class DeformableConfigs:
     fem_poisson_ratio_max: float = 0.45
     fem_model: Literal["linear", "stable_neohookean", "linear_corotated"] = "stable_neohookean"
     fem_hydroelastic_modulus: float = 1e7
-    fem_friction_mu: float = 0.3
     fem_contact_resistance: float | None = None
     fem_hessian_invariant: bool = False
 

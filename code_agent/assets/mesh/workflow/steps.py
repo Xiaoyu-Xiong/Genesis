@@ -220,7 +220,7 @@ def run_texture_pipeline(
             submit_response=submit_response,
             final_response=final_response,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return MeshyTextureResult(
             requested=True,
             ok=False,

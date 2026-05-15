@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import json
+import contextlib
 from pathlib import Path
 from typing import Any
 
 import trimesh
+
+from code_agent.io_utils import load_json_object
 
 
 def load_mesh_asset_summary(mesh_path: str | Path) -> dict[str, Any]:
@@ -18,15 +20,13 @@ def load_mesh_asset_summary(mesh_path: str | Path) -> dict[str, Any]:
         summary["error"] = "mesh file not found"
         return summary
 
-    try:
+    with contextlib.suppress(Exception):
         summary["mesh_bytes"] = path.stat().st_size
-    except Exception:  # noqa: BLE001
-        pass
 
     asset_root = _asset_root_from_mesh_path(path)
-    metadata = _load_json_dict(asset_root / "metadata.json")
-    raw_manifold = _load_json_dict(asset_root / "raw_manifold_check.json")
-    manifold = _load_json_dict(asset_root / "manifold_check.json")
+    metadata = load_json_object(asset_root / "metadata.json")
+    raw_manifold = load_json_object(asset_root / "raw_manifold_check.json")
+    manifold = load_json_object(asset_root / "manifold_check.json")
 
     if metadata is not None:
         repair_payload = metadata.get("repair")
@@ -59,9 +59,9 @@ def load_mesh_asset_summary(mesh_path: str | Path) -> dict[str, Any]:
             summary["bbox_min"] = bbox_min
             summary["bbox_max"] = bbox_max
             summary["bbox_size"] = bbox_size
-            summary["vertex_count"] = int(len(mesh.vertices))
-            summary["face_count"] = int(len(mesh.faces))
-    except Exception as exc:  # noqa: BLE001
+            summary["vertex_count"] = len(mesh.vertices)
+            summary["face_count"] = len(mesh.faces)
+    except Exception as exc:
         summary.setdefault("error", f"{type(exc).__name__}: {exc}")
 
     return summary
@@ -71,13 +71,6 @@ def _asset_root_from_mesh_path(mesh_path: Path) -> Path:
     if mesh_path.parent.name in {"downloads", "processed", "textured"}:
         return mesh_path.parent.parent
     return mesh_path.parent
-
-
-def _load_json_dict(path: Path) -> dict[str, object] | None:
-    if not path.exists():
-        return None
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return payload if isinstance(payload, dict) else None
 
 
 def _merge_bbox_fields(summary: dict[str, Any], payload: dict[str, object]) -> None:

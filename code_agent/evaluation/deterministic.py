@@ -209,12 +209,19 @@ def _read_execution_text(path_value: Any, run_dir: Path) -> str:
         paths.append(path if path.is_absolute() else (run_dir / path))
     paths.extend([run_dir / "reports" / "stderr.txt", run_dir / "reports" / "stdout.txt"])
     for path in paths:
-        try:
-            if path.is_file():
-                return path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+        text = _read_text_if_file(path)
+        if text is not None:
+            return text
     return ""
+
+
+def _read_text_if_file(path: Path) -> str | None:
+    try:
+        if path.is_file():
+            return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    return None
 
 
 def _artifact_paths(execution_report: Any) -> list[Path]:

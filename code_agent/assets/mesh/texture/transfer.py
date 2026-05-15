@@ -136,7 +136,7 @@ def transfer_texture_to_repaired_mesh(
             diagnostics_dir=diagnostics_dir,
             stage_durations_sec=stage_durations_sec,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         diagnostics_payload = {
             "ok": False,
             "source_mesh_path": str(source_mesh_path),

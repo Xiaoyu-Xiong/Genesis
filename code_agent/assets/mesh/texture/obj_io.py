@@ -82,11 +82,11 @@ def write_parameterized_obj(
     if geometry_faces.shape != uv_faces.shape:
         raise ValueError(f"Geometry face shape {geometry_faces.shape} does not match UV face shape {uv_faces.shape}")
 
-    lines: list[str] = []
-    for vertex in np.asarray(vertices, dtype=np.float64):
-        lines.append(f"v {float(vertex[0]):.9f} {float(vertex[1]):.9f} {float(vertex[2]):.9f}")
-    for uv in np.asarray(uvs, dtype=np.float64):
-        lines.append(f"vt {float(uv[0]):.9f} {float(uv[1]):.9f}")
+    lines = [
+        f"v {float(vertex[0]):.9f} {float(vertex[1]):.9f} {float(vertex[2]):.9f}"
+        for vertex in np.asarray(vertices, dtype=np.float64)
+    ]
+    lines.extend(f"vt {float(uv[0]):.9f} {float(uv[1]):.9f}" for uv in np.asarray(uvs, dtype=np.float64))
     for geometry_face, uv_face in zip(geometry_faces, uv_faces, strict=True):
         tokens = [
             f"{int(geometry_index) + 1}/{int(uv_index) + 1}"

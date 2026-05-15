@@ -94,7 +94,7 @@ def _render_xml_preview_impl(
         import mujoco
         import numpy as np
         from PIL import Image
-    except Exception as exc:  # noqa: BLE001 - preview support is optional but should be reported.
+    except Exception as exc:
         report["errors"].append(f"Preview imports failed: {type(exc).__name__}: {exc}")
         return report
 
@@ -112,7 +112,7 @@ def _render_xml_preview_impl(
                 "to fit the MJCF offscreen framebuffer."
             )
         renderer = mujoco.Renderer(model, height=height, width=width)
-    except Exception as exc:  # noqa: BLE001 - keep renderer setup errors in report.
+    except Exception as exc:
         report["errors"].append(f"MuJoCo preview setup failed: {type(exc).__name__}: {exc}")
         return report
 
@@ -155,7 +155,7 @@ def _render_xml_preview_impl(
                     **stats,
                 }
             )
-    except Exception as exc:  # noqa: BLE001 - one preview failure invalidates the preview report.
+    except Exception as exc:
         report["errors"].append(f"MuJoCo preview render failed: {type(exc).__name__}: {exc}")
     finally:
         close = getattr(renderer, "close", None)

@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from code_agent.configs import CONFIGS
+from code_agent.io_utils import load_json_object
 
 
 def evaluate_visual_artifacts(*, run_dir: Path, output_path: Path | None = None) -> dict[str, Any]:
@@ -19,8 +20,8 @@ def evaluate_visual_artifacts(*, run_dir: Path, output_path: Path | None = None)
     reports_dir = run_dir / "reports"
     output_path = output_path or (reports_dir / "visual_evaluation.json")
     contact_sheet_path = reports_dir / "visual_contact_sheet.jpg"
-    execution_report = _read_json(reports_dir / "execution_report.json")
-    render_stats = _read_json(run_dir / "artifacts" / "render_stats.json")
+    execution_report = load_json_object(reports_dir / "execution_report.json")
+    render_stats = load_json_object(run_dir / "artifacts" / "render_stats.json")
     frames_dir = run_dir / "artifacts" / "frames"
     frame_paths = _sample_frame_paths(frames_dir, render_stats=render_stats)
     diagnostic_frame_paths = _diagnostic_frame_paths(execution_report)
@@ -103,7 +104,7 @@ def _sample_frame_paths(
     if fps is None or sample_every_sec <= 0:
         return _uniform_sample_frames(frames, max_frames)
 
-    interval = max(1, int(round(sample_every_sec * fps)))
+    interval = max(1, round(sample_every_sec * fps))
     sampled = frames[::interval]
     if sampled[-1] != frames[-1]:
         sampled.append(frames[-1])
@@ -159,21 +160,11 @@ def _positive_float(value: Any) -> float | None:
     return number
 
 
-def _read_json(path: Path) -> dict[str, Any] | None:
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def _summarize_image(path: Path) -> dict[str, Any]:
     try:
         with Image.open(path) as image:
             rgb = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"path": str(path), "error": f"{type(exc).__name__}: {exc}"}
     return {
         "path": str(path),
@@ -186,7 +177,7 @@ def _summarize_image(path: Path) -> dict[str, Any]:
 
 def _write_contact_sheet(frame_paths: list[Path], output_path: Path, *, max_width: int) -> None:
     thumb_width = max(1, int(max_width // 2))
-    thumb_height = max(1, int(round(thumb_width * 9 / 16)))
+    thumb_height = max(1, round(thumb_width * 9 / 16))
     label_height = 25
     thumbs: list[Image.Image] = []
     for path in frame_paths:
@@ -209,9 +200,8 @@ def _write_contact_sheet(frame_paths: list[Path], output_path: Path, *, max_widt
 def _texture_summaries(manifest_path: Path) -> list[dict[str, Any]]:
     if not manifest_path.is_file():
         return []
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+    manifest = load_json_object(manifest_path)
+    if manifest is None:
         return []
     assets = manifest.get("assets")
     if not isinstance(assets, list):
@@ -237,7 +227,7 @@ def _summarize_texture(path: Path) -> dict[str, Any]:
     try:
         with Image.open(path) as image:
             rgb = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"texture_error": f"{type(exc).__name__}: {exc}"}
     return {
         "texture_size": [int(rgb.shape[1]), int(rgb.shape[0])],
@@ -257,7 +247,7 @@ def _texture_presence(texture: dict[str, Any], frame_paths: list[Path]) -> dict[
         try:
             with Image.open(path) as image:
                 rgb = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
         diff = np.linalg.norm(rgb - target.reshape((1, 1, 3)), axis=2)
         fractions.append(float(np.mean(diff < 0.18)))

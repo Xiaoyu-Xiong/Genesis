@@ -14,11 +14,22 @@
           "logical_name": { "type": "string", "minLength": 1 },
           "source_type": {
             "type": "string",
-            "enum": ["primitive", "generated_mesh", "repo_asset", "mjcf", "urdf"]
+            "enum": ["primitive", "generated_mesh", "repo_asset", "input_mesh", "derived_mesh", "mjcf", "urdf"]
           },
-          "runtime_path": { "type": "string", "minLength": 1 },
+          "runtime_path": {
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              { "type": "null" }
+            ]
+          },
           "visual_path": { "type": ["string", "null"] },
-          "scale": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+          "scale": {
+            "oneOf": [
+              { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+              { "type": "number" },
+              { "type": "null" }
+            ]
+          },
           "bbox": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
           "file_meshes_are_zup": { "type": ["boolean", "null"] },
           "texture_path": { "type": ["string", "null"] },
@@ -31,6 +42,7 @@
           "control_interface": { "type": "object" },
           "base": { "type": "object" },
           "validation": { "type": "object" },
+          "asset_request": { "type": "object" },
           "simulation_role": { "type": "string", "minLength": 1 },
           "status": { "type": "string", "enum": ["ready", "pending", "failed"] },
           "notes": { "type": "array", "items": { "type": "string" } }
