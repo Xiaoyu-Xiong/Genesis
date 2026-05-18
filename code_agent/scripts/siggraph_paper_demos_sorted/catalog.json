@@ -1,6 +1,6 @@
 {
-  "updated_at": "2026-05-14T13:50:00-04:00",
-  "purpose": "Moderate-complexity SIGGRAPH / SIGGRAPH-Asia style reference clips sorted by boundary motion and supported body types.",
+  "updated_at": "2026-05-15T16:55:00-04:00",
+  "purpose": "Moderate-complexity SIGGRAPH / SIGGRAPH-Asia style reference clips sorted by boundary motion, supported body types, and robotics/control examples.",
   "selection_rules": [
     "Use only rigid or articulated rigid bodies, volumetric deformable bodies, and fixed or scripted rigid boundaries.",
     "Exclude cloth, hair, fluids, granular media, thin rods/cables, pneumatic soft actuators, and fragile precision-placement examples.",
@@ -91,6 +91,34 @@
       "source_url": "https://diglib.eg.org/items/54af7e32-56a8-42f0-be42-4b5363f5f232",
       "paper": "Two-way Coupling of Rigid and Deformable Bodies",
       "venue": "Eurographics/SIGGRAPH Symposium on Computer Animation, 2008"
+    },
+    {
+      "id": "soft_body_locomotion_2012",
+      "path": "videos/soft_body_locomotion_2012.mp4",
+      "source_url": "https://www.jie-tan.net/project/softBodyLocomotion.html",
+      "paper": "Soft Body Locomotion",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2012"
+    },
+    {
+      "id": "soft_contacts_2011",
+      "path": "videos/soft_contacts_2011.mp4",
+      "source_url": "https://sites.cc.gatech.edu/graphics/projects/Sumit/homepage/projects/softcontacts/",
+      "paper": "Controlling Physics-Based Characters Using Soft Contacts",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH Asia), 2011"
+    },
+    {
+      "id": "robot_designer_2015",
+      "path": "videos/robot_designer_2015.mp4",
+      "source_url": "https://ait.ethz.ch/robot-designer",
+      "paper": "Interactive Design of 3D-printable Robotic Creatures",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH Asia), 2015"
+    },
+    {
+      "id": "deepmimic_2018",
+      "path": "videos/deepmimic_2018_main.mp4",
+      "source_url": "https://xbpeng.github.io/projects/DeepMimic/index.html",
+      "paper": "DeepMimic: Example-Guided Deep Reinforcement Learning of Physics-Based Character Skills",
+      "venue": "ACM Transactions on Graphics (SIGGRAPH), 2018"
     }
   ],
   "categories": {
@@ -129,6 +157,24 @@
       "allegro_hand_soft_ball",
       "robot_flexible_beam_insertion",
       "soft_c_clamp_rigid_ball_squeeze"
+    ],
+    "robotics": [
+      "robot_arm_flexible_beam_insertion",
+      "robot_hand_soft_ball_grasp",
+      "fetch_robot_deformable_grasp",
+      "robot_c_clamp_ball_squeeze",
+      "robot_foot_soft_mushroom_crush",
+      "robot_fist_soft_head_punch",
+      "soft_robot_ring_roll",
+      "soft_robot_inchworm_crawl",
+      "soft_robot_x_walk",
+      "servo_quadruped_gait_edit",
+      "servo_multi_leg_creature_walk",
+      "soft_finger_ball_flick",
+      "soft_finger_pen_hold",
+      "soft_foot_biped_push_recovery",
+      "atlas_robot_box_kick",
+      "atlas_robot_box_backflip"
     ]
   },
   "examples": [
@@ -371,6 +417,166 @@
       "clip_path": "moving_boundary_rigid_deformable/clips/soft_c_clamp_rigid_ball_squeeze.mp4",
       "clip_contact_sheet": "moving_boundary_rigid_deformable/clip_contact_sheets/soft_c_clamp_rigid_ball_squeeze.jpg",
       "fit_notes": "Simple moving jaw, one soft C-shaped solid, and one rigid ball; replaces unsupported pneumatic soft gripper style."
+    },
+    {
+      "title": "robot_arm_flexible_beam_insertion",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "non_smooth_newton_2019",
+      "source_segment_sec": {"start": 16.0, "end": 42.0},
+      "clip_path": "robotics/clips/robot_arm_flexible_beam_insertion.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/robot_arm_flexible_beam_insertion.jpg",
+      "fit_notes": "Robotics version of the flexible beam insertion reference; staged robot-arm trajectory plus a dynamic deformable beam."
+    },
+    {
+      "title": "robot_hand_soft_ball_grasp",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "non_smooth_newton_2019",
+      "source_segment_sec": {"start": 104.0, "end": 130.0},
+      "clip_path": "robotics/clips/robot_hand_soft_ball_grasp.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/robot_hand_soft_ball_grasp.jpg",
+      "fit_notes": "Articulated robot-hand joint control with a dynamic soft FEM ball; useful for grasp/squeeze controller tests."
+    },
+    {
+      "title": "fetch_robot_deformable_grasp",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "non_smooth_newton_2019",
+      "source_segment_sec": {"start": 52.0, "end": 76.0},
+      "clip_path": "robotics/clips/fetch_robot_deformable_grasp.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/fetch_robot_deformable_grasp.jpg",
+      "fit_notes": "Fetch-style arm/gripper grasps and lifts a soft object with a simple staged trajectory; excludes the later unsupported PneuNet gripper segment."
+    },
+    {
+      "title": "robot_c_clamp_ball_squeeze",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "adaptive_rigidification_2022",
+      "source_segment_sec": {"start": 28.0, "end": 45.0},
+      "clip_path": "robotics/clips/robot_c_clamp_ball_squeeze.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/robot_c_clamp_ball_squeeze.jpg",
+      "fit_notes": "One-dimensional controlled jaw/end-effector squeezes a rigid ball into a soft C-shaped body."
+    },
+    {
+      "title": "robot_foot_soft_mushroom_crush",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "trading_spaces_2024",
+      "source_segment_sec": {"start": 10.0, "end": 55.0},
+      "clip_path": "robotics/clips/robot_foot_soft_mushroom_crush.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/robot_foot_soft_mushroom_crush.jpg",
+      "fit_notes": "Controlled robot foot/boot trajectory over thick soft mushroom toys; low layout sensitivity."
+    },
+    {
+      "title": "robot_fist_soft_head_punch",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "trading_spaces_2024",
+      "source_segment_sec": {"start": 100.0, "end": 140.0},
+      "clip_path": "robotics/clips/robot_fist_soft_head_punch.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/robot_fist_soft_head_punch.jpg",
+      "fit_notes": "Open-loop robot striker/end-effector drives a soft contact impact against a deformable head."
+    },
+    {
+      "title": "soft_robot_ring_roll",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "soft_body_locomotion_2012",
+      "source_segment_sec": {"start": 178.0, "end": 205.0},
+      "clip_path": "robotics/clips/soft_robot_ring_roll.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/soft_robot_ring_roll.jpg",
+      "fit_notes": "Soft-body locomotion ring controlled by internal actuation targets; deformable body only, no skeleton or cloth."
+    },
+    {
+      "title": "soft_robot_inchworm_crawl",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "soft_body_locomotion_2012",
+      "source_segment_sec": {"start": 220.0, "end": 242.0},
+      "clip_path": "robotics/clips/soft_robot_inchworm_crawl.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/soft_robot_inchworm_crawl.jpg",
+      "fit_notes": "Inchworm-style soft robot with phase-based internal contractions and frictional ground contact."
+    },
+    {
+      "title": "soft_robot_x_walk",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "soft_body_locomotion_2012",
+      "source_segment_sec": {"start": 242.0, "end": 267.0},
+      "clip_path": "robotics/clips/soft_robot_x_walk.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/soft_robot_x_walk.jpg",
+      "fit_notes": "Four-lobed deformable robot walking under phase-shifted contraction controls."
+    },
+    {
+      "title": "servo_quadruped_gait_edit",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "robot_designer_2015",
+      "source_segment_sec": {"start": 20.0, "end": 58.0},
+      "clip_path": "robotics/clips/servo_quadruped_gait_edit.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/servo_quadruped_gait_edit.jpg",
+      "fit_notes": "Rigid articulated quadruped with periodic servo gait controls; prompt removes fabrication/electronics detail."
+    },
+    {
+      "title": "servo_multi_leg_creature_walk",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "robot_designer_2015",
+      "source_segment_sec": {"start": 124.0, "end": 165.0},
+      "clip_path": "robotics/clips/servo_multi_leg_creature_walk.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/servo_multi_leg_creature_walk.jpg",
+      "fit_notes": "Gait-gallery style servo creatures simplified to repeated articulated leg modules and robust foot contacts."
+    },
+    {
+      "title": "soft_finger_ball_flick",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "soft_contacts_2011",
+      "source_segment_sec": {"start": 150.0, "end": 180.0},
+      "clip_path": "robotics/clips/soft_finger_ball_flick.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/soft_finger_ball_flick.jpg",
+      "fit_notes": "Soft fingertip pads on an articulated hand improve controlled ball contact; usable as a compact manipulation demo."
+    },
+    {
+      "title": "soft_finger_pen_hold",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "soft_contacts_2011",
+      "source_segment_sec": {"start": 245.0, "end": 260.0},
+      "clip_path": "robotics/clips/soft_finger_pen_hold.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/soft_finger_pen_hold.jpg",
+      "fit_notes": "Articulated fingers with deformable pads maintain a controlled pinch on a dynamic rigid pen under perturbation."
+    },
+    {
+      "title": "soft_foot_biped_push_recovery",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "soft_contacts_2011",
+      "source_segment_sec": {"start": 5.0, "end": 45.0},
+      "clip_path": "robotics/clips/soft_foot_biped_push_recovery.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/soft_foot_biped_push_recovery.jpg",
+      "fit_notes": "Simplified biped control with deformable foot contacts and a push-recovery disturbance."
+    },
+    {
+      "title": "atlas_robot_box_kick",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "deepmimic_2018",
+      "source_segment_sec": {"start": 162.0, "end": 181.0},
+      "clip_path": "robotics/clips/atlas_robot_box_kick.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/atlas_robot_box_kick.jpg",
+      "fit_notes": "High-control articulated rigid robot kicking dynamic cubes; prompt asks for preauthored targets rather than RL reproduction."
+    },
+    {
+      "title": "atlas_robot_box_backflip",
+      "category": "robotics",
+      "cases_path": "robotics/cases.txt",
+      "source_video_id": "deepmimic_2018",
+      "source_segment_sec": {"start": 181.0, "end": 205.0},
+      "clip_path": "robotics/clips/atlas_robot_box_backflip.mp4",
+      "clip_contact_sheet": "robotics/clip_contact_sheets/atlas_robot_box_backflip.jpg",
+      "fit_notes": "High-control articulated robot jump/backflip target with dynamic rigid cubes; acceptable as a stretch robotics case."
     }
   ]
 }

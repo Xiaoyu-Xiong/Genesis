@@ -39,7 +39,7 @@ class RuntimeConfigs:
     """Genesis runtime defaults for generated simulations."""
 
     sim_dt: float = 0.01
-    sim_substeps: int = 1
+    sim_substeps: int = 10
     render_every_n_steps: int = 4
     render_fps: int = 25
     render_res: tuple[int, int] = (640, 480)
@@ -49,7 +49,7 @@ class RuntimeConfigs:
 class DeformableConfigs:
     """FEM deformable defaults for generated simulations."""
 
-    enabled: bool = True
+    enabled: bool = False
     friction: float = 0.3
     tet_resolution: int = 2
     genesis_precision: str = "32"
@@ -72,7 +72,7 @@ class DeformableConfigs:
 class IPCConfigs:
     """IPC contact/coupling defaults for generated simulations."""
 
-    enabled: bool = True
+    enabled: bool = False
     ipc_newton_max_iterations: int | None = None
     ipc_newton_min_iterations: int | None = 2
     ipc_newton_tolerance: float | None = None

@@ -26,6 +26,8 @@ Folders:
 - `moving_boundary_deformable_only/`
 - `fixed_boundary_rigid_deformable/`
 - `moving_boundary_rigid_deformable/`
+- `robotics/`: controller-oriented SIGGRAPH / SIGGRAPH-Asia examples, including articulated robot manipulation,
+  soft-robot locomotion, servo legged robots, and soft-contact hand/foot control.
 
 Each folder contains:
 
@@ -36,7 +38,7 @@ Each folder contains:
 Top-level files:
 
 - `catalog.json`: source videos, source segments, category labels, clip paths, contact-sheet paths, and fit notes.
-- `cases_active.txt`: a roll-up of all final selected cases for convenience.
+- `cases_active.txt`: a manually curated active subset for current suite runs.
 - `videos/`: downloaded external source videos that were not already present in `../siggraph_paper_demos/videos/`.
 
 Notes:
@@ -45,3 +47,6 @@ Notes:
   rigid SIGGRAPH examples rely on chains, gears, card stacks, pin fields, or other precise layouts.
 - New clips were added from Adaptive Rigidification, Adaptive Merging, Contact-Centric Deformation Learning, Trading
   Spaces, and the SCA two-way rigid/deformable coupling video, in addition to the existing local source-video set.
+- The robotics folder intentionally includes examples with explicit simple controllers. Those cases are meant to test
+  joint PD, staged end-effector trajectories, gait phase control, and soft-body actuator targets rather than purely
+  passive settling.

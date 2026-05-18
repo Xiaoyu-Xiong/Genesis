@@ -103,13 +103,7 @@
               "name": { "type": "string", "minLength": 1 },
               "asset_type": { "type": "string", "minLength": 1 },
               "purpose": { "type": "string", "minLength": 1 },
-              "scale": {
-                "oneOf": [
-                  { "type": "number", "exclusiveMinimum": 0 },
-                  { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 }, "minItems": 3, "maxItems": 3 },
-                  { "type": "null" }
-                ]
-              },
+              "scale": { "type": ["number", "null"], "exclusiveMinimum": 0 },
               "bbox": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
               "texture_needs": { "type": ["string", "null"] },
               "simulation_role": { "type": "string", "minLength": 1 }

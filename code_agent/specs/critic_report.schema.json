@@ -10,6 +10,7 @@
     "failure_modes",
     "recommended_owner",
     "repair_summary",
+    "asset_diagnostics",
     "evidence"
   ],
   "properties": {
@@ -22,6 +23,36 @@
       "enum": ["planner", "scene", "body", "action", "rendering", "integrator", "execution", "none"]
     },
     "repair_summary": { "type": ["string", "null"] },
+    "asset_diagnostics": {
+      "type": ["object", "null"],
+      "required": [
+        "asset_issue",
+        "asset_names",
+        "asset_family",
+        "evidence",
+        "recommended_planner_action"
+      ],
+      "properties": {
+        "asset_issue": { "type": "boolean" },
+        "asset_names": { "type": "array", "items": { "type": "string" } },
+        "asset_family": {
+          "type": ["string", "null"],
+          "enum": ["mesh", "xml", "mjcf", "urdf", "primitive", "unknown", null]
+        },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "recommended_planner_action": {
+          "type": ["string", "null"],
+          "enum": [
+            "start_mesh_assets",
+            "update_mesh_asset_metadata",
+            "start_xml_assets",
+            "inspect_assets",
+            null
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "evidence": {
       "type": "object",
       "required": ["metrics", "frames", "video", "event_logs"],

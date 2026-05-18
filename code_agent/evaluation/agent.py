@@ -9,12 +9,21 @@ from code_agent.configs import CONFIGS
 from code_agent.io_utils import load_json_object
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
 from code_agent.utils.general_prompts import (
+    CRITIC_ASSET_EVALUATION_GUIDE,
     CRITIC_DECISION_GUIDE,
     CRITIC_EVIDENCE_READING_GUIDE,
     CRITIC_GENERAL_RULES,
     CRITIC_VISUAL_EVIDENCE_GUIDE,
     SOURCE_AWARE_REPAIR_GUIDE,
 )
+
+PROMPT_TEXT_LIMITS = {
+    "execution_report": 120_000,
+    "generated_source_file": 60_000,
+    "source_file": 50_000,
+    "json_report": 50_000,
+    "stdout_stderr": 40_000,
+}
 
 
 def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any]) -> dict[str, Any]:
@@ -51,6 +60,7 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
             "failure_modes": failure_modes,
             "recommended_owner": "none",
             "repair_summary": None,
+            "asset_diagnostics": None,
             "evidence": {"metrics": [], "frames": [], "video": None, "event_logs": []},
         }
     report["codex_result"] = {
@@ -71,17 +81,18 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
     metrics = _read_text(run_dir / "artifacts" / "metrics.json")
     render_stats = _read_text(run_dir / "artifacts" / "render_stats.json")
     visual_evaluation = _read_text(run_dir / "reports" / "visual_evaluation.json")
-    execution_report = _read_text(run_dir / "reports" / "execution_report.json")
+    execution_report = _read_text(run_dir / "reports" / "execution_report.json", max_chars=PROMPT_TEXT_LIMITS["execution_report"])
     generated_source = _generated_source_bundle(run_dir)
     planner_output = _read_text(run_dir / "contracts" / "planner_output.json")
     timing_contract = _read_text(run_dir / "contracts" / "timing.json")
     deformable_config = _read_text(run_dir / "contracts" / "deformable_config.json")
     asset_manifest = _read_text(run_dir / "assets" / "asset_manifest.json")
+    asset_evidence = _asset_evidence_bundle(run_dir)
     genesis_context = _genesis_context_pointer(run_dir)
     summary = _read_text(run_dir / "artifacts" / "summary.json")
     run_result = _read_text(run_dir / "artifacts" / "run_result.json")
-    stdout = _read_text(run_dir / "reports" / "stdout.txt")
-    stderr = _read_text(run_dir / "reports" / "stderr.txt")
+    stdout = _read_text(run_dir / "reports" / "stdout.txt", max_chars=PROMPT_TEXT_LIMITS["stdout_stderr"])
+    stderr = _read_text(run_dir / "reports" / "stderr.txt", max_chars=PROMPT_TEXT_LIMITS["stdout_stderr"])
     return textwrap.dedent(
         f"""
         {CRITIC_GENERAL_RULES}
@@ -124,6 +135,9 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         Asset manifest:
         {asset_manifest}
 
+        Generated asset source and preview evidence:
+        {asset_evidence}
+
         Genesis documentation and local-code context:
         {genesis_context}
 
@@ -144,6 +158,8 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
 
         {CRITIC_DECISION_GUIDE}
 
+        {CRITIC_ASSET_EVALUATION_GUIDE}
+
         {CRITIC_VISUAL_EVIDENCE_GUIDE}
 
         If repair is needed, use `repair_summary` for this guidance:
@@ -151,6 +167,9 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
 
         Return JSON matching critic_report.schema.json. `recommended_owner` must be one of:
         planner, scene, body, action, rendering, integrator, execution, none.
+        When a generated asset itself is the likely source of failure, set `recommended_owner` to `planner` and populate
+        the optional `asset_diagnostics` object with the affected asset names, asset family, evidence, and the Planner
+        asset action that should be used next.
         Use `needs_repair` when there is a clear owner-routed fix.
         """
     ).strip()
@@ -191,6 +210,9 @@ def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, An
             contact_sheet_path = visual_report["contact_sheet_path"]
         if isinstance(visual_report.get("sampled_frames"), list):
             sampled_frames = [str(path) for path in visual_report["sampled_frames"] if isinstance(path, str)]
+    asset_preview_images = [str(path) for path in _asset_preview_image_paths(run_dir)]
+    asset_preview_reports = [str(path) for path in _asset_preview_report_paths(run_dir)]
+    asset_source_paths = [str(path) for path in _asset_source_paths(run_dir)]
 
     index: dict[str, Any] = {
         "schema_version": 1,
@@ -199,8 +221,12 @@ def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, An
         "sizes_bytes": {name: _file_size(path) for name, path in paths.items()},
         "contact_sheet_path": contact_sheet_path,
         "sampled_frames": sampled_frames,
+        "asset_preview_images": asset_preview_images,
+        "asset_preview_reports": asset_preview_reports,
+        "asset_source_paths": asset_source_paths,
         "notes": [
             "Generated source is also inlined in the critic prompt for source-aware review.",
+            "Generated asset source and preview paths are included so asset morphology can be judged directly.",
             "Large evidence files are referenced by path so the critic can inspect them without exceeding input limits.",
             "The event log is complete on disk and should be sampled or searched as needed.",
         ],
@@ -213,28 +239,106 @@ def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, An
 
 def _critic_image_paths(run_dir: Path) -> tuple[Path, ...]:
     report_path = run_dir / "reports" / "visual_evaluation.json"
-    if not report_path.exists():
-        return ()
-    try:
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return ()
+    report = load_json_object(report_path) if report_path.exists() else None
     image_paths: list[Path] = []
-    contact_sheet_path = report.get("contact_sheet_path")
-    if isinstance(contact_sheet_path, str):
-        contact_sheet = Path(contact_sheet_path)
-        if contact_sheet.is_file():
-            image_paths.append(contact_sheet)
+    if isinstance(report, dict):
+        contact_sheet_path = report.get("contact_sheet_path")
+        if isinstance(contact_sheet_path, str):
+            contact_sheet = Path(contact_sheet_path)
+            if contact_sheet.is_file():
+                image_paths.append(contact_sheet)
+    image_paths.extend(_asset_preview_image_paths(run_dir))
     if image_paths:
-        return tuple(image_paths)
+        return _unique_existing_paths(image_paths, limit=12)
+    if not isinstance(report, dict):
+        return ()
     sampled_frames = report.get("sampled_frames")
     if isinstance(sampled_frames, list):
         for item in sampled_frames:
             if isinstance(item, str):
-                frame_path = Path(item)
-                if frame_path.is_file():
-                    image_paths.append(frame_path)
-    return tuple(image_paths)
+                image_paths.append(Path(item))
+    return _unique_existing_paths(image_paths, limit=12)
+
+
+def _asset_evidence_bundle(run_dir: Path) -> str:
+    blocks: list[str] = []
+    source_paths = _asset_source_paths(run_dir)
+    if source_paths:
+        blocks.append("Asset source files:")
+        blocks.extend(_file_block_limited(path) for path in source_paths[:6])
+    preview_reports = _asset_preview_report_paths(run_dir)
+    if preview_reports:
+        blocks.append("Asset preview reports:")
+        blocks.extend(_file_block_limited(path, max_chars=8000) for path in preview_reports[:6])
+    generation_reports = sorted((run_dir / "assets").glob("**/xml_asset_generation_report.json"))
+    if generation_reports:
+        blocks.append("Asset generation reports:")
+        blocks.extend(_file_block_limited(path, max_chars=12000) for path in generation_reports[:4])
+    if not blocks:
+        return "<no generated asset source or preview evidence found>"
+    return "\n\n".join(blocks)
+
+
+def _asset_source_paths(run_dir: Path) -> list[Path]:
+    manifest = load_json_object(run_dir / "assets" / "asset_manifest.json")
+    if not isinstance(manifest, dict):
+        return []
+    paths: list[Path] = []
+    for entry in manifest.get("assets", []):
+        if not isinstance(entry, dict):
+            continue
+        source_type = str(entry.get("source_type") or "")
+        if source_type not in {"mjcf", "urdf", "generated_xml"}:
+            continue
+        value = entry.get("runtime_path")
+        if isinstance(value, str):
+            path = Path(value)
+            if path.is_file() and path.suffix.lower() in {".xml", ".urdf", ".mjcf"}:
+                paths.append(path)
+    return list(_unique_existing_paths(paths, limit=12))
+
+
+def _asset_preview_report_paths(run_dir: Path) -> list[Path]:
+    reports = list((run_dir / "assets").glob("**/preview_report.json"))
+    reports.extend((run_dir / "reports" / "asset_inspection").glob("**/preview_report.json"))
+    return list(_unique_existing_paths(sorted(reports), limit=12))
+
+
+def _asset_preview_image_paths(run_dir: Path) -> list[Path]:
+    roots = [run_dir / "assets", run_dir / "reports" / "asset_inspection"]
+    preferred = ("top", "iso", "front", "side")
+    paths: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for stem in preferred:
+            paths.extend(sorted(root.glob(f"**/{stem}.png")))
+            paths.extend(sorted(root.glob(f"**/{stem}.jpg")))
+        paths.extend(sorted(root.glob("**/contact_sheet.png")))
+        paths.extend(sorted(root.glob("**/contact_sheet.jpg")))
+    return list(_unique_existing_paths(paths, limit=10))
+
+
+def _unique_existing_paths(paths: list[Path], *, limit: int) -> tuple[Path, ...]:
+    unique: list[Path] = []
+    seen: set[Path] = set()
+    for path in paths:
+        resolved = path.resolve()
+        if resolved in seen or not resolved.is_file():
+            continue
+        seen.add(resolved)
+        unique.append(resolved)
+        if len(unique) >= limit:
+            break
+    return tuple(unique)
+
+
+def _file_block_limited(path: Path, *, max_chars: int = 30000) -> str:
+    text = _read_text(path, max_chars=max_chars)
+    if len(text) > max_chars:
+        text = _clip_middle(text, max_chars)
+    suffix = path.suffix.lstrip(".") or "text"
+    return f"### {path}\n```{suffix}\n{text}\n```"
 
 
 def _generated_source_bundle(run_dir: Path) -> str:
@@ -245,7 +349,7 @@ def _generated_source_bundle(run_dir: Path) -> str:
         run_dir / "src" / "rendering.py",
         run_dir / "src" / "main.py",
     ]
-    return "\n\n".join(_file_block(path) for path in source_paths)
+    return "\n\n".join(_file_block_limited(path, max_chars=PROMPT_TEXT_LIMITS["generated_source_file"]) for path in source_paths)
 
 
 def _genesis_context_pointer(run_dir: Path) -> str:
@@ -275,13 +379,24 @@ def _genesis_context_pointer(run_dir: Path) -> str:
 
 def _file_block(path: Path) -> str:
     suffix = path.suffix.lstrip(".") or "text"
-    return f"### {path}\n```{suffix}\n{_read_text(path)}\n```"
+    return f"### {path}\n```{suffix}\n{_read_text(path, max_chars=PROMPT_TEXT_LIMITS['source_file'])}\n```"
 
 
-def _read_text(path: Path) -> str:
+def _read_text(path: Path, *, max_chars: int | None = None) -> str:
     if not path.exists():
         return f"<missing: {path}>"
-    return path.read_text(encoding="utf-8", errors="replace")
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return _clip_middle(text, max_chars) if max_chars is not None else text
+
+
+def _clip_middle(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    marker = f"\n<truncated {len(text) - max_chars} chars from middle>\n"
+    keep = max(0, max_chars - len(marker))
+    head = keep // 2
+    tail = keep - head
+    return text[:head] + marker + text[-tail:]
 
 
 def _file_size(path: Path) -> int | None:

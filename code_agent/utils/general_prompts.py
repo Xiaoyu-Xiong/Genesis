@@ -82,6 +82,11 @@ important source-level feedback just to keep the answer short. If the evidence p
 being invalid or unsuitable (failed manifold check, Genesis FEM import validation failure, missing/corrupt texture,
 wrong generated topology, or a visual/runtime mesh pairing defect), route the fix to Planner/mesh asset regeneration
 instead of asking scene/body/action/rendering workers to patch, reshape, retopologize, or procedurally replace that mesh.
+If the evidence points to a generated XML/MJCF/URDF asset itself being unsuitable for the requested mechanism
+(for example a gripper without a real opposing thumb, fingers that cannot form an enclosing cage, missing useful
+actuator affordances, wrong joint axes, invalid link hierarchy, or a body tree whose primitive geometry cannot perform
+the requested contact task), route the fix to Planner/XML asset regeneration. Do not keep assigning action/body repairs
+when the action is only failing because the generated articulated asset cannot physically do the job.
 """.strip()
 
 
@@ -298,7 +303,11 @@ Action policy:
 - Only choose finish pass after the latest critic verdict is pass.
 - If the latest critic verdict is inconclusive because `codex_result.error_type` is `codex_usage_limit`, choose finish
   with verdict inconclusive; do not request code repair from a missing/blocked critic review.
-- If critic fails and repair budget remains, choose request_repair for the most relevant generation owner.
+- If critic fails and repair budget remains, choose request_repair for the most relevant source owner unless the critic
+  routes the defect to Planner-owned asset regeneration. When critic recommends `planner` because a generated mesh or
+  XML/MJCF asset is intrinsically wrong for the task, revise the affected asset request in a complete planner_output and
+  choose start_mesh_assets/start_xml_assets for the affected asset_names. Do not call request_repair with owner
+  `planner`; Planner repairs asset prompts through the asset actions.
 - If deterministic artifact checks, stderr, or stdout mention `ipc.initial_penetration`, libuipc initial
   penetration/intersection/thickness/distance/sanity-check failure, first decide whether the concrete evidence points
   to asset geometry/topology/scale or to body placement/clearance. Use inspect_assets when a ready generated asset could
@@ -327,6 +336,27 @@ CRITIC_EVIDENCE_READING_GUIDE = """
 The complete evidence files listed above are available on disk. Read the full files directly when needed, especially the
 event log and full artifact report. The event log may be too large to inline in one Codex turn; do not treat
 non-inlined evidence as missing.
+""".strip()
+
+
+CRITIC_ASSET_EVALUATION_GUIDE = """
+Asset and mechanism evaluation:
+- Treat generated assets as first-class evidence, not as trusted black boxes. Inspect asset manifests, generated XML/MJCF
+  source, worker reports, preview images, and in-scene contact sheets when the task depends on a generated mesh,
+  articulated hand/gripper, robot, mechanism, or visually specific object.
+- Judge whether the asset's shape, topology, joint axes, actuator contract, scale, and visible geometry can plausibly
+  perform the requested task before blaming only action timing. For grasping/manipulation tasks, explicitly check
+  whether fingers and thumb can form a real opposing cage around the payload, whether the payload can fit inside that
+  grasp volume, and whether closing the actuators would trap rather than sweep the payload away.
+- If a simulation fails because the generated asset is morphologically unsuitable, visually wrong, lacks required
+  joints/actuators, has the wrong scale/orientation/topology, or cannot provide the requested contact affordance, set
+  `recommended_owner` to `planner`. In `repair_summary`, tell Planner to rewrite the affected asset request and rerun
+  start_xml_assets/start_mesh_assets with concrete asset-level requirements. Do not keep recommending action/body
+  repairs just because metrics report no lift, no squeeze, or lateral escape when the visible/source evidence shows the
+  end-effector geometry cannot physically contain or manipulate the object.
+- If the generated asset is plausible but its scene placement, initial clearance, material/coupling, or code-side
+  metadata is wrong, route to body/scene. If the asset and placement are plausible but the timing, controller, gates, or
+  release sequence are wrong, route to action.
 """.strip()
 
 
@@ -458,6 +488,7 @@ Decide whether the run passes as a generated Genesis simulation result. Compare 
 source, execution artifacts, metrics, event logs, render stats, and visual evidence. Prioritize execution correctness,
 required artifacts, plausible movement, physically coherent staging, and whether the visual evidence matches the task.
 {GENERATED_RESULT_QUALITY_GUIDE}
+{CRITIC_ASSET_EVALUATION_GUIDE}
 {PHYSICAL_CONTROL_METHOD_GUIDE}
 {PHYSICAL_CAUSALITY_CRITIC_GUIDE}
 {DEFORMABLE_CRITIC_GUIDE}
