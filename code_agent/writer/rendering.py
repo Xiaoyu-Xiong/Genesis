@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from code_agent.utils.general_prompts import RENDER_CLARITY_GUIDE
+from code_agent.prompts.common import RENDER_CLARITY_GUIDE
 
 from .common import WorkerSpec
 

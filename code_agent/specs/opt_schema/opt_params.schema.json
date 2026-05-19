@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opt_params.schema.json",
+  "title": "Optimization Parameters",
+  "type": "object",
+  "required": ["schema_version", "params"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "source": { "type": ["string", "null"], "enum": ["default", "current", "best", "trial", "manual", null] },
+    "trial_index": { "type": ["integer", "null"], "minimum": 0 },
+    "params": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/json_value" }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/json_value" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "json_value": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/json_value" } },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/json_value" }
+        }
+      ]
+    }
+  }
+}

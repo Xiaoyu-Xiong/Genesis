@@ -1,0 +1,261 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+from code_agent.configs import CONFIGS
+from code_agent.io_utils import load_json_object
+from code_agent.opt.contracts import (
+    OptContractError,
+    OptContracts,
+    load_opt_contracts,
+    normalized_initial_sigma,
+    payload_from_vector,
+    vector_from_payload,
+    write_params_payload,
+)
+from code_agent.opt.optimizers.cma_es import CMAESOptimizer, default_population_size
+from code_agent.opt.reports import OptReporter
+from code_agent.opt.trials import RunOptOptions, TrialExecutor, TrialResult, payload_for_trial
+
+
+@dataclass(slots=True, frozen=True)
+class RunOptConfig:
+    case_dir: Path
+    target_spec_path: Path | None = None
+    opt_space_path: Path | None = None
+    default_params_path: Path | None = None
+    backend: str | None = None
+    max_trials: int | None = None
+    population_size: int | None = None
+    seed: int | None = None
+    timeout_sec: float | None = None
+    steps: int | None = None
+    duration_sec: float | None = None
+    render_fps: int | None = None
+    render_best: bool | None = None
+    main_file: str = CONFIGS.opt.runner_main_file
+
+
+def run_optimization(config: RunOptConfig) -> dict[str, Any]:
+    """Run the low-level numerical optimizer for one generated case workspace."""
+
+    runner = _OptRunner(config)
+    try:
+        return runner.run()
+    except OptContractError as exc:
+        return runner.write_failed_report(str(exc))
+
+
+class _OptRunner:
+    def __init__(self, config: RunOptConfig) -> None:
+        self.config = config
+        self.case_dir = config.case_dir.resolve()
+        self.contracts_dir = self.case_dir / "contracts"
+        self.reporter = OptReporter(self.case_dir)
+        self.trials = TrialExecutor(
+            case_dir=self.case_dir,
+            contracts_dir=self.contracts_dir,
+            reports_dir=self.reporter.reports_dir,
+            main_file=config.main_file,
+        )
+
+    def run(self) -> dict[str, Any]:
+        contracts = load_opt_contracts(
+            case_dir=self.case_dir,
+            target_spec_path=self.config.target_spec_path,
+            opt_space_path=self.config.opt_space_path,
+            default_params_path=self.config.default_params_path,
+        )
+        options = self._resolve_options(contracts)
+        self.reporter.prepare()
+
+        best_result: TrialResult | None = None
+        baseline_scores: list[float] = []
+        trial_index = 0
+        for _ in range(options.baseline_trials):
+            baseline_payload = payload_for_trial(
+                contracts.default_params,
+                source="trial",
+                trial_index=trial_index,
+                metadata={"kind": "baseline"},
+            )
+            result = self.trials.run_trial(
+                trial_index=trial_index,
+                params_payload=baseline_payload,
+                options=options,
+                contracts=contracts,
+            )
+            self.reporter.append_trace(result.entry)
+            baseline_scores.append(float(result.score.score) if result.score.score is not None else 0.0)
+            best_result = self._choose_best(best_result, result, contracts)
+            trial_index += 1
+
+        active_variables = contracts.active_variables
+        default_vector = vector_from_payload(active_variables, contracts.default_params)
+        initial_sigmas = [
+            normalized_initial_sigma(variable) or CONFIGS.opt.runner_default_initial_sigma
+            for variable in active_variables
+        ]
+        optimizer = CMAESOptimizer(
+            dim=len(active_variables),
+            mean=default_vector,
+            initial_sigmas=initial_sigmas,
+            population_size=options.population_size,
+            seed=options.seed,
+        )
+        remaining = options.max_trials
+        while remaining > 0:
+            count = min(optimizer.population_size, remaining)
+            candidates = optimizer.ask(count=count)
+            candidate_scores: list[float] = []
+            for candidate in candidates:
+                candidate_payload = payload_from_vector(
+                    active_variables,
+                    candidate,
+                    base_payload=contracts.default_params,
+                    source="trial",
+                    trial_index=trial_index,
+                    metadata={"kind": "cma_es", "optimizer_state": asdict(optimizer.state())},
+                )
+                result = self.trials.run_trial(
+                    trial_index=trial_index,
+                    params_payload=candidate_payload,
+                    options=options,
+                    contracts=contracts,
+                )
+                self.reporter.append_trace(result.entry)
+                candidate_scores.append(float(result.score.score) if result.score.score is not None else 0.0)
+                best_result = self._choose_best(best_result, result, contracts)
+                trial_index += 1
+                remaining -= 1
+            optimizer.tell(candidates[: len(candidate_scores)], candidate_scores, maximize=self._maximize(contracts))
+
+        best_render_dir: Path | None = None
+        if best_result is not None:
+            best_payload = payload_for_trial(
+                best_result.params_payload,
+                source="best",
+                trial_index=int(best_result.entry["trial_index"]),
+                metadata={"selected_by": "code_agent.opt", "score": best_result.score.score},
+            )
+            write_params_payload(self.reporter.best_params_path, best_payload)
+            write_params_payload(options.current_params_path, best_payload)
+            if options.render_best:
+                best_render_dir = options.best_out_dir
+                self.trials.run_best_render(best_payload, options)
+
+        verification = self.reporter.write_verification(best_result, best_render_dir, contracts.target_spec)
+        return self.reporter.write_report(
+            contracts=contracts,
+            options=options,
+            baseline_scores=baseline_scores,
+            best_result=best_result,
+            best_render_dir=best_render_dir,
+            verification_path=self.reporter.verification_report_path if verification else None,
+            default_initial_sigma=CONFIGS.opt.runner_default_initial_sigma,
+        )
+
+    def write_failed_report(self, failure: str) -> dict[str, Any]:
+        return self.reporter.write_failed_report(failure)
+
+    def _resolve_options(self, contracts: OptContracts) -> RunOptOptions:
+        budget = contracts.opt_space.get("budget", {})
+        execution = contracts.opt_space.get("execution", {}) or {}
+        timing = load_json_object(self.contracts_dir / "timing.json") or {}
+        backend = self.config.backend or budget.get("backend") or CONFIGS.harness.default_backend
+        max_trials = int(self.config.max_trials if self.config.max_trials is not None else budget["max_trials"])
+        population_size = (
+            self.config.population_size if self.config.population_size is not None else budget.get("population_size")
+        )
+        if population_size is None:
+            population_size = default_population_size(len(contracts.active_variables))
+        seed = self.config.seed if self.config.seed is not None else budget.get("seed")
+        timeout_sec = float(
+            self.config.timeout_sec
+            if self.config.timeout_sec is not None
+            else budget.get("timeout_sec") or CONFIGS.opt.runner_timeout_sec
+        )
+        steps = _first_int(self.config.steps, execution.get("steps"), timing.get("steps"))
+        duration_sec = _first_float(self.config.duration_sec, execution.get("duration_sec"), timing.get("duration_sec"))
+        render_fps = _first_int(self.config.render_fps, execution.get("render_fps"), timing.get("render_fps"))
+        target_video_frames = _first_int(None, timing.get("target_video_frames"))
+        render_best = (
+            self.config.render_best
+            if self.config.render_best is not None
+            else bool(budget.get("render_best", CONFIGS.opt.runner_render_best))
+        )
+        baseline_trials = max(1, int(budget.get("baseline_trials", CONFIGS.opt.runner_baseline_trials)))
+        trial_root = self._workspace_path(
+            execution.get("trial_root", CONFIGS.opt.runner_trial_root),
+            "execution.trial_root",
+        )
+        best_out_dir = self._workspace_path(
+            execution.get("best_out_dir", CONFIGS.opt.runner_best_out_dir),
+            "execution.best_out_dir",
+        )
+        current_params_path = self._workspace_path(
+            execution.get("params_path", CONFIGS.opt.runner_current_params_path),
+            "execution.params_path",
+        )
+        return RunOptOptions(
+            backend=str(backend),
+            max_trials=max_trials,
+            population_size=population_size,
+            seed=seed,
+            timeout_sec=timeout_sec,
+            steps=steps,
+            duration_sec=duration_sec,
+            render_fps=render_fps,
+            target_video_frames=target_video_frames,
+            render_best=render_best,
+            baseline_trials=baseline_trials,
+            trial_root=trial_root,
+            best_out_dir=best_out_dir,
+            current_params_path=current_params_path,
+        )
+
+    def _choose_best(
+        self,
+        current_best: TrialResult | None,
+        candidate: TrialResult,
+        contracts: OptContracts,
+    ) -> TrialResult:
+        if current_best is None:
+            return candidate
+        candidate_score = candidate.score.score
+        best_score = current_best.score.score
+        if candidate_score is None:
+            return current_best
+        if best_score is None:
+            return candidate
+        if self._maximize(contracts):
+            return candidate if candidate_score > best_score else current_best
+        return candidate if candidate_score < best_score else current_best
+
+    def _maximize(self, contracts: OptContracts) -> bool:
+        return contracts.target_spec["objective"]["direction"] == "maximize"
+
+    def _workspace_path(self, value: Any, field_name: str) -> Path:
+        text = str(value)
+        path = Path(text)
+        if path.is_absolute() or ".." in path.parts:
+            raise OptContractError(f"{field_name} must be a relative path inside the case workspace.")
+        return self.case_dir / path
+
+
+def _first_int(*values: Any) -> int | None:
+    for value in values:
+        if value is None:
+            continue
+        return int(value)
+    return None
+
+
+def _first_float(*values: Any) -> float | None:
+    for value in values:
+        if value is None:
+            continue
+        return float(value)
+    return None

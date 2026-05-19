@@ -1,0 +1,59 @@
+{
+  "$id": "opt_subagent_report.schema.json",
+  "title": "Opt Codex Subagent Report",
+  "type": "object",
+  "required": [
+    "status",
+    "case_type",
+    "edited_files",
+    "optimized_variables",
+    "baseline",
+    "best",
+    "diagnosis",
+    "recommendation",
+    "evidence",
+    "opt_report_path",
+    "failures"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["success", "partial_success", "needs_more_optimization", "needs_rewrite", "failed"]
+    },
+    "case_type": { "type": ["string", "null"] },
+    "edited_files": { "type": "array", "items": { "type": "string" } },
+    "optimized_variables": { "type": "array", "items": { "type": "string" } },
+    "baseline": {
+      "type": "object",
+      "required": ["success", "score", "metrics_path", "video_path", "params_path", "summary"],
+      "properties": {
+        "success": { "type": ["boolean", "null"] },
+        "score": { "type": ["number", "null"] },
+        "metrics_path": { "type": ["string", "null"] },
+        "video_path": { "type": ["string", "null"] },
+        "params_path": { "type": ["string", "null"] },
+        "summary": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "best": {
+      "type": "object",
+      "required": ["success", "score", "metrics_path", "video_path", "params_path", "summary"],
+      "properties": {
+        "success": { "type": ["boolean", "null"] },
+        "score": { "type": ["number", "null"] },
+        "metrics_path": { "type": ["string", "null"] },
+        "video_path": { "type": ["string", "null"] },
+        "params_path": { "type": ["string", "null"] },
+        "summary": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "diagnosis": { "type": ["string", "null"] },
+    "recommendation": { "type": ["string", "null"] },
+    "evidence": { "type": "array", "items": { "type": "string" } },
+    "opt_report_path": { "type": ["string", "null"] },
+    "failures": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

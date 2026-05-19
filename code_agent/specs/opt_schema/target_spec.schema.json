@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "target_spec.schema.json",
+  "title": "Optimization Target Specification",
+  "type": "object",
+  "required": ["schema_version", "task_family", "objective"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "task_family": { "type": "string", "minLength": 1 },
+    "description": { "type": ["string", "null"] },
+    "goal": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/json_value" }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/json_value" }
+    },
+    "objective": {
+      "type": "object",
+      "required": ["type", "direction"],
+      "properties": {
+        "type": { "type": "string", "enum": ["weighted_terms", "task_specific"] },
+        "direction": { "type": "string", "enum": ["maximize", "minimize"] },
+        "failure_penalty": { "type": ["number", "null"] },
+        "terms": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/objective_term" }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "success_criteria": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/success_criterion" }
+    },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "unresolved_risks": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "objective_term": {
+      "type": "object",
+      "required": ["name", "weight", "metric_path", "transform"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+        },
+        "weight": { "type": "number" },
+        "metric_path": { "type": "string", "minLength": 1 },
+        "transform": {
+          "type": "string",
+          "enum": [
+            "identity",
+            "absolute_error",
+            "squared_error",
+            "threshold_min",
+            "threshold_max",
+            "reward_if_true",
+            "penalty_if_true",
+            "custom"
+          ]
+        },
+        "target": { "$ref": "#/$defs/json_value" },
+        "success_threshold": { "type": ["number", "null"] },
+        "description": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "success_criterion": {
+      "type": "object",
+      "required": ["name", "metric_path", "op", "threshold"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "metric_path": { "type": "string", "minLength": 1 },
+        "op": { "type": "string", "enum": ["<", "<=", ">", ">=", "==", "!="] },
+        "threshold": { "$ref": "#/$defs/json_value" },
+        "description": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "json_value": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/json_value" } },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/json_value" }
+        }
+      ]
+    }
+  }
+}

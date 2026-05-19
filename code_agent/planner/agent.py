@@ -7,7 +7,7 @@ from typing import Any
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import load_json_object
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
-from code_agent.utils.general_prompts import (
+from code_agent.prompts.planner import (
     PLANNER_ACTION_POLICY_GUIDE,
     PLANNER_GENERAL_RULES,
     planner_available_actions_section,

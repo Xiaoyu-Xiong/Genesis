@@ -6,6 +6,8 @@ Short references for the current Planner-led pipeline:
 - [Genesis Context](context.md)
 - [Evaluation](evaluation.md)
 - [Mesh Pipeline](mesh.md)
+- [Opt Agent](opt.md)
+- [Prompts](prompts.md)
 - [Scripts and Suites](scripts.md)
 - [Specs](specs.md)
 - [Status](status.md)

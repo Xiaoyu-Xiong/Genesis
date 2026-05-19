@@ -5,6 +5,7 @@ from pathlib import Path
 
 from code_agent.configs import CONFIGS
 from code_agent.context.genesis import build_genesis_context_pack
+from code_agent.opt.runner import RunOptConfig, run_optimization
 from code_agent.utils.suite import run_suite
 
 
@@ -33,6 +34,31 @@ def _cmd_build_genesis_context(args: argparse.Namespace) -> None:
     pack = build_genesis_context_pack(args.out_dir, refresh=args.refresh)
     print(f"Genesis context: {pack.markdown_path}")
     print(f"Official docs cache: {pack.docs_dir}")
+
+
+def _cmd_run_opt(args: argparse.Namespace) -> None:
+    report = run_optimization(
+        RunOptConfig(
+            case_dir=args.case_dir.resolve(),
+            target_spec_path=args.target_spec.resolve() if args.target_spec else None,
+            opt_space_path=args.opt_space.resolve() if args.opt_space else None,
+            default_params_path=args.default_params.resolve() if args.default_params else None,
+            backend=args.backend,
+            max_trials=args.max_trials,
+            population_size=args.population_size,
+            seed=args.seed,
+            timeout_sec=args.timeout_sec,
+            steps=args.steps,
+            duration_sec=args.duration_sec,
+            render_fps=args.render_fps,
+            render_best=args.render_best,
+            main_file=args.main_file,
+        )
+    )
+    report_path = args.case_dir.resolve() / "reports" / "opt_report.json"
+    best_score = report.get("best_score")
+    best_score_text = "none" if best_score is None else f"{float(best_score):.6g}"
+    print(f"Opt {report['status']}. Best score: {best_score_text}. Report: {report_path}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -66,6 +92,27 @@ def build_parser() -> argparse.ArgumentParser:
     context_parser.add_argument("--out-dir", type=Path, required=True)
     context_parser.add_argument("--refresh", action="store_true")
     context_parser.set_defaults(func=_cmd_build_genesis_context)
+
+    run_opt_parser = sub.add_parser("run-opt", help="Run the optimization agent on a generated case workspace.")
+    run_opt_parser.add_argument("--case-dir", type=Path, required=True)
+    run_opt_parser.add_argument("--target-spec", type=Path, default=None)
+    run_opt_parser.add_argument("--opt-space", type=Path, default=None)
+    run_opt_parser.add_argument("--default-params", type=Path, default=None)
+    run_opt_parser.add_argument("--main-file", default=CONFIGS.opt.runner_main_file)
+    run_opt_parser.add_argument("--backend", choices=("cpu", "gpu"), default=None)
+    run_opt_parser.add_argument("--cpu", action="store_const", const="cpu", dest="backend")
+    run_opt_parser.add_argument("--gpu", action="store_const", const="gpu", dest="backend")
+    run_opt_parser.add_argument("--max-trials", type=int, default=None)
+    run_opt_parser.add_argument("--population-size", type=int, default=None)
+    run_opt_parser.add_argument("--seed", type=int, default=None)
+    run_opt_parser.add_argument("--timeout-sec", type=float, default=None)
+    run_opt_parser.add_argument("--steps", type=int, default=None)
+    run_opt_parser.add_argument("--duration-sec", type=float, default=None)
+    run_opt_parser.add_argument("--render-fps", type=int, default=None)
+    render_best_group = run_opt_parser.add_mutually_exclusive_group()
+    render_best_group.add_argument("--render-best", action="store_true", dest="render_best", default=None)
+    render_best_group.add_argument("--no-render-best", action="store_false", dest="render_best")
+    run_opt_parser.set_defaults(func=_cmd_run_opt)
     return parser
 
 

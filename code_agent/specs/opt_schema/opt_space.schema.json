@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opt_space.schema.json",
+  "title": "Optimization Space Contract",
+  "type": "object",
+  "required": ["schema_version", "optimizer", "variables", "budget"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "optimizer": { "type": "string", "const": "cma_es" },
+    "description": { "type": ["string", "null"] },
+    "variables": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/variable" }
+    },
+    "budget": {
+      "type": "object",
+      "required": ["max_trials"],
+      "properties": {
+        "max_trials": { "type": "integer", "minimum": 1 },
+        "population_size": { "type": ["integer", "null"], "minimum": 2 },
+        "seed": { "type": ["integer", "null"] },
+        "baseline_trials": { "type": "integer", "minimum": 0 },
+        "timeout_sec": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "backend": { "type": ["string", "null"], "enum": ["gpu", "cpu", null] },
+        "render_best": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "trial_root": { "type": "string", "minLength": 1 },
+        "best_out_dir": { "type": "string", "minLength": 1 },
+        "params_path": { "type": "string", "minLength": 1 },
+        "steps": { "type": ["integer", "null"], "minimum": 0 },
+        "duration_sec": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "render_fps": { "type": ["integer", "null"], "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "unresolved_risks": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "variable": {
+      "type": "object",
+      "required": ["name", "type", "default", "bounds", "scale", "owner", "description"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+        },
+        "type": { "type": "string", "const": "float" },
+        "default": { "type": "number" },
+        "bounds": {
+          "type": "array",
+          "prefixItems": [{ "type": "number" }, { "type": "number" }],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "scale": { "type": "string", "enum": ["linear", "log"] },
+        "owner": { "type": "string", "enum": ["scene", "body", "action", "rendering"] },
+        "description": { "type": "string", "minLength": 1 },
+        "group": {
+          "type": ["string", "null"],
+          "enum": ["timing", "target", "control", "material", "contact", "solver", "other", null]
+        },
+        "units": { "type": ["string", "null"] },
+        "active": { "type": "boolean" },
+        "initial_sigma": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "safe_margin": { "type": ["string", "null"] },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "scale": { "const": "log" } }, "required": ["scale"] },
+          "then": {
+            "properties": {
+              "default": { "exclusiveMinimum": 0 },
+              "bounds": {
+                "prefixItems": [
+                  { "type": "number", "exclusiveMinimum": 0 },
+                  { "type": "number", "exclusiveMinimum": 0 }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

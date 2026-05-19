@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opt_report.schema.json",
+  "title": "Optimization Report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "status",
+    "optimizer",
+    "num_trials",
+    "baseline_score",
+    "best_trial",
+    "best_score",
+    "best_params_path",
+    "trace_path"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "status": { "type": "string", "enum": ["completed", "failed", "inconclusive"] },
+    "optimizer": { "type": "string", "const": "cma_es" },
+    "num_trials": { "type": "integer", "minimum": 0 },
+    "baseline_score": { "type": ["number", "null"] },
+    "best_trial": { "type": ["integer", "null"], "minimum": 0 },
+    "best_score": { "type": ["number", "null"] },
+    "best_params_path": { "type": ["string", "null"] },
+    "best_render_dir": { "type": ["string", "null"] },
+    "trace_path": { "type": "string", "minLength": 1 },
+    "verification_report_path": { "type": ["string", "null"] },
+    "budget": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/json_value" }
+    },
+    "summary": { "type": ["string", "null"] },
+    "failures": { "type": "array", "items": { "type": "string" } },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "json_value": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/json_value" } },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/json_value" }
+        }
+      ]
+    }
+  }
+}

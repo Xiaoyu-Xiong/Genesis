@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opt_trace_entry.schema.json",
+  "title": "Optimization Trace Entry",
+  "type": "object",
+  "required": ["schema_version", "trial_index", "status", "params_path", "score", "duration_sec", "objective"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "trial_index": { "type": "integer", "minimum": 0 },
+    "status": { "type": "string", "enum": ["completed", "failed", "timed_out", "skipped", "invalid"] },
+    "params_path": { "type": "string", "minLength": 1 },
+    "artifacts_dir": { "type": ["string", "null"] },
+    "metrics_path": { "type": ["string", "null"] },
+    "execution_report_path": { "type": ["string", "null"] },
+    "score": { "type": ["number", "null"] },
+    "duration_sec": { "type": "number", "minimum": 0 },
+    "exit_code": { "type": ["integer", "null"] },
+    "objective": { "$ref": "#/$defs/score_report" },
+    "errors": { "type": "array", "items": { "type": "string" } },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "score_report": {
+      "type": "object",
+      "required": ["score", "success", "terms", "measured"],
+      "properties": {
+        "score": { "type": ["number", "null"] },
+        "success": { "type": "boolean" },
+        "terms": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/json_value" }
+        },
+        "measured": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/json_value" }
+        },
+        "failure_penalty": { "type": ["number", "null"] },
+        "failure_reason": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "json_value": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/json_value" } },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/json_value" }
+        }
+      ]
+    }
+  }
+}

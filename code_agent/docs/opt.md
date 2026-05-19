@@ -1,0 +1,652 @@
+# Opt Codex Subagent
+
+`code_agent/opt/` is the toolbox and protocol layer for a dedicated Opt Codex subagent. The subagent is responsible for
+optimization-related work on generated Genesis cases when, and only when, Planner decides that parameter optimization is
+worth invoking.
+
+The important architectural choice is that optimization strategy should live in the Opt subagent's reasoning, not in a
+hard-coded pipeline. The repository should provide reliable tools, schemas, runners, reports, and examples. The Opt
+subagent decides which parameters to expose, which optimizer to use, how many trials to run, whether to revise the search
+space, and whether the case should be sent back to Planner for structural repair.
+
+## Core Principle
+
+The normal generation pipeline should remain valid:
+
+```text
+Planner -> scene/body/action/rendering agents -> execution/critic
+```
+
+Optimization is an optional branch:
+
+```text
+Planner
+  -> generated case
+  -> optional Opt Codex subagent
+  -> Planner accepts, asks for more optimization, or routes a rewrite
+```
+
+This means simple cases do not pay an optimization cost, while contact-rich or parameter-sensitive cases can receive a
+specialized optimization pass.
+
+## What Opt Is
+
+The Opt subagent is:
+
+- A Codex subagent specialized for optimization, parameterization, trial execution, and diagnosis.
+- A reader and editor of generated case workspaces.
+- A user of optimizer backends such as CMA-ES.
+- A producer of evidence: baseline metrics, trial traces, best parameters, rendered best videos, and diagnosis reports.
+- A source of recommendations back to Planner.
+
+The Opt subagent is not:
+
+- A replacement for Planner.
+- A replacement for the original scene/body/action/rendering agents.
+- A hidden task rewriter.
+- A mechanism for adding non-physical shortcuts, hidden attachments, or post-initialization state writes.
+- A final judge of task acceptance. Planner and Critic still own final acceptance.
+
+## Planner Responsibilities
+
+Planner decides whether to call Opt and how to use the result.
+
+Planner should call Opt when:
+
+- The generated case is runnable but behavior depends on sensitive constants.
+- Contact, grasping, material response, PD gains, friction, damping, timing, or release placement are likely limiting
+  success.
+- The prompt explicitly asks for inverse design, controllability, tuning, or target matching.
+- A critic or execution report suggests that failure is caused by parameters rather than missing entities or invalid
+  code structure.
+
+Planner may skip Opt when:
+
+- The default generated rollout already satisfies the task.
+- The failure is clearly structural, such as missing required bodies, invalid assets, missing control handles, or an
+  impossible gripper geometry.
+- The task is purely visual or rendering-only.
+- The optimization budget is too small to produce useful evidence.
+
+Planner should provide Opt with:
+
+- The case directory.
+- The original prompt and Planner intent.
+- Success criteria and non-negotiable physical constraints.
+- Allowed and forbidden edits.
+- Optimization budget and backend preference.
+- Any specific suspicion, such as "release placement is failing" or "material stiffness looks wrong".
+
+Planner should decide after Opt returns:
+
+- Accept the optimized best parameters and continue to final critic.
+- Ask Opt for another optimization pass with a revised budget or narrower goal.
+- Ask the original agents to rewrite code or assets based on Opt's diagnosis.
+- Mark the case inconclusive or failed if optimization cannot repair it safely.
+
+## Opt Subagent Responsibilities
+
+The Opt subagent owns the optimization pass end to end.
+
+It should:
+
+- Inspect generated `src/scene.py`, `src/body.py`, `src/action.py`, `src/rendering.py`, `src/main.py`, existing
+  contracts, artifacts, reports, and metrics.
+- Identify sensitive values that are safe to optimize.
+- Decide whether parameters belong to `scene`, `body`, `action`, or occasionally `rendering`.
+- Patch generated code so it can read opt parameters while remaining runnable without Opt.
+- Emit or revise `contracts/target_spec.json`, `contracts/opt_space.json`, and
+  `contracts/default_opt_params.json`.
+- Choose an optimizer backend. Version 1 has CMA-ES available; future versions may add random search, Bayesian
+  optimization, trajectory optimization, differentiable simulation, or RL.
+- Run baseline and candidate rollouts, usually without render.
+- Render baseline and best results when requested or when visual evidence is needed.
+- Write trace and report artifacts.
+- Diagnose whether remaining failure is parameter-level, objective-level, metric-level, or structural.
+- Return a concise structured result to Planner.
+
+It may patch generated modules, but it must keep edits local and explain them. It should not silently transform a task
+into a different task.
+
+## Current Code Layout
+
+`code_agent/opt/` now separates the human/manual CLI entry point, the Planner-facing agent harness, and reusable
+optimization mechanics:
+
+- `cli.py`: temporary command-line facade for early debugging. It parses flags such as `--case-dir`, `--max-rollouts`,
+  and `--render-best`, constructs an `OptAgentRequest`, calls `run_opt_agent`, and prints the resulting JSON. It should
+  not contain prompt text, Codex execution logic, report parsing, or optimization policy.
+- `agent.py`: programmatic Planner-facing harness. It builds the Opt prompt, invokes the real Codex Opt subagent,
+  parses the final JSON, normalizes it into `OptAgentResult`, and writes `reports/opt_subagent_report.json`. It should
+  not parse CLI arguments or hard-code case-specific parameter choices.
+- `code_agent/prompts/opt.py`: the Opt subagent role prompt, including inspection duties, safety constraints, allowed
+  edits, runner commands, and final report requirements.
+- `types.py`: Planner-to-Opt request and Opt-to-Planner result dataclasses.
+- `contracts.py` and `objective.py`: opt contract validation, vector/payload conversion, and metric scoring.
+- `runner.py`: low-level numerical optimization loop. It loads contracts, resolves budget/runtime options, runs
+  baseline and CMA-ES trials, selects the best result, and delegates rollout/report mechanics.
+- `trials.py`: single-rollout execution helper. It writes current opt params, runs generated `src/main.py`, loads
+  metrics, scores a trial, and optionally renders the best result.
+- `reports.py`: trace, `opt_report.json`, and `verification_report.json` writing.
+- `optimizers/cma_es.py`: the CMA-ES backend. Future optimizer backends should live under `optimizers/` as sibling
+  modules.
+- `code_agent/configs.py`: shared Opt defaults under `CONFIGS.opt`, including manual Opt-agent request defaults, runner
+  timeout/render/path defaults, fallback normalized sigma, and CMA-ES population-size rule constants.
+
+This layout intentionally keeps parameterization decisions out of Python hard-coded adapters. The Codex Opt subagent is
+responsible for inspecting each generated workspace, deciding whether and how to expose variables, and calling the
+generic runner when appropriate.
+
+## Editing Boundaries
+
+Opt may usually edit:
+
+- `src/action.py` to expose timing, target, controller, PD, force, and schedule parameters.
+- `src/body.py` to expose material, density, friction, restitution, geometry-scale, initial placement, and object
+  parameter hooks.
+- `src/scene.py` to expose carefully bounded solver/contact parameters when the value is a genuine simulation setting.
+- `contracts/*.json` for optimization specs and parameter payloads.
+- `reports/*.json` and optimization artifacts.
+
+Opt should avoid editing:
+
+- `src/rendering.py`, unless the task explicitly includes camera or visual-objective optimization.
+- Generated assets, except for tiny parameterization hooks. If the asset or mechanism is structurally wrong, Opt should
+  report `needs_rewrite` to Planner.
+- Task text, success semantics, or entity set.
+
+Opt must not:
+
+- Add hidden constraints, attachments, suction, teleportation, or direct dynamic-object state writes after
+  initialization unless the original task explicitly asks for them.
+- Remove required physical participants.
+- Replace an articulated, deformable, or coupled simulation with a simpler fake.
+- Overwrite unrelated user or worker changes.
+
+## Planner To Opt Request
+
+Planner should call the Opt subagent with a structured brief. A representative request is:
+
+```json
+{
+  "case_dir": "code_agent/workspaces/.../fetch_robot_rigid_grasp",
+  "original_prompt": "Create a Fetch-style manipulator grasping and releasing an orange rigid ball into a dish.",
+  "planner_intent": "Optimize generated behavior if parameters, not structure, appear to limit success.",
+  "allowed_edits": [
+    "src/action.py",
+    "src/body.py only for material/contact hooks",
+    "contracts/*.json",
+    "reports/*.json",
+    "artifacts/opt_*"
+  ],
+  "forbidden_changes": [
+    "Do not change task semantics.",
+    "Do not directly write dynamic object state after initialization.",
+    "Do not add hidden constraints or attachments.",
+    "Do not replace generated assets without reporting needs_rewrite."
+  ],
+  "optimization_budget": {
+    "max_rollouts": 20,
+    "backend": "gpu",
+    "render_baseline": true,
+    "render_best": true
+  },
+  "success_criteria": [
+    "The object is manipulated by physical contact.",
+    "The target behavior is visible in metrics and video.",
+    "The optimized case preserves the original prompt constraints."
+  ]
+}
+```
+
+The request is guidance, not a rigid script. The Opt subagent can still decide how to parameterize, whether to run
+baseline first, which optimizer to choose, and when to stop.
+
+## Opt To Planner Result
+
+Opt should return a structured summary:
+
+```json
+{
+  "status": "success",
+  "edited_files": [
+    "src/action.py",
+    "contracts/target_spec.json",
+    "contracts/opt_space.json",
+    "contracts/default_opt_params.json"
+  ],
+  "optimized_variables": [
+    "target.grasp_z_offset_m",
+    "target.release_y_offset_m",
+    "gripper.closed_command_m"
+  ],
+  "baseline": {
+    "success": false,
+    "score": -0.48,
+    "metrics_path": "artifacts/opt_baseline/metrics.json",
+    "video_path": "artifacts/opt_baseline/render.mp4",
+    "params_path": "contracts/default_opt_params.json",
+    "summary": "Baseline misses the lift/release gates."
+  },
+  "best": {
+    "success": true,
+    "score": 5.85,
+    "params_path": "contracts/best_opt_params.json",
+    "metrics_path": "artifacts/opt_best/metrics.json",
+    "video_path": "artifacts/opt_best/render.mp4",
+    "summary": "Optimized rollout completes the target behavior."
+  },
+  "diagnosis": "The case was parameter-limited. Grasp, lift, release, and final placement pass after tuning.",
+  "recommendation": "Planner can proceed to critic/final acceptance."
+}
+```
+
+Allowed statuses:
+
+- `success`: optimized result satisfies metrics and available visual evidence.
+- `partial_success`: optimization improved behavior but not enough for final acceptance.
+- `needs_more_optimization`: current evidence suggests another opt pass is useful.
+- `needs_rewrite`: parameter optimization is not the right fix; Planner should route a rewrite.
+- `failed`: Opt could not run, contracts are invalid, rollouts fail, or evidence is inconclusive.
+
+`baseline` and `best` are fixed-field evidence objects for Codex structured output compatibility. Use `null` for
+unavailable fields. Put extra details in `summary` or `evidence` instead of adding ad hoc fields.
+
+For `needs_rewrite`, Opt should include owner guidance through the existing schema fields:
+
+```json
+{
+  "status": "needs_rewrite",
+  "case_type": "rigid_grasp",
+  "edited_files": [],
+  "optimized_variables": [],
+  "baseline": {
+    "success": false,
+    "score": -0.73,
+    "metrics_path": "artifacts/opt_agent_baseline/metrics.json",
+    "video_path": "artifacts/opt_agent_baseline/render.mp4",
+    "params_path": "contracts/default_opt_params.json",
+    "summary": "Baseline never reaches opposing contact."
+  },
+  "best": {
+    "success": null,
+    "score": null,
+    "metrics_path": null,
+    "video_path": null,
+    "params_path": null,
+    "summary": null
+  },
+  "diagnosis": "The gripper geometry cannot enclose the ball; likely owner is body/action rather than parameter tuning.",
+  "evidence": [
+    "Pad-to-ball distance never enters tolerance.",
+    "Video shows one-sided approach with no opposing contact.",
+    "Changing controller targets does not improve contact."
+  ],
+  "opt_report_path": null,
+  "failures": ["structural_gripper_geometry"],
+  "recommendation": "Ask body/action agents to regenerate gripper geometry and control handles."
+}
+```
+
+## Parameterization Scope
+
+Opt can expose any bounded scalar that is physically meaningful and read at the correct simulation lifecycle point.
+
+Common `action.py` variables:
+
+- Phase timings and schedule fractions.
+- End-effector, base, wrist, gripper, plate, or tool target positions.
+- PD gains such as `kp`, `kv`, damping, motor gains, force limits, velocity limits, torque scales, impedance gains.
+- External force or impulse magnitudes when the task allows them.
+
+Common `body.py` variables:
+
+- Object density, mass scale, friction, restitution, damping.
+- FEM Young's modulus, Poisson ratio, material damping, bending/rod stiffness, plasticity parameters.
+- Geometry scale and initial placement, if changing them preserves prompt semantics.
+- Contact material parameters.
+
+Common `scene.py` variables:
+
+- Timestep, substeps, solver tolerances, contact stiffness, contact distance, IPC/contact settings.
+- These should be bounded tightly and used only when they represent solver tuning rather than task cheating.
+
+Use `scale: "log"` for positive variables spanning orders of magnitude, such as stiffness, damping, density, solver
+tolerances, and many controller gains. Use `scale: "linear"` for signed offsets, schedule fractions, moderate friction
+ranges, and target positions.
+
+## Optimizer Backends
+
+Version 1 exposes CMA-ES.
+
+CMA-ES is useful because:
+
+- It does not need gradients.
+- It tolerates noisy metrics better than grid search.
+- It fits low-dimensional continuous tuning.
+- It can tune geometry, control, material, contact, and solver scalars through one contract format.
+
+CMA-ES details currently supported:
+
+- Variables are normalized to `[0, 1]`.
+- `population_size` may be explicit or auto-selected.
+- If omitted, `population_size` uses:
+
+```text
+canonical = CONFIGS.opt.cma_es_population_base
+          + floor(CONFIGS.opt.cma_es_population_log_multiplier * log(dim))
+if dim <= CONFIGS.opt.cma_es_low_dim_threshold:
+    population_size = clamp(
+        canonical,
+        CONFIGS.opt.cma_es_low_dim_min_population,
+        CONFIGS.opt.cma_es_low_dim_max_population,
+    )
+else:
+    population_size = canonical
+```
+
+- Each variable may define `initial_sigma` in normalized `[0, 1]` coordinates.
+- Variables without `initial_sigma` use `CONFIGS.opt.runner_default_initial_sigma` (currently `0.25`).
+- The backend initializes covariance with per-variable sigmas and then adapts normally.
+
+These settings are tools for Opt, not a fixed strategy. Opt may choose explicit values, run small probe batches, revise
+the search space, or ask Planner for a rewrite.
+
+## Case Contracts
+
+Optimization-enabled cases use these files when Opt has prepared or revised the workspace. The runner paths below are
+defaults from `CONFIGS.opt` unless `opt_space.execution` overrides them:
+
+```text
+contracts/target_spec.json
+contracts/opt_space.json
+contracts/default_opt_params.json
+contracts/current_opt_params.json
+contracts/best_opt_params.json
+
+artifacts/opt_trials/trial_000/
+artifacts/opt_trials/trial_001/
+artifacts/opt_best/
+
+reports/opt_trace.jsonl
+reports/opt_report.json
+reports/verification_report.json
+```
+
+### `contracts/target_spec.json`
+
+Defines target behavior, objective terms, and success criteria.
+
+```json
+{
+  "schema_version": 1,
+  "task_family": "soft_ball_compression",
+  "goal": {
+    "final_height": 0.12,
+    "final_lateral_spread": 0.24
+  },
+  "objective": {
+    "type": "weighted_terms",
+    "direction": "maximize",
+    "failure_penalty": 10.0,
+    "terms": [
+      {
+        "name": "height_match",
+        "weight": -1.0,
+        "metric_path": "deformation.final_height",
+        "transform": "absolute_error",
+        "target": 0.12
+      }
+    ]
+  },
+  "success_criteria": [
+    {
+      "name": "height_tolerance",
+      "metric_path": "deformation.final_height_error",
+      "op": "<=",
+      "threshold": 0.01
+    }
+  ]
+}
+```
+
+### `contracts/opt_space.json`
+
+Defines bounded variables and optimization budget. Opt may create this from scratch or revise one generated by another
+agent.
+
+```json
+{
+  "schema_version": 1,
+  "optimizer": "cma_es",
+  "variables": [
+    {
+      "name": "control.plate_target_z",
+      "type": "float",
+      "default": 0.12,
+      "bounds": [0.09, 0.16],
+      "scale": "linear",
+      "owner": "action",
+      "group": "control",
+      "units": "m",
+      "initial_sigma": 0.2,
+      "description": "Lowest target height of the press plate during compression."
+    },
+    {
+      "name": "material.youngs_modulus",
+      "type": "float",
+      "default": 80000.0,
+      "bounds": [10000.0, 300000.0],
+      "scale": "log",
+      "owner": "body",
+      "group": "material",
+      "units": "Pa",
+      "initial_sigma": 0.35,
+      "description": "FEM elastic stiffness for the soft ball."
+    }
+  ],
+  "budget": {
+    "max_trials": 24,
+    "population_size": null,
+    "seed": 0
+  }
+}
+```
+
+### `contracts/default_opt_params.json`
+
+Stores the default parameter payload used by the baseline rollout.
+
+### `contracts/current_opt_params.json`
+
+Written by Opt before each trial. Generated modules should read this file when present.
+
+### `contracts/best_opt_params.json`
+
+Written after optimization. Planner, Critic, and final renders should use this parameter set unless Planner explicitly
+requests another opt pass.
+
+## Generated Module Expectations
+
+Generated modules should remain runnable without Opt.
+
+Recommended behavior:
+
+- If `contracts/current_opt_params.json` exists, read it.
+- If it does not exist, fall back to `contracts/default_opt_params.json`.
+- If neither exists, fall back to local safe defaults.
+- Never require Opt for normal `run-suite` execution.
+- Record the loaded opt params in `metrics.json`.
+- Avoid stale trial params. Final renders should use `best_opt_params.json` or a copied current payload selected by Opt.
+
+Ownership guidance:
+
+- `scene.py` owns solver/contact lifecycle parameters.
+- `body.py` owns material, geometry, initial placement, density, friction, and object parameter hooks.
+- `action.py` owns policy schedule, phase timings, trajectory targets, PD gains, force limits, and control parameters.
+- `rendering.py` should usually stay out of version 1 optimization.
+
+## Validation Rules
+
+Formal schemas live in `code_agent/specs/opt_schema/`:
+
+- `target_spec.schema.json`
+- `opt_space.schema.json`
+- `opt_params.schema.json`
+- `opt_trace_entry.schema.json`
+- `opt_report.schema.json`
+- `verification_report.schema.json`
+
+Every variable must have:
+
+- `name`
+- `type`
+- `default`
+- `bounds`
+- `scale`
+- `owner`
+- `description`
+
+Supported in version 1:
+
+- `type: "float"`
+- `scale: "linear"`
+- `scale: "log"` for positive-valued variables
+- owners `scene`, `body`, `action`, `rendering`, with most variables expected in `body` or `action`
+
+Rejected in version 1:
+
+- Unbounded variables.
+- Per-step action arrays.
+- Categorical variables.
+- Variables that enable hidden constraints, direct target-following, or direct post-initialization object state writes.
+- Variables with defaults outside bounds.
+- Log-scale variables with non-positive bounds.
+- Variables whose effects cannot be observed in trial metrics or visual evidence.
+
+## Reports
+
+### `reports/opt_trace.jsonl`
+
+One JSON object per trial:
+
+```json
+{
+  "schema_version": 1,
+  "trial_index": 0,
+  "status": "completed",
+  "params_path": "artifacts/opt_trials/trial_000/opt_params.json",
+  "artifacts_dir": "artifacts/opt_trials/trial_000",
+  "metrics_path": "artifacts/opt_trials/trial_000/metrics.json",
+  "score": 0.52,
+  "objective": {
+    "score": 0.52,
+    "success": false,
+    "terms": {},
+    "measured": {}
+  },
+  "duration_sec": 18.4,
+  "exit_code": 0
+}
+```
+
+### `reports/opt_report.json`
+
+Final optimization summary:
+
+```json
+{
+  "schema_version": 1,
+  "status": "completed",
+  "optimizer": "cma_es",
+  "num_trials": 24,
+  "baseline_score": 0.41,
+  "best_trial": 17,
+  "best_score": 0.91,
+  "best_params_path": "contracts/best_opt_params.json",
+  "best_render_dir": "artifacts/opt_best",
+  "trace_path": "reports/opt_trace.jsonl",
+  "verification_report_path": "reports/verification_report.json"
+}
+```
+
+### `reports/verification_report.json`
+
+Task-oriented comparison between target and best result:
+
+```json
+{
+  "schema_version": 1,
+  "success": true,
+  "target": {
+    "final_height": 0.12
+  },
+  "measured": {
+    "final_height": 0.126
+  },
+  "terms": {
+    "height_match": -0.006
+  },
+  "score": 0.91,
+  "best_trial": 17
+}
+```
+
+## Available Entry Points
+
+The current implementation provides a temporary manual CLI for debugging the Opt agent before full Planner integration:
+
+```text
+uv run python -m code_agent.opt.cli --case-dir path/to/case --backend gpu --max-rollouts 24
+```
+
+Useful debugging flags:
+
+```text
+--no-render-baseline
+--no-render-best
+--timeout-sec 300
+--steps 300
+--duration-sec 10
+```
+
+The lower-level optimization runner is still available through `code_agent.cli run-opt` after a case already has valid
+Opt contracts and parameter hooks:
+
+```text
+uv run python -m code_agent.cli run-opt --case-dir path/to/case --gpu --max-trials 24
+```
+
+Useful runner flags:
+
+```text
+--no-render-best
+--timeout-sec 300
+--population-size 6
+--seed 0
+--steps 300
+```
+
+`code_agent.opt.agent.run_opt_agent` is the Planner-facing API that invokes Codex. `code_agent.opt.cli` is only a thin
+manual wrapper around that API. The `code_agent.cli run-opt` entry point does not invoke Codex; it only runs the
+numerical optimizer after the generated workspace has valid opt contracts and parameter hooks.
+
+## Critical Guidance
+
+This design intentionally avoids hard-coding optimization strategy into the pipeline.
+
+Do not make Planner or the runner assume a fixed sequence such as:
+
+```text
+baseline -> CMA-ES -> staged restart -> final render
+```
+
+Instead:
+
+- Planner decides whether Opt is needed and what constraints matter.
+- Opt decides how to parameterize and optimize based on the generated case and evidence.
+- The runner and schemas provide dependable mechanics.
+- Critic and Planner decide whether the result should be accepted.
+
+The intelligence should live in the Codex agents' reasoning over code, metrics, videos, and reports. The repository
+should make that reasoning executable and auditable.

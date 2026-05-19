@@ -12,6 +12,6 @@
 - `execution.py`: runs generated projects through uv and serializes local Genesis subprocesses with a process lock.
 - `local_execution.py`: captures stdout/stderr, execution metadata, and artifact paths.
 - `timing.py`: resolves Planner timing plus CLI overrides.
-- `general_prompts.py`: shared Planner/Writer/Critic prompt contracts.
 
 Generated workers should not run Genesis or mutate the environment directly; execution goes through these utilities.
+Prompt text and prompt builders live in `code_agent/prompts/`, not `utils/`.

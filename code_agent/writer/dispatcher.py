@@ -10,7 +10,7 @@ from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_code
 from code_agent.configs import CONFIGS
 
 from . import action, body, rendering, scene
-from code_agent.utils.general_prompts import FEM_IPC_API_GUIDE, RIGID_API_GUIDE, WORKER_COMMON_RULES
+from code_agent.prompts.worker import FEM_IPC_API_GUIDE, RIGID_API_GUIDE, WORKER_COMMON_RULES
 
 from .common import WorkerDispatchResult, WorkerRole, WorkerSpec
 

@@ -11,15 +11,18 @@ class CodexConfigs:
     planner_model: str = "gpt-5.5"
     worker_model: str = "gpt-5.5"
     critic_model: str = "gpt-5.5"
+    opt_model: str = "gpt-5.5"
     reasoning_effort: str = "xhigh"
     service_tier: Literal["fast", "standard"] | None = "standard"
     planner_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     critic_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     worker_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
+    opt_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
     ask_for_approval: Literal["untrusted", "on-request", "never"] = "never"
     planner_timeout_sec: float = 1500.0
     worker_timeout_sec: float = 1500.0
     critic_timeout_sec: float = 1500.0
+    opt_timeout_sec: float = 3600.0
 
 
 @dataclass(slots=True, frozen=True)
@@ -32,6 +35,29 @@ class HarnessConfigs:
     execution_timeout_sec: float = 1000.0
     command_timeout_sec: float = 300.0
     default_backend: str = "gpu"
+
+
+@dataclass(slots=True, frozen=True)
+class OptConfigs:
+    """Static defaults for Opt agent requests and low-level numerical optimization."""
+
+    agent_backend: Literal["cpu", "gpu"] = "gpu"
+    agent_timeout_sec: float = 1000.0
+    agent_render_baseline: bool = True
+    agent_render_best: bool = True
+    runner_timeout_sec: float = 1000.0
+    runner_render_best: bool = True
+    runner_baseline_trials: int = 1
+    runner_default_initial_sigma: float = 0.25
+    runner_main_file: str = "src/main.py"
+    runner_trial_root: str = "artifacts/opt_trials"
+    runner_best_out_dir: str = "artifacts/opt_best"
+    runner_current_params_path: str = "contracts/current_opt_params.json"
+    cma_es_population_base: int = 4
+    cma_es_population_log_multiplier: float = 3.0
+    cma_es_low_dim_threshold: int = 8
+    cma_es_low_dim_min_population: int = 6
+    cma_es_low_dim_max_population: int = 8
 
 
 @dataclass(slots=True, frozen=True)
@@ -92,7 +118,9 @@ class IPCConfigs:
     ipc_contact_resistance: float = 3e6
     ipc_contact_eps_velocity: float = 0.01
     ipc_contact_constitution: Literal["ipc", "al-ipc"] = "ipc"
-    ipc_collision_detection_method: Literal["info_stackless_bvh", "stackless_bvh", "linear_bvh"] | None = "info_stackless_bvh"
+    ipc_collision_detection_method: Literal["info_stackless_bvh", "stackless_bvh", "linear_bvh"] | None = (
+        "info_stackless_bvh"
+    )
     ipc_cfl_enable: bool | None = True
     ipc_sanity_check_enable: bool | None = True
     ipc_constraint_strength_translation: float = 10
@@ -183,6 +211,7 @@ class XMLAssetConfigs:
 class Configs:
     codex: CodexConfigs
     harness: HarnessConfigs
+    opt: OptConfigs
     runtime: RuntimeConfigs
     deformable: DeformableConfigs
     ipc: IPCConfigs
@@ -195,6 +224,7 @@ class Configs:
 CONFIGS = Configs(
     codex=CodexConfigs(),
     harness=HarnessConfigs(),
+    opt=OptConfigs(),
     runtime=RuntimeConfigs(),
     deformable=DeformableConfigs(),
     ipc=IPCConfigs(),

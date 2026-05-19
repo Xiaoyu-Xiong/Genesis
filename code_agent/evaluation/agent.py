@@ -8,13 +8,13 @@ from typing import Any
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import load_json_object
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
-from code_agent.utils.general_prompts import (
+from code_agent.prompts.common import SOURCE_AWARE_REPAIR_GUIDE
+from code_agent.prompts.critic import (
     CRITIC_ASSET_EVALUATION_GUIDE,
     CRITIC_DECISION_GUIDE,
     CRITIC_EVIDENCE_READING_GUIDE,
     CRITIC_GENERAL_RULES,
     CRITIC_VISUAL_EVIDENCE_GUIDE,
-    SOURCE_AWARE_REPAIR_GUIDE,
 )
 
 PROMPT_TEXT_LIMITS = {

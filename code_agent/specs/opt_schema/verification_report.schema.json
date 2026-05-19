@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "verification_report.schema.json",
+  "title": "Optimization Verification Report",
+  "type": "object",
+  "required": ["schema_version", "success", "score", "target", "measured", "terms"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "success": { "type": "boolean" },
+    "score": { "type": ["number", "null"] },
+    "target": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/json_value" }
+    },
+    "measured": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/json_value" }
+    },
+    "terms": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/json_value" }
+    },
+    "best_trial": { "type": ["integer", "null"], "minimum": 0 },
+    "best_params_path": { "type": ["string", "null"] },
+    "best_render_dir": { "type": ["string", "null"] },
+    "failure_reason": { "type": ["string", "null"] },
+    "warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "json_value": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/json_value" } },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/json_value" }
+        }
+      ]
+    }
+  }
+}

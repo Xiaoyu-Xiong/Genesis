@@ -1,7 +1,8 @@
 # Specs
 
 `code_agent/specs/` contains JSON schemas for Planner actions, generated plans, worker reports, asset manifests,
-execution reports, critic reports, and persisted episode state. They are runtime contracts, not a simulation IR.
+execution reports, critic reports, persisted episode state, and the first optimization contracts. They are runtime
+contracts, not a simulation IR.
 
 Current Planner actions:
 
@@ -37,3 +38,16 @@ The contract provides FEM material ranges/defaults for `E`, `nu`, and `rho`, plu
 `fem_model`, hydroelastic/contact-resistance settings, tet resolution, precision, and IPC solver/contact parameters.
 It intentionally does not provide a `fem_friction_mu` override: generated body code must choose explicit
 task-appropriate FEM `friction_mu` values per material.
+
+Optimization contract schemas live under `code_agent/specs/opt_schema/`:
+
+- `target_spec.schema.json`: task target, objective terms, and success criteria.
+- `opt_space.schema.json`: CMA-ES search variables, defaults, bounds, ownership, and trial budget.
+- `opt_params.schema.json`: structured default/current/best parameter payloads consumed by generated modules.
+- `opt_trace_entry.schema.json`: one JSONL record per optimization trial.
+- `opt_report.schema.json`: optimization summary, baseline score, best trial, and report paths.
+- `opt_subagent_report.schema.json`: structured final output from the Codex Opt subagent to Planner.
+- `verification_report.schema.json`: best-result comparison against the target spec.
+
+These schemas define the parameter optimization interface. The current Opt entry point invokes a Codex subagent that can
+prepare generated modules/contracts and call the lower-level optimizer runner.

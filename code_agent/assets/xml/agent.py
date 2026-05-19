@@ -13,7 +13,7 @@ from code_agent.assets.xml.validation_core.manifest import manifest_entry_from_x
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import dump_json
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
-from code_agent.utils.general_prompts import PHYSICAL_CAUSALITY_CONTRACT, SCALE_POLICY_GUIDE
+from code_agent.prompts.common import PHYSICAL_CAUSALITY_CONTRACT, SCALE_POLICY_GUIDE
 
 
 def generate_xml_asset(
