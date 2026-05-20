@@ -140,6 +140,7 @@ def run_suite(
     render_fps: int | None = None,
     deformable_enabled: bool | None = None,
     ipc_enabled: bool | None = None,
+    opt_enabled: bool | None = None,
 ) -> dict[str, object]:
     tasks_file = tasks_file.resolve()
     out_dir = out_dir.resolve()
@@ -154,6 +155,7 @@ def run_suite(
     effective_ipc_enabled = effective_deformable_enabled or (
         CONFIGS.ipc.enabled if ipc_enabled is None else bool(ipc_enabled)
     )
+    effective_opt_enabled = CONFIGS.opt.enabled if opt_enabled is None else bool(opt_enabled)
     genesis_context = build_genesis_context_pack(out_dir)
     max_workers = _resolve_max_parallel_cases(num_cases=len(cases), max_parallel_cases=max_parallel_cases)
     started_at = time.time()
@@ -169,6 +171,7 @@ def run_suite(
         "render_fps": render_fps,
         "deformable_enabled": effective_deformable_enabled,
         "ipc_enabled": effective_ipc_enabled,
+        "opt_enabled": effective_opt_enabled,
         "max_parallel_cases": max_workers,
         "genesis_execution_lock": {
             "scope": "all run_generated_simulation calls in this Python process, plus a per-user /tmp file lock",
@@ -201,6 +204,7 @@ def run_suite(
                 render_fps=render_fps,
                 deformable_enabled=effective_deformable_enabled,
                 ipc_enabled=effective_ipc_enabled,
+                opt_enabled=effective_opt_enabled,
             ): index
             for index, case in enumerate(cases)
         }
@@ -252,6 +256,7 @@ def _run_case(
     render_fps: int | None,
     deformable_enabled: bool,
     ipc_enabled: bool,
+    opt_enabled: bool,
 ) -> dict[str, Any]:
     case_dir = out_dir / case.case_id
     case_dir.mkdir(parents=True, exist_ok=True)
@@ -271,6 +276,7 @@ def _run_case(
             render_fps=render_fps,
             deformable_enabled=deformable_enabled,
             ipc_enabled=ipc_enabled,
+            opt_enabled=opt_enabled,
         )
     )
     return session.run()

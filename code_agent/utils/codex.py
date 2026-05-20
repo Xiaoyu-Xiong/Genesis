@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import signal
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
+from code_agent.assets.builtin_guard import builtin_asset_denied_roots
 from code_agent.configs import CONFIGS
 
 CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
@@ -39,6 +42,8 @@ class CodexExecRequest:
     service_tier: Literal["fast", "standard"] | None = CONFIGS.codex.service_tier
     timeout_sec: float | None = None
     extra_args: tuple[str, ...] = ()
+    hide_builtin_assets: bool = CONFIGS.codex.hide_builtin_assets_from_agents
+    writable_roots: tuple[Path, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -107,7 +112,7 @@ def build_codex_exec_command(request: CodexExecRequest, *, resolved_codex: str |
         command.extend(["--image", str(image_path)])
     command.extend(request.extra_args)
     command.append("-")
-    return command
+    return _wrap_with_asset_sandbox(request, command)
 
 
 def _codex_cli_service_tier(service_tier: Literal["fast", "standard"] | None) -> str | None:
@@ -129,14 +134,32 @@ def run_codex_exec(request: CodexExecRequest) -> CodexExecResult:
 def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
     request = _normalize_request_paths(request)
     started = time.time()
-    resolved_codex = resolve_codex_binary(request.codex_bin)
-    command = build_codex_exec_command(request, resolved_codex=resolved_codex)
     jsonl_path = request.output_jsonl_path
     final_path = request.final_message_path
     stderr_path = jsonl_path.with_suffix(jsonl_path.suffix + ".stderr")
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     final_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
+
+    resolved_codex = resolve_codex_binary(request.codex_bin)
+    if resolved_codex is not None and request.hide_builtin_assets and builtin_asset_denied_roots():
+        bwrap_bin = shutil.which("bwrap")
+        if bwrap_bin is None:
+            message = "bwrap is required to hide Genesis built-in assets from Codex agents, but it is not on PATH."
+            _write_error_outputs(jsonl_path, final_path, request.role, "asset_sandbox_unavailable", message)
+            ended = time.time()
+            return _result(
+                request,
+                [request.codex_bin],
+                started,
+                ended,
+                None,
+                None,
+                "asset_sandbox_unavailable",
+                message,
+                stderr_path,
+            )
+    command = build_codex_exec_command(request, resolved_codex=resolved_codex)
     final_path.unlink(missing_ok=True)
 
     if resolved_codex is None:
@@ -171,6 +194,7 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
                 stdin=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
+                start_new_session=True,
             )
             stdout, _ = process.communicate(input=request.prompt, timeout=request.timeout_sec)
             jsonl_file.write(stdout)
@@ -179,7 +203,7 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
             timed_out = True
             error_type = "timeout"
             error_message = f"Codex invocation timed out after {request.timeout_sec} seconds"
-            process.kill()
+            _kill_process_tree(process)
             stdout, _ = process.communicate()
             jsonl_file.write(stdout)
             exit_code = process.returncode
@@ -213,6 +237,20 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
         stderr_path,
         timed_out=timed_out,
     )
+
+
+def _kill_process_tree(process: subprocess.Popen[str]) -> None:
+    """Terminate a Codex wrapper and any child binary it launched."""
+
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (AttributeError, ProcessLookupError, OSError):
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
 
 
 def _result(
@@ -264,6 +302,7 @@ def _normalize_request_paths(request: CodexExecRequest) -> CodexExecRequest:
         final_message_path=_repo_path(request.final_message_path),
         output_schema_path=None if request.output_schema_path is None else _repo_path(request.output_schema_path),
         image_paths=tuple(_repo_path(path) for path in request.image_paths),
+        writable_roots=tuple(_repo_path(path) for path in request.writable_roots),
     )
 
 
@@ -271,6 +310,68 @@ def _repo_path(path: Path) -> Path:
     if path.is_absolute():
         return path.resolve()
     return (DEFAULT_REPO_ROOT / path).resolve()
+
+
+def _wrap_with_asset_sandbox(request: CodexExecRequest, command: list[str]) -> list[str]:
+    if not request.hide_builtin_assets:
+        return command
+    denied_roots = tuple(path for path in builtin_asset_denied_roots() if path.exists())
+    if not denied_roots:
+        return command
+    bwrap_bin = shutil.which("bwrap")
+    if bwrap_bin is None:
+        return command
+
+    wrapper = [
+        bwrap_bin,
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev-bind",
+        "/dev",
+        "/dev",
+        "--proc",
+        "/proc",
+        "--tmpfs",
+        "/tmp",
+    ]
+    for root in _asset_sandbox_writable_roots(request, denied_roots=denied_roots):
+        wrapper.extend(["--bind", str(root), str(root)])
+    for root in denied_roots:
+        wrapper.extend(["--tmpfs", str(root)])
+    wrapper.extend(["--chdir", str(request.cwd)])
+    return [*wrapper, *command]
+
+
+def _asset_sandbox_writable_roots(request: CodexExecRequest, *, denied_roots: tuple[Path, ...]) -> tuple[Path, ...]:
+    roots = [
+        request.output_jsonl_path.parent,
+        request.final_message_path.parent,
+        *request.writable_roots,
+    ]
+    codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+    if codex_home.exists():
+        roots.append(codex_home)
+    resolved: list[Path] = []
+    for root in roots:
+        path = root.resolve()
+        if not path.exists():
+            continue
+        if any(_is_relative_to(path, denied) or _is_relative_to(denied, path) for denied in denied_roots):
+            continue
+        if any(path == existing or _is_relative_to(path, existing) for existing in resolved):
+            continue
+        resolved = [existing for existing in resolved if not _is_relative_to(existing, path)]
+        resolved.append(path)
+    return tuple(resolved)
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
 
 
 def _read_codex_version(codex_bin: str) -> str | None:

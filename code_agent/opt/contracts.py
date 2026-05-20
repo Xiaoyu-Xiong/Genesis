@@ -11,7 +11,7 @@ from code_agent.io_utils import dump_json, load_json_object
 
 
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
-_OWNERS = {"scene", "body", "action", "rendering"}
+_OWNERS = {"scene", "body", "action"}
 _SCALES = {"linear", "log"}
 _TRANSFORMS = {
     "identity",
@@ -337,6 +337,7 @@ def _variables_from_space(opt_space: dict[str, Any], path: Path) -> list[OptVari
         not isinstance(population_size, int) or isinstance(population_size, bool) or population_size < 2
     ):
         raise OptContractError(f"{path} budget.population_size must be null or an integer >= 2.")
+    _validate_strategy(opt_space.get("strategy"), path)
     variables_payload = opt_space.get("variables")
     if not isinstance(variables_payload, list) or not variables_payload:
         raise OptContractError(f"{path} variables must be a non-empty list.")
@@ -399,6 +400,53 @@ def _variable_from_payload(payload: Any, path: Path, index: int) -> OptVariable:
     )
 
 
+def _validate_strategy(strategy: Any, path: Path) -> None:
+    if strategy is None:
+        return
+    if not isinstance(strategy, dict):
+        raise OptContractError(f"{path} strategy must be an object when provided.")
+    early_stop = strategy.get("early_stop")
+    if early_stop is not None and not isinstance(early_stop, dict):
+        raise OptContractError(f"{path} strategy.early_stop must be an object.")
+    if isinstance(early_stop, dict):
+        _optional_positive_int(early_stop.get("patience_generations"), f"{path} strategy.early_stop.patience_generations")
+        _optional_non_negative_number(early_stop.get("min_delta"), f"{path} strategy.early_stop.min_delta")
+    _validate_restarts(strategy.get("restarts"), path, "strategy.restarts")
+    phases = strategy.get("phases")
+    if phases is None:
+        return
+    if not isinstance(phases, list):
+        raise OptContractError(f"{path} strategy.phases must be a list.")
+    for index, phase in enumerate(phases):
+        if not isinstance(phase, dict):
+            raise OptContractError(f"{path} strategy.phases[{index}] must be an object.")
+        _optional_positive_int(phase.get("max_trials"), f"{path} strategy.phases[{index}].max_trials")
+        _optional_positive_number(phase.get("sigma_scale"), f"{path} strategy.phases[{index}].sigma_scale")
+        _optional_population(phase.get("population_size"), f"{path} strategy.phases[{index}].population_size")
+        groups = phase.get("groups")
+        if groups is not None:
+            if not isinstance(groups, list) or not all(isinstance(item, str) for item in groups):
+                raise OptContractError(f"{path} strategy.phases[{index}].groups must be a string list.")
+        names = phase.get("variables")
+        if names is not None:
+            if not isinstance(names, list) or not all(isinstance(item, str) and _NAME_RE.match(item) for item in names):
+                raise OptContractError(f"{path} strategy.phases[{index}].variables must contain valid variable names.")
+        _validate_restarts(phase.get("restarts"), path, f"strategy.phases[{index}].restarts")
+
+
+def _validate_restarts(restarts: Any, path: Path, label: str) -> None:
+    if restarts is None:
+        return
+    if not isinstance(restarts, list):
+        raise OptContractError(f"{path} {label} must be a list.")
+    for index, restart in enumerate(restarts):
+        if not isinstance(restart, dict):
+            raise OptContractError(f"{path} {label}[{index}] must be an object.")
+        _optional_positive_int(restart.get("max_trials"), f"{path} {label}[{index}].max_trials")
+        _optional_positive_number(restart.get("sigma_scale"), f"{path} {label}[{index}].sigma_scale")
+        _optional_population(restart.get("population_size"), f"{path} {label}[{index}].population_size")
+
+
 def _validate_params_payload(payload: dict[str, Any], path: Path) -> None:
     if payload.get("schema_version") != 1:
         raise OptContractError(f"{path} must have schema_version 1.")
@@ -442,3 +490,33 @@ def _finite_number(value: Any, label: str) -> float:
     if not math.isfinite(value_float):
         raise OptContractError(f"{label} must be finite.")
     return value_float
+
+
+def _optional_positive_int(value: Any, label: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise OptContractError(f"{label} must be null or an integer >= 1.")
+
+
+def _optional_population(value: Any, label: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, int) or isinstance(value, bool) or value < 2:
+        raise OptContractError(f"{label} must be null or an integer >= 2.")
+
+
+def _optional_positive_number(value: Any, label: str) -> None:
+    if value is None:
+        return
+    value_float = _finite_number(value, label)
+    if value_float <= 0.0:
+        raise OptContractError(f"{label} must be positive.")
+
+
+def _optional_non_negative_number(value: Any, label: str) -> None:
+    if value is None:
+        return
+    value_float = _finite_number(value, label)
+    if value_float < 0.0:
+        raise OptContractError(f"{label} must be non-negative.")

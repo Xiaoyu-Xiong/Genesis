@@ -53,18 +53,20 @@ Planner decides whether to call Opt and how to use the result.
 
 Planner should call Opt when:
 
-- The generated case is runnable but behavior depends on sensitive constants.
-- Contact, grasping, material response, PD gains, friction, damping, timing, or release placement are likely limiting
-  success.
+- The generated case is runnable: code executes, required entities exist, video/metrics are produced, and the physical
+  causal story is basically plausible.
+- The failure looks like a continuous parameter residual rather than a missing structure: distance is close but off,
+  speed/angle/timing is wrong, contact happens in the wrong place, a PD gain is unstable, or friction/damping/density is
+  sensitive.
+- There are real control handles in `src/action.py`, `src/body.py`, or `src/scene.py` that Opt can safely expose.
 - The prompt explicitly asks for inverse design, controllability, tuning, or target matching.
-- A critic or execution report suggests that failure is caused by parameters rather than missing entities or invalid
-  code structure.
+- A critic or execution report suggests that repeated local repair is converging to "almost works, but wrong numbers".
 
 Planner may skip Opt when:
 
 - The default generated rollout already satisfies the task.
-- The failure is clearly structural, such as missing required bodies, invalid assets, missing control handles, or an
-  impossible gripper geometry.
+- The failure is clearly structural, such as missing required bodies, invalid assets, missing control handles, wrong
+  joint axes, caged/stuck task objects, impossible geometry, absent metrics, or invisible target behavior.
 - The task is purely visual or rendering-only.
 - The optimization budget is too small to produce useful evidence.
 
@@ -90,10 +92,10 @@ The Opt subagent owns the optimization pass end to end.
 
 It should:
 
-- Inspect generated `src/scene.py`, `src/body.py`, `src/action.py`, `src/rendering.py`, `src/main.py`, existing
-  contracts, artifacts, reports, and metrics.
+- Inspect generated `src/scene.py`, `src/body.py`, `src/action.py`, `src/main.py`, existing contracts, artifacts,
+  reports, and metrics. It may read `src/rendering.py` only to understand available evidence, not as an edit target.
 - Identify sensitive values that are safe to optimize.
-- Decide whether parameters belong to `scene`, `body`, `action`, or occasionally `rendering`.
+- Decide whether parameters belong to `scene`, `body`, or `action`.
 - Patch generated code so it can read opt parameters while remaining runnable without Opt.
 - Emit or revise `contracts/target_spec.json`, `contracts/opt_space.json`, and
   `contracts/default_opt_params.json`.
@@ -101,6 +103,8 @@ It should:
   optimization, trajectory optimization, differentiable simulation, or RL.
 - Run baseline and candidate rollouts, usually without render.
 - Render baseline and best results when requested or when visual evidence is needed.
+- Inspect the best render/video before reporting `success` or `partial_success`. Numeric success is not sufficient; the
+  final evidence must include a `video_checked=...` item describing the video or sampled frames and the visual outcome.
 - Write trace and report artifacts.
 - Diagnose whether remaining failure is parameter-level, objective-level, metric-level, or structural.
 - Return a concise structured result to Planner.
@@ -123,8 +127,11 @@ optimization mechanics:
   edits, runner commands, and final report requirements.
 - `types.py`: Planner-to-Opt request and Opt-to-Planner result dataclasses.
 - `contracts.py` and `objective.py`: opt contract validation, vector/payload conversion, and metric scoring.
-- `runner.py`: low-level numerical optimization loop. It loads contracts, resolves budget/runtime options, runs
-  baseline and CMA-ES trials, selects the best result, and delegates rollout/report mechanics.
+- `runner.py`: low-level numerical optimization orchestrator. It loads contracts, resolves budget/runtime options, runs
+  baselines, selects/renders the best result, and writes reports.
+- `strategy.py`: parses generic strategy knobs from `contracts/opt_space.json`, including phases, restarts, and
+  early-stop settings.
+- `search.py`: executes the CMA-ES phase/restart search loop using the chosen strategy.
 - `trials.py`: single-rollout execution helper. It writes current opt params, runs generated `src/main.py`, loads
   metrics, scores a trial, and optionally renders the best result.
 - `reports.py`: trace, `opt_report.json`, and `verification_report.json` writing.
@@ -148,12 +155,18 @@ Opt may usually edit:
 - `contracts/*.json` for optimization specs and parameter payloads.
 - `reports/*.json` and optimization artifacts.
 
+Opt must not edit:
+
+- `src/rendering.py`, camera placement, lights, capture cadence, or visual-only parameters.
+
 Opt should avoid editing:
 
-- `src/rendering.py`, unless the task explicitly includes camera or visual-objective optimization.
 - Generated assets, except for tiny parameterization hooks. If the asset or mechanism is structurally wrong, Opt should
   report `needs_rewrite` to Planner.
 - Task text, success semantics, or entity set.
+
+If visual evidence is unclear because the camera or renderer is wrong, Opt should report that Planner needs a rendering
+repair instead of turning rendering into an optimization variable.
 
 Opt must not:
 
@@ -175,6 +188,7 @@ Planner should call the Opt subagent with a structured brief. A representative r
   "allowed_edits": [
     "src/action.py",
     "src/body.py only for material/contact hooks",
+    "src/scene.py only for solver/contact/timestep hooks",
     "contracts/*.json",
     "reports/*.json",
     "artifacts/opt_*"
@@ -183,6 +197,7 @@ Planner should call the Opt subagent with a structured brief. A representative r
     "Do not change task semantics.",
     "Do not directly write dynamic object state after initialization.",
     "Do not add hidden constraints or attachments.",
+    "Do not edit src/rendering.py or optimize rendering/camera/visual-only variables.",
     "Do not replace generated assets without reporting needs_rewrite."
   ],
   "optimization_budget": {
@@ -348,6 +363,16 @@ else:
 - Each variable may define `initial_sigma` in normalized `[0, 1]` coordinates.
 - Variables without `initial_sigma` use `CONFIGS.opt.runner_default_initial_sigma` (currently `0.25`).
 - The backend initializes covariance with per-variable sigmas and then adapts normally.
+- `strategy.phases` may optimize variable groups or named variables in stages. This lets Opt try action/control timing
+  first, then material/contact, then scene/solver settings, without hard-coding that sequence into Planner.
+- `strategy.restarts` may run multiple seeds or sigma scales. This is useful when one CMA-ES run can get stuck in a
+  bad basin.
+- `strategy.early_stop` may stop a phase/restart when success criteria are met or when several generations fail to
+  improve by `min_delta`.
+- The runner reports objective-shaping warnings when the objective is only binary/custom, and boundary warnings when
+  the selected best parameters cluster near search bounds.
+- Low-fidelity first is intentionally not part of the current runner strategy because changing duration, fps, or solver
+  fidelity can make early evidence disagree with the final rendered rollout.
 
 These settings are tools for Opt, not a fixed strategy. Opt may choose explicit values, run small probe batches, revise
 the search space, or ask Planner for a rewrite.
@@ -449,6 +474,23 @@ agent.
     "max_trials": 24,
     "population_size": null,
     "seed": 0
+  },
+  "strategy": {
+    "early_stop": {
+      "enabled": true,
+      "patience_generations": 3,
+      "min_delta": 0.001,
+      "stop_on_success": true
+    },
+    "restarts": [
+      {"name": "wide", "sigma_scale": 1.5, "max_trials": 8},
+      {"name": "local", "sigma_scale": 0.6, "max_trials": 8, "start_from_best": true}
+    ],
+    "phases": [
+      {"name": "control_first", "groups": ["timing", "target", "control"], "max_trials": 12},
+      {"name": "contact_next", "groups": ["material", "contact"], "max_trials": 8, "start_from_best": true},
+      {"name": "all_refine", "max_trials": 8, "start_from_best": true}
+    ]
   }
 }
 ```
@@ -484,7 +526,7 @@ Ownership guidance:
 - `scene.py` owns solver/contact lifecycle parameters.
 - `body.py` owns material, geometry, initial placement, density, friction, and object parameter hooks.
 - `action.py` owns policy schedule, phase timings, trajectory targets, PD gains, force limits, and control parameters.
-- `rendering.py` should usually stay out of version 1 optimization.
+- `rendering.py` is excluded from Opt parameterization. Rendering defects should be routed back to the rendering worker.
 
 ## Validation Rules
 
@@ -512,7 +554,7 @@ Supported in version 1:
 - `type: "float"`
 - `scale: "linear"`
 - `scale: "log"` for positive-valued variables
-- owners `scene`, `body`, `action`, `rendering`, with most variables expected in `body` or `action`
+- owners `scene`, `body`, or `action`, with most variables expected in `body` or `action`
 
 Rejected in version 1:
 
@@ -594,7 +636,14 @@ Task-oriented comparison between target and best result:
 
 ## Available Entry Points
 
-The current implementation provides a temporary manual CLI for debugging the Opt agent before full Planner integration:
+Planner integration is available through the `run_opt` Planner action. The action is optional and gated by the suite's
+effective Opt setting, which defaults to `CONFIGS.opt.enabled` and can be overridden by `run-suite --enable-opt` or
+`run-suite --disable-opt`. When disabled, Planner should not choose it. When enabled and selected, the handler invokes
+`code_agent.opt.agent.run_opt_agent`, records the structured Opt result in episode state, syncs
+`contracts/best_opt_params.json` to `contracts/current_opt_params.json` when Opt produces a usable result, and marks the
+case for `run_execution` so Critic evaluates fresh root artifacts generated with the selected parameters.
+
+The manual CLI remains useful for debugging the Opt agent directly:
 
 ```text
 uv run python -m code_agent.opt.cli --case-dir path/to/case --backend gpu --max-rollouts 24
@@ -627,9 +676,19 @@ Useful runner flags:
 --steps 300
 ```
 
-`code_agent.opt.agent.run_opt_agent` is the Planner-facing API that invokes Codex. `code_agent.opt.cli` is only a thin
-manual wrapper around that API. The `code_agent.cli run-opt` entry point does not invoke Codex; it only runs the
-numerical optimizer after the generated workspace has valid opt contracts and parameter hooks.
+`code_agent.opt.agent.run_opt_agent` is the Planner-facing API that invokes Codex. The Planner `run_opt` action and
+`code_agent.opt.cli` both call that API. The `code_agent.cli run-opt` entry point does not invoke Codex; it only runs
+the numerical optimizer after the generated workspace has valid opt contracts and parameter hooks.
+
+If the Codex Opt subagent times out or exits nonzero after writing a fresh lower-level `reports/opt_report.json`,
+`run_opt_agent` recovers that report instead of returning an empty failure. A verified successful best trial becomes
+`success`; an improved but still-unsuccessful best trial becomes `needs_more_optimization`; otherwise the recovered
+result remains `failed` but includes the opt report, scores, variables, and evidence paths for Planner.
+
+When the Codex Opt subagent returns `success` or `partial_success`, the harness now requires explicit best-video
+evidence. If `request.render_best` is true and the report lacks a valid best video or a `video_checked=...` style
+evidence item, the result is downgraded to `needs_more_optimization` so Planner does not accept a purely numeric
+success claim.
 
 ## Critical Guidance
 

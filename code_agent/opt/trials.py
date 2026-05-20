@@ -145,7 +145,7 @@ class TrialExecutor:
                     main_file=self.main_file,
                     output_dir=report_dir,
                     timeout_sec=options.timeout_sec,
-                    python_executable="uv run python",
+                    python_executable="uv run --no-sync python",
                     extra_args=tuple(extra_args),
                     artifact_dir_names=(),
                     artifact_file_names=(),

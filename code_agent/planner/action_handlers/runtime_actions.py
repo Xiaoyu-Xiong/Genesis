@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import subprocess
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from code_agent.assets.builtin_guard import builtin_asset_violations, case_source_builtin_asset_violations
 from code_agent.configs import CONFIGS
 from code_agent.evaluation.runner import evaluate_generated_run
 from code_agent.io_utils import decode_process_stream
+from code_agent.opt.agent import run_opt_agent
+from code_agent.opt.types import OptAgentRequest
 from code_agent.utils.codex import DEFAULT_REPO_ROOT
 from code_agent.utils.execution import run_generated_simulation
 from code_agent.utils.integrator import write_main
@@ -54,6 +58,14 @@ class RuntimeActionHandler:
                 "status": "precondition_failed",
                 "message": "All workers must be ok before integration.",
             }
+        asset_violations = case_source_builtin_asset_violations(self.session.case_dir)
+        if asset_violations:
+            return {
+                "ok": False,
+                "status": "forbidden_builtin_asset_reference",
+                "message": "Generated source references forbidden Genesis built-in assets.",
+                "errors": asset_violations,
+            }
         timing = self.session.current_timing()
         main_py = write_main(
             run_dir=self.session.case_dir,
@@ -77,6 +89,14 @@ class RuntimeActionHandler:
     def run_execution(self, action: dict[str, Any]) -> dict[str, Any]:
         if self.session.state.get("integration") is None:
             return {"ok": False, "status": "precondition_failed", "message": "integration is missing."}
+        asset_violations = case_source_builtin_asset_violations(self.session.case_dir)
+        if asset_violations:
+            return {
+                "ok": False,
+                "status": "forbidden_builtin_asset_reference",
+                "message": "Generated source references forbidden Genesis built-in assets.",
+                "errors": asset_violations,
+            }
         timing = self.session.current_timing()
         main_py = Path(str(self.session.state["integration"]["main_py"]))
         backend = str(action.get("backend") or self.session.config.backend)
@@ -114,6 +134,100 @@ class RuntimeActionHandler:
         self.session.state["control"]["needs_critic"] = False
         return {"ok": critic.get("verdict") == "pass", "status": "critic_evaluated", "critic": critic}
 
+    def run_opt(self, action: dict[str, Any]) -> dict[str, Any]:
+        opt_state = self.session.state.setdefault(
+            "opt",
+            {
+                "enabled": self.session.config.opt_enabled,
+                "status": "not_requested" if self.session.config.opt_enabled else "disabled",
+                "attempts": 0,
+                "latest_result": None,
+                "latest_request": None,
+                "history": [],
+            },
+        )
+        opt_state["enabled"] = self.session.config.opt_enabled
+        if not self.session.config.opt_enabled:
+            opt_state["status"] = "disabled"
+            return {
+                "ok": False,
+                "status": "opt_disabled",
+                "message": "Opt is disabled for this suite run; Planner must use the normal repair/critic path.",
+            }
+        if self.session.state.get("integration") is None:
+            return {"ok": False, "status": "precondition_failed", "message": "integration is missing."}
+
+        timing = self.session.current_timing()
+        render_flag = action.get("render")
+        request = OptAgentRequest(
+            case_dir=self.session.case_dir,
+            original_prompt=self.session.config.task,
+            planner_intent=self._opt_planner_intent(action),
+            allowed_edits=(
+                "src/action.py for control schedules, target poses, controller gains, and action hooks",
+                "src/body.py for material, contact, density, friction, and body-parameter hooks only",
+                "src/scene.py for solver/contact/timestep hooks only",
+                "contracts/*.json",
+                "reports/*.json",
+                "artifacts/opt_*",
+            ),
+            forbidden_changes=(
+                "Do not change task semantics or required entities.",
+                "Do not directly write dynamic object state after initialization.",
+                "Do not add hidden constraints, attachments, suction, fake joints, or task-object teleportation.",
+                "Do not edit src/rendering.py or optimize rendering/camera/visual-only variables.",
+                "Do not edit repository-level pipeline code during the Opt pass.",
+            ),
+            max_rollouts=None,
+            backend=str(action.get("backend") or CONFIGS.opt.agent_backend or self.session.config.backend),
+            timeout_sec=float(action.get("timeout_sec") or CONFIGS.opt.agent_timeout_sec),
+            render_baseline=CONFIGS.opt.agent_render_baseline if render_flag is None else bool(render_flag),
+            render_best=CONFIGS.opt.agent_render_best if render_flag is None else bool(render_flag),
+            steps=timing.steps,
+            duration_sec=timing.duration_sec,
+            render_fps=timing.render_fps,
+            target_video_frames=timing.target_video_frames,
+            success_criteria=tuple(self._planner_success_criteria()),
+        )
+        result = run_opt_agent(request)
+        result_payload = asdict(result)
+        request_payload = asdict(request)
+        attempts = int(opt_state.get("attempts") or 0) + 1
+        opt_state.update(
+            {
+                "status": result.status,
+                "attempts": attempts,
+                "latest_result": result_payload,
+                "latest_request": self.session.json_safe(request_payload),
+                "updated_at_unix": time.time(),
+            }
+        )
+        history = opt_state.setdefault("history", [])
+        if isinstance(history, list):
+            history.append({"attempt": attempts, "result": result_payload, "request": self.session.json_safe(request_payload)})
+
+        synced_current = None
+        if result.status in {"success", "partial_success", "needs_more_optimization"}:
+            synced_current = self._sync_best_opt_params_to_current()
+            self.session.state["control"]["needs_execution"] = True
+            self.session.state["control"]["needs_critic"] = False
+            message = (
+                "Opt completed and selected parameters for rerun. "
+                "Planner should run_execution next so root artifacts reflect the optimized case."
+            )
+        elif result.status == "needs_rewrite":
+            message = "Opt diagnosed a structural issue; Planner should route repair or regeneration using the recommendation."
+        else:
+            message = "Opt failed or returned inconclusive evidence; Planner should inspect the Opt report."
+
+        return {
+            "ok": result.status in {"success", "partial_success", "needs_more_optimization"},
+            "status": f"opt_{result.status}",
+            "message": message,
+            "opt": result_payload,
+            "synced_current_opt_params": synced_current,
+        }
+
     def run_command(
         self,
         action: dict[str, Any],
@@ -132,6 +246,14 @@ class RuntimeActionHandler:
             action.get("timeout_sec") or min(self.session.config.timeout_sec, CONFIGS.harness.command_timeout_sec)
         )
         command = [*executable, *raw_args]
+        asset_violations = builtin_asset_violations(command, label=f"{label}_command")
+        if asset_violations:
+            return {
+                "ok": False,
+                "status": "forbidden_builtin_asset_reference",
+                "message": "Planner command references forbidden Genesis built-in assets.",
+                "errors": asset_violations,
+            }
         stdout_path = self.session.command_dir / f"turn_{turn:03d}_{label}.stdout.txt"
         stderr_path = self.session.command_dir / f"turn_{turn:03d}_{label}.stderr.txt"
         started = time.time()
@@ -191,6 +313,31 @@ class RuntimeActionHandler:
         self.session.state["status"] = verdict
         self.session.state["stop_reason"] = action.get("summary") or action.get("rationale")
         return {"ok": verdict == "pass", "status": "finished", "verdict": verdict}
+
+    def _opt_planner_intent(self, action: dict[str, Any]) -> str:
+        parts = [
+            "Optimize the generated case only if the evidence suggests a compact parameter/control search can improve it.",
+            f"Planner rationale: {action.get('rationale') or '<none>'}",
+        ]
+        notes = action.get("notes")
+        if isinstance(notes, list) and notes:
+            parts.append("Planner notes: " + "; ".join(str(item) for item in notes))
+        critic = self.session.state.get("critic")
+        if isinstance(critic, dict):
+            parts.append("Latest critic summary: " + str(critic.get("summary") or critic.get("repair_summary") or ""))
+            parts.append("Latest critic recommended_owner: " + str(critic.get("recommended_owner") or "none"))
+        return "\n".join(parts)
+
+    def _planner_success_criteria(self) -> list[str]:
+        planner_output = self.session.current_planner_output()
+        scene_brief = planner_output.get("scene_brief") if isinstance(planner_output, dict) else None
+        criteria = scene_brief.get("success_criteria") if isinstance(scene_brief, dict) else None
+        if isinstance(criteria, list):
+            return [str(item) for item in criteria if isinstance(item, str) and item]
+        return []
+
+    def _sync_best_opt_params_to_current(self) -> str | None:
+        return self.session.sync_best_opt_params_to_current(selected_by="planner.run_opt")
 
 
 def planner_requires_asset_manifest(planner_output: dict[str, Any] | None) -> bool:

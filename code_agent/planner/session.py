@@ -11,7 +11,8 @@ try:
 except ImportError:  # pragma: no cover - the uv environment normally has jsonschema.
     Draft202012Validator = None  # type: ignore[assignment]
 
-from code_agent.configs import deformable_config_dict
+from code_agent.assets.builtin_guard import builtin_asset_violations
+from code_agent.configs import CONFIGS, deformable_config_dict
 from code_agent.io_utils import dump_json
 from code_agent.utils.codex import DEFAULT_REPO_ROOT
 from code_agent.utils.timing import TimingPlan, resolve_timing
@@ -19,6 +20,9 @@ from code_agent.planner.actions import EpisodeActionExecutor
 from code_agent.planner.action_handlers.worker_actions import WORKER_ROLES
 from code_agent.planner.agent import EpisodePlanner
 from code_agent.writer.common import WorkerDispatchResult
+
+OPT_RESULT_STATUSES = {"success", "partial_success", "needs_more_optimization", "needs_rewrite", "failed"}
+OPT_RERUN_STATUSES = {"success", "partial_success", "needs_more_optimization"}
 
 
 @dataclass(slots=True, frozen=True)
@@ -35,6 +39,7 @@ class PlannerSessionConfig:
     render_fps: int | None = None
     deformable_enabled: bool = False
     ipc_enabled: bool = False
+    opt_enabled: bool = CONFIGS.opt.enabled
     max_planner_turns: int | None = None
 
 
@@ -108,6 +113,14 @@ class PlannerSession:
             "integration": None,
             "execution": None,
             "critic": None,
+            "opt": {
+                "enabled": config.opt_enabled,
+                "status": "not_requested" if config.opt_enabled else "disabled",
+                "attempts": 0,
+                "latest_result": None,
+                "latest_request": None,
+                "history": [],
+            },
             "commands": [],
             "observations": [],
             "stop_reason": None,
@@ -122,6 +135,7 @@ class PlannerSession:
         for turn in range(max_turns):
             if self.state["status"] != "running":
                 break
+            self.refresh_opt_state_from_report()
             self.state["turn_index"] = turn
             action = self.planner.request_action(turn)
             result = self.actions.execute(action, turn)
@@ -158,6 +172,14 @@ class PlannerSession:
                 "status": "invalid_planner_output",
                 "message": "planner_output failed schema validation.",
                 "errors": errors,
+            }
+        asset_violations = builtin_asset_violations(planner_output, label="planner_output")
+        if asset_violations:
+            return {
+                "ok": False,
+                "status": "forbidden_builtin_asset_reference",
+                "message": "planner_output references forbidden Genesis built-in assets.",
+                "errors": asset_violations,
             }
 
         planner_output_path = self.contracts_dir / "planner_output.json"
@@ -265,6 +287,7 @@ class PlannerSession:
         return str(result.get("status"))
 
     def build_summary(self) -> dict[str, Any]:
+        self.refresh_opt_state_from_report()
         critic = self.state.get("critic") if isinstance(self.state.get("critic"), dict) else {}
         execution = self.state.get("execution") if isinstance(self.state.get("execution"), dict) else {}
         status = str(self.state.get("status") or "fail")
@@ -288,8 +311,80 @@ class PlannerSession:
             "blocked_reason": self.state.get("blocked_reason"),
             "deformable_enabled": self.config.deformable_enabled,
             "ipc_enabled": self.config.ipc_enabled,
+            "opt_enabled": self.config.opt_enabled,
             "deformable_config_path": str(self.deformable_config_path),
+            "opt": self.state.get("opt"),
         }
+
+    def refresh_opt_state_from_report(self) -> None:
+        """Reconcile Opt state with a structured report that landed after timeout.
+
+        Codex can write its final JSON just as the wrapper is timing out. The
+        planner state should reflect the parseable Opt payload on disk rather
+        than a stale wrapper-level timeout status.
+        """
+
+        opt = self.state.get("opt")
+        if not self.config.opt_enabled or not isinstance(opt, dict):
+            return
+        payload = self._load_latest_opt_payload()
+        if payload is None:
+            return
+        status = payload.get("status")
+        if status not in OPT_RESULT_STATUSES:
+            return
+
+        result_payload = self.json_safe(payload)
+        latest_result = opt.get("latest_result")
+        if isinstance(latest_result, dict) and latest_result == result_payload and opt.get("status") == status:
+            return
+
+        opt["status"] = status
+        opt["latest_result"] = result_payload
+        opt["updated_at_unix"] = time.time()
+        report = self.load_json(self.reports_dir / "opt_subagent_report.json")
+        request = report.get("request") if isinstance(report, dict) else None
+        if isinstance(request, dict):
+            opt["latest_request"] = self.json_safe(request)
+        history = opt.setdefault("history", [])
+        if isinstance(history, list):
+            attempt = int(opt.get("attempts") or len(history) or 1)
+            if not history or history[-1].get("result") != result_payload:
+                history.append({"attempt": attempt, "result": result_payload, "source": "disk_reconcile"})
+
+        if self.state.get("status") == "running" and status in OPT_RERUN_STATUSES:
+            self.sync_best_opt_params_to_current(selected_by="planner.opt_disk_reconcile")
+            critic = self.state.get("critic")
+            if not isinstance(critic, dict) or critic.get("verdict") != "pass":
+                self.state["control"]["needs_execution"] = True
+                self.state["control"]["needs_critic"] = False
+
+    def _load_latest_opt_payload(self) -> dict[str, Any] | None:
+        final_payload = self.load_json(self.logs_dir / "codex_opt_subagent.final.json")
+        if isinstance(final_payload, dict) and final_payload.get("status") in OPT_RESULT_STATUSES:
+            return final_payload
+        report = self.load_json(self.reports_dir / "opt_subagent_report.json")
+        result = report.get("result") if isinstance(report, dict) else None
+        if isinstance(result, dict) and result.get("status") in OPT_RESULT_STATUSES:
+            return result
+        return None
+
+    def sync_best_opt_params_to_current(self, *, selected_by: str) -> str | None:
+        best_path = self.contracts_dir / "best_opt_params.json"
+        current_path = self.contracts_dir / "current_opt_params.json"
+        payload = self.load_json(best_path)
+        if payload is None:
+            return None
+        metadata = payload.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        metadata = dict(metadata)
+        metadata["selected_by"] = selected_by
+        metadata["selected_at_unix"] = time.time()
+        payload = dict(payload)
+        payload["metadata"] = metadata
+        dump_json(payload, current_path)
+        return str(current_path)
 
     def current_planner_output(self) -> dict[str, Any] | None:
         path_text = self.state.get("planner_output_path")

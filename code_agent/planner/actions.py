@@ -42,12 +42,24 @@ class EpisodeActionExecutor:
                 return self.runtime.run_execution(action)
             if name == "run_critic":
                 return self.runtime.run_critic()
+            if name == "run_opt":
+                return self.runtime.run_opt(action)
             if name == "request_repair":
                 return self.workers.request_repair(action)
             if name == "run_python":
-                return self.runtime.run_command(action, turn, label="python", executable=("uv", "run", "python"))
+                return self.runtime.run_command(
+                    action,
+                    turn,
+                    label="python",
+                    executable=("uv", "run", "--no-sync", "python"),
+                )
             if name == "run_pytest":
-                return self.runtime.run_command(action, turn, label="pytest", executable=("uv", "run", "pytest"))
+                return self.runtime.run_command(
+                    action,
+                    turn,
+                    label="pytest",
+                    executable=("uv", "run", "--no-sync", "pytest"),
+                )
             if name == "finish":
                 return self.runtime.finish(action)
         except Exception as exc:

@@ -15,11 +15,19 @@ class OptAgentRequest:
     case_dir: Path
     original_prompt: str | None = None
     planner_intent: str = DEFAULT_PLANNER_INTENT
-    allowed_edits: tuple[str, ...] = ("src/action.py", "contracts/*.json", "reports/*.json", "artifacts/opt_*")
+    allowed_edits: tuple[str, ...] = (
+        "src/action.py for control schedules, target poses, controller gains, and action hooks",
+        "src/body.py for material, contact, density, friction, and body-parameter hooks only",
+        "src/scene.py for solver/contact/timestep hooks only",
+        "contracts/*.json",
+        "reports/*.json",
+        "artifacts/opt_*",
+    )
     forbidden_changes: tuple[str, ...] = (
         "Do not change task semantics.",
         "Do not directly write dynamic object state after initialization.",
         "Do not add hidden constraints or attachments.",
+        "Do not edit src/rendering.py or optimize rendering/camera/visual-only variables.",
     )
     max_rollouts: int | None = None
     backend: str = CONFIGS.opt.agent_backend

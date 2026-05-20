@@ -33,6 +33,7 @@ class EpisodePlanner:
                 output_jsonl_path=self.session.logs_dir / f"codex_planner_turn_{turn:03d}.jsonl",
                 final_message_path=self.session.logs_dir / f"codex_planner_turn_{turn:03d}.final.json",
                 timeout_sec=CONFIGS.codex.planner_timeout_sec,
+                writable_roots=(self.session.case_dir,),
             )
         )
         planner_invocations = self.session.state.setdefault("planner_invocations", [])
@@ -120,6 +121,7 @@ class EpisodePlanner:
             render_every_n_steps=render_every_n_steps,
             render_fps=render_fps,
             render_res=render_res,
+            opt_enabled=self.session.config.opt_enabled,
         )
         return "\n\n".join(
             [
@@ -221,7 +223,23 @@ class EpisodePlanner:
             if isinstance(critic, dict) and critic.get("verdict") == "pass":
                 guide.append("critic passed: finish pass is valid.")
             elif isinstance(critic, dict):
-                guide.append("critic did not pass: repair if budget remains, otherwise finish fail.")
+                opt_state = state.get("opt")
+                opt_attempts = int(opt_state.get("attempts") or 0) if isinstance(opt_state, dict) else 0
+                opt_status = str(opt_state.get("status") or "") if isinstance(opt_state, dict) else ""
+                if self.session.config.opt_enabled and opt_attempts == 0:
+                    guide.append(
+                        "critic did not pass: choose run_opt if the case is runnable and the remaining miss looks like "
+                        "a continuous parameter/control residual with real handles in action/body/scene; choose repair "
+                        "for structural defects such as invalid assets, missing entities, impossible geometry, missing "
+                        "metrics, or invisible behavior."
+                    )
+                elif self.session.config.opt_enabled and opt_status == "needs_rewrite":
+                    guide.append(
+                        "Opt reported needs_rewrite: use its recommendation to route source repair or asset "
+                        "regeneration if budget remains."
+                    )
+                else:
+                    guide.append("critic did not pass: repair if budget remains, otherwise finish fail.")
         return guide
 
     def _codex_usage_limit_blockers(self) -> list[str]:

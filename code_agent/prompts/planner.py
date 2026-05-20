@@ -1,6 +1,7 @@
 """Planner prompt clauses."""
 
 from code_agent.prompts.common import (
+    BUILTIN_ASSET_POLICY_GUIDE,
     GENERATED_RESULT_QUALITY_GUIDE,
     PHYSICAL_CAUSALITY_CONTRACT,
     SCALE_POLICY_GUIDE,
@@ -24,6 +25,7 @@ workers make correct source-level decisions.
 Include every schema field in every response. Use null for irrelevant scalar/object fields and [] for irrelevant array
 fields.
 {SCALE_POLICY_GUIDE}
+{BUILTIN_ASSET_POLICY_GUIDE}
 """.strip()
 
 
@@ -77,6 +79,7 @@ def planner_available_actions_section(
     render_every_n_steps: int,
     render_fps: int,
     render_res: tuple[int, int],
+    opt_enabled: bool,
 ) -> str:
     return f"""
 Available actions:
@@ -110,10 +113,11 @@ Available actions:
   validation fails, regenerate that asset through the mesh asset action; do not ask body/scene workers to rewrite or
   procedurally repair the mesh geometry.
   For articulated robots, grippers, gates, latches, actuated mechanisms, or any task object that is best represented as
-  one self-contained primitive MJCF body tree with joints and actuators, add an XML/MJCF asset request with
+  one self-contained MJCF body tree with joints and actuators, add an XML/MJCF asset request with
   asset_type=`generated_xml` or `mjcf`. Describe the required joints, actuator semantics, base behavior, approximate
-  dimensions, and control affordances in purpose/simulation_role. XML/MJCF asset requests are primitive-geom only; do
-  not use them for textured decorative mesh objects.
+  dimensions, and control affordances in purpose/simulation_role. XML/MJCF assets may use primitive geoms or generated
+  case-workspace mesh files, but must never reference Genesis built-in meshes, external mesh downloads, hfields, or
+  texture files. Do not use XML/MJCF only for textured decorative mesh objects.
   When the plan uses XML/MJCF actuators, make the body/action contracts explicit: body must expose stable actuator
   names, joint names, DOF groups, or control handles in `actors`, and action must drive those handles with Genesis
   actuator/DOF/force control APIs after initialization. Do not ask action to create motion for an XML articulated asset
@@ -175,10 +179,24 @@ Available actions:
 - run_integrator: wire generated modules into src/main.py.
 - run_execution: run generated code through the harness on the local GPU.
 - run_critic: ask the read-only critic to evaluate execution artifacts.
+- run_opt: invoke the dedicated Opt Codex subagent for a generated case that appears parameter-limited or
+  control-sensitive. Current CONFIGS.opt.enabled={opt_enabled}. If false, do not choose this action. If true, use it
+  after integration and preferably after execution/critic evidence shows the case is runnable: code runs, video/metrics
+  exist, required entities are present, and the physical causal story is basically plausible, but the target is missed.
+  Good Opt candidates have continuous measurable residuals such as distance, speed, angle, timing, pose, friction,
+  damping, gain, material/contact, or solver/contact sensitivity, and the generated action/body/scene code exposes real
+  control handles that Opt can safely parameterize. Bad Opt candidates are structural failures: missing entities,
+  invalid assets, broken imports, impossible geometry, wrong joint axes, caged/stuck objects, missing metrics, invisible
+  rendering, or task semantics that need rewriting. If the same owner has already received one or two local repairs and
+  the remaining failure is still "behavior is close but off", prefer run_opt before exhausting all repair rounds. The
+  Opt subagent receives the case workspace, timing, backend, success criteria, allowed edit scope, and current reports;
+  it decides what parameters to expose, which bounds/sigma/strategy to use, whether to run CMA-ES, and whether to return
+  success, needs_more_optimization, needs_rewrite, or failed. After a useful Opt result, choose run_execution so the
+  normal root artifacts and critic evidence reflect the selected best parameters.
 - request_repair: send `repair_brief` to the owning worker when critic/execution evidence shows a fix.
   {SOURCE_AWARE_REPAIR_GUIDE}
-- run_python: optional controlled `uv run python ...` command. Use `python_args` and cwd repo/case.
-- run_pytest: optional controlled `uv run pytest ...` command. Use `pytest_args` and cwd repo/case.
+- run_python: optional controlled `uv run --no-sync python ...` command. Use `python_args` and cwd repo/case.
+- run_pytest: optional controlled `uv run --no-sync pytest ...` command. Use `pytest_args` and cwd repo/case.
 - finish: end the episode with verdict pass, fail, or inconclusive.
 """.strip()
 
@@ -206,7 +224,7 @@ Action policy:
   planner_output whose affected generated_mesh request has the corrected uniform scale/bbox. Do not use
   start_mesh_assets for metadata-only sizing fixes.
 - If reports/xml_asset_generation_report.json shows a generated_xml/mjcf request failed because the asset prompt,
-  primitive body tree, joints, or actuators were underspecified or wrong, choose start_xml_assets for the affected
+  body geometry, joints, or actuators were underspecified or wrong, choose start_xml_assets for the affected
   asset_names with a complete revised planner_output whose affected XML/MJCF request integrates the concrete feedback.
 - Geometry failures such as initial intersections, invalid IPC worlds, impossible clearances, or repeated contact
   explosions are not always choreography/body-placement bugs. They can also come from generated mesh defects such as a
@@ -222,6 +240,21 @@ Action policy:
 - Only choose run_integrator after scene/body/action/rendering are all ok.
 - Only choose run_execution after integration is current.
 - Only choose run_critic after execution is current.
+- If CONFIGS.opt.enabled is true, use this generic Opt decision policy:
+  if execution failed, assets are invalid, imports are broken, metrics are absent, or the scene cannot render the
+  relevant behavior, choose repair/regeneration instead of Opt.
+  elif critic failed and required entities/control handles exist and the miss has a continuous measurable residual,
+  choose run_opt before repeated source repair.
+  elif critic failed and the evidence is structural, choose request_repair or asset regeneration.
+  elif Opt returns success, partial_success, or needs_more_optimization with a useful best, choose run_execution next.
+  elif Opt returns needs_rewrite, route repair/regeneration using Opt's diagnosis.
+  Opt candidates include missed grasp/release timing, close target misses, plausible-but-unstable contact,
+  material/friction/density/damping sensitivity, target pose offsets, controller gain sensitivity, or solver/contact
+  tolerance sensitivity. Do not choose run_opt for missing entities, invalid assets, broken imports, impossible
+  geometry, caged/stuck mechanisms, absent metrics, invisible target behavior, or cases where task semantics need to be
+  rewritten.
+- After run_opt returns success, partial_success, or needs_more_optimization, choose run_execution next so
+  artifacts/metrics/render and reports/execution_report.json are regenerated from the selected current opt params.
 - Only choose finish pass after the latest critic verdict is pass.
 - If the latest critic verdict is inconclusive because `codex_result.error_type` is `codex_usage_limit`, choose finish
   with verdict inconclusive; do not request code repair from a missing/blocked critic review.

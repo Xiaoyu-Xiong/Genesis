@@ -36,6 +36,7 @@
         "run_integrator",
         "run_execution",
         "run_critic",
+        "run_opt",
         "request_repair",
         "run_python",
         "run_pytest",

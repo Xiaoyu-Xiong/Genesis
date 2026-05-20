@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
+import sys
 
 from code_agent.configs import CONFIGS
 from code_agent.context.genesis import build_genesis_context_pack
@@ -25,6 +27,7 @@ def _cmd_run_suite(args: argparse.Namespace) -> None:
         render_fps=args.render_fps,
         deformable_enabled=args.deformable_enabled,
         ipc_enabled=args.ipc_enabled,
+        opt_enabled=args.opt_enabled,
     )
     summary_path = out_dir / "summary.json"
     print(f"Done. {summary['num_passed']}/{summary['num_cases']} cases passed. Summary: {summary_path}")
@@ -86,6 +89,9 @@ def build_parser() -> argparse.ArgumentParser:
     ipc_group = run_suite_parser.add_mutually_exclusive_group()
     ipc_group.add_argument("--enable-ipc", action="store_true", dest="ipc_enabled", default=None)
     ipc_group.add_argument("--disable-ipc", action="store_false", dest="ipc_enabled")
+    opt_group = run_suite_parser.add_mutually_exclusive_group()
+    opt_group.add_argument("--enable-opt", action="store_true", dest="opt_enabled", default=None)
+    opt_group.add_argument("--disable-opt", action="store_false", dest="opt_enabled")
     run_suite_parser.set_defaults(func=_cmd_run_suite)
 
     context_parser = sub.add_parser("build-genesis-context", help="Fetch/cache Genesis docs context for subagents.")
@@ -116,11 +122,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
+def main(*, hard_exit_after_success: bool = False) -> None:
     parser = build_parser()
     args = parser.parse_args()
     args.func(args)
+    if hard_exit_after_success and args.command == "run-suite":
+        # Some Genesis/native dependencies can abort during interpreter teardown
+        # after the suite summary has already been written. For the CLI batch
+        # path, flush user-visible output and bypass late native destructors so
+        # supervisors see the real suite completion status.
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
 
 
 if __name__ == "__main__":
-    main()
+    main(hard_exit_after_success=True)

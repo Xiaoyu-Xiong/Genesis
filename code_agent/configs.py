@@ -18,6 +18,8 @@ class CodexConfigs:
     critic_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
     worker_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
     opt_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
+    hide_builtin_assets_from_agents: bool = True
+    builtin_asset_denied_roots: tuple[str, ...] = ("genesis/assets",)
     ask_for_approval: Literal["untrusted", "on-request", "never"] = "never"
     planner_timeout_sec: float = 1500.0
     worker_timeout_sec: float = 1500.0
@@ -41,14 +43,22 @@ class HarnessConfigs:
 class OptConfigs:
     """Static defaults for Opt agent requests and low-level numerical optimization."""
 
+    enabled: bool = True
     agent_backend: Literal["cpu", "gpu"] = "gpu"
-    agent_timeout_sec: float = 1000.0
+    agent_timeout_sec: float = 2000.0
     agent_render_baseline: bool = True
     agent_render_best: bool = True
-    runner_timeout_sec: float = 1000.0
+    runner_timeout_sec: float = 1500.0
     runner_render_best: bool = True
     runner_baseline_trials: int = 1
     runner_default_initial_sigma: float = 0.25
+    runner_early_stop_enabled: bool = True
+    runner_early_stop_patience_generations: int = 3
+    runner_early_stop_min_delta: float = 1e-4
+    runner_stop_on_success: bool = True
+    runner_boundary_near_margin: float = 0.03
+    runner_boundary_warn_fraction: float = 0.5
+    runner_restart_seed_stride: int = 1009
     runner_main_file: str = "src/main.py"
     runner_trial_root: str = "artifacts/opt_trials"
     runner_best_out_dir: str = "artifacts/opt_best"

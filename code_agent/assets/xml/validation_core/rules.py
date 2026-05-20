@@ -6,13 +6,20 @@ from code_agent.assets.xml.validation_core.collectors import tag
 
 
 def validate_joint_contract(
-    joint_infos: list[dict[str, object]], errors: list[str], warnings: list[str]
+    joint_infos: list[dict[str, object]],
+    errors: list[str],
+    warnings: list[str],
+    *,
+    allow_passive_freejoint: bool = False,
 ) -> None:
     if not joint_infos:
         errors.append("XML asset must contain at least one named joint.")
         return
     non_free_joints = [joint for joint in joint_infos if joint.get("type") != "free"]
     if not non_free_joints:
+        if allow_passive_freejoint:
+            warnings.append("Accepted passive freejoint asset with no controllable non-free joints.")
+            return
         errors.append("XML asset must contain at least one controllable non-free articulated joint.")
     for joint in non_free_joints:
         joint_type = joint.get("type")
@@ -30,8 +37,12 @@ def validate_actuator_contract(
     equalities: list[dict[str, object]],
     errors: list[str],
     warnings: list[str],
+    allow_passive_freejoint: bool = False,
 ) -> None:
     if not actuators:
+        if allow_passive_freejoint:
+            warnings.append("Accepted passive freejoint asset with no actuators.")
+            return
         errors.append("XML asset must include at least one actuator for its articulated body.")
         return
 
@@ -80,7 +91,7 @@ def validate_actuator_contract(
 
 def validate_geoms(geom_infos: list[dict[str, object]], errors: list[str], warnings: list[str]) -> None:
     if not geom_infos:
-        errors.append("XML asset must include primitive geoms for its articulated body.")
+        errors.append("XML asset must include geoms for its articulated body.")
         return
     collision_geoms = [
         geom
@@ -88,7 +99,7 @@ def validate_geoms(geom_infos: list[dict[str, object]], errors: list[str], warni
         if geom.get("contype") not in {"0", "0.0"} and geom.get("conaffinity") not in {"0", "0.0"}
     ]
     if not collision_geoms:
-        errors.append("XML asset must include at least one collision-enabled primitive geom.")
+        errors.append("XML asset must include at least one collision-enabled geom.")
     untyped = [str(geom["name"]) for geom in geom_infos if not geom.get("type")]
     if untyped:
         warnings.append("Some geoms rely on default geom type: " + ", ".join(untyped))
@@ -115,6 +126,16 @@ def base_contract(root_body: ET.Element | None) -> dict[str, object]:
 def control_interface(
     actuators: list[dict[str, object]], equalities: list[dict[str, object]]
 ) -> dict[str, object]:
+    if not actuators:
+        return {
+            "actuators": [],
+            "suggested_commands": [],
+            "coupling": equality_coupling_notes(equalities),
+            "notes": [
+                "No actuators are present. This is valid only for an explicitly passive freejoint asset controlled by "
+                "initial conditions or contact from scene/action code."
+            ],
+        }
     return {
         "actuators": actuators,
         "suggested_commands": [

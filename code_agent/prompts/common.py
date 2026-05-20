@@ -34,6 +34,20 @@ Scale policy:
 """.strip()
 
 
+BUILTIN_ASSET_POLICY_GUIDE = """
+Built-in Genesis asset policy:
+- Do not inspect, copy, import, or reference prepackaged assets under `genesis/assets`.
+- Do not use `gs.utils.get_assets_dir()`, `genesis.utils.misc.get_assets_dir()`, or Genesis built-in relative asset
+  paths such as `xml/...`, `urdf/...`, or `meshes/...` for task geometry, robots, textures, or props. The only
+  exception is an XML/MJCF file referencing a mesh file that was generated into the same case workspace and validated
+  by the XML asset pipeline.
+- Use Genesis primitive morphs, case-workspace generated XML/MJCF assets, Meshy-generated assets, or explicit
+  user-provided layout assets that have been copied into the case workspace. XML/MJCF mesh references are allowed only
+  when the mesh files are generated case-workspace assets validated by the XML asset pipeline.
+- This is enforced by the Codex invocation sandbox and by static validation of planner outputs and generated source.
+""".strip()
+
+
 PHYSICAL_CAUSALITY_CRITIC_GUIDE = """
 Audit physical causality. Identify which entities are controlled, which entities are passive task objects, and which
 APIs modify them during simulation. Fail the result if a passive task object reaches the goal mainly through direct
@@ -84,7 +98,7 @@ wrong generated topology, or a visual/runtime mesh pairing defect), route the fi
 instead of asking scene/body/action/rendering workers to patch, reshape, retopologize, or procedurally replace that mesh.
 If the evidence points to a generated XML/MJCF/URDF asset itself being unsuitable for the requested mechanism
 (for example a gripper without a real opposing thumb, fingers that cannot form an enclosing cage, missing useful
-actuator affordances, wrong joint axes, invalid link hierarchy, or a body tree whose primitive geometry cannot perform
-the requested contact task), route the fix to Planner/XML asset regeneration. Do not keep assigning action/body repairs
-when the action is only failing because the generated articulated asset cannot physically do the job.
+actuator affordances, wrong joint axes, invalid link hierarchy, or body geometry that cannot perform the requested
+contact task), route the fix to Planner/XML asset regeneration. Do not keep assigning action/body repairs when the
+action is only failing because the generated articulated asset cannot physically do the job.
 """.strip()

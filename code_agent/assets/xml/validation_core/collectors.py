@@ -15,7 +15,7 @@ ACTUATOR_TAGS = {
     "velocity",
 }
 FORBIDDEN_TAGS = {"camera", "include", "light"}
-FORBIDDEN_GEOM_TYPES = {"hfield", "mesh", "plane"}
+FORBIDDEN_GEOM_TYPES = {"hfield", "plane"}
 MESH_ASSET_TAGS = {"hfield", "mesh"}
 GLOBAL_SIMULATION_TAGS = {"option"}
 
@@ -79,7 +79,7 @@ def collect_body_tree(
     )
 
     if not direct_geoms and direct_joints:
-        warnings.append(f"Body `{body_path}` has joints but no direct primitive geom.")
+        warnings.append(f"Body `{body_path}` has joints but no direct geom.")
 
     for joint in direct_joints:
         joint_tag = tag(joint)
@@ -118,7 +118,8 @@ def collect_body_tree(
         if geom_type in FORBIDDEN_GEOM_TYPES:
             errors.append(
                 f"Forbidden geom type `{geom_type}` found on `{geom_name}`. "
-                "Generated XML assets must use primitive non-plane body geoms."
+                "Generated XML assets must use non-plane body geoms; mesh geoms are allowed only with generated "
+                "case-workspace mesh files declared in the XML asset section."
             )
 
     for site in [child for child in list(body) if tag(child) == "site"]:

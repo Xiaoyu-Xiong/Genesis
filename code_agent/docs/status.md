@@ -12,6 +12,8 @@ Implemented:
 - deterministic integration into `src/main.py`
 - local uv/GPU execution with serialized Genesis subprocesses
 - deterministic artifact checks, visual evidence, and single-pass Codex Critic
+- optional Planner-invoked Opt Codex subagent, gated by `CONFIGS.opt.enabled`
+- Codex-level sandboxing and static validation that prevent generated cases from using prepackaged `genesis/assets`
 - owner-routed repair for writer-owned failures
 - ordinary rigid, rigid+IPC, and FEM+IPC capability contracts
 

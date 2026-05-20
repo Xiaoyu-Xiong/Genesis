@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -10,13 +10,12 @@ from code_agent.opt.contracts import (
     OptContractError,
     OptContracts,
     load_opt_contracts,
-    normalized_initial_sigma,
-    payload_from_vector,
-    vector_from_payload,
     write_params_payload,
 )
-from code_agent.opt.optimizers.cma_es import CMAESOptimizer, default_population_size
+from code_agent.opt.optimizers.cma_es import default_population_size
 from code_agent.opt.reports import OptReporter
+from code_agent.opt.search import CMAESStrategyRunner
+from code_agent.opt.strategy import choose_best, maximize, resolve_strategy, strategy_report
 from code_agent.opt.trials import RunOptOptions, TrialExecutor, TrialResult, payload_for_trial
 
 
@@ -69,8 +68,44 @@ class _OptRunner:
             default_params_path=self.config.default_params_path,
         )
         options = self._resolve_options(contracts)
+        strategy = resolve_strategy(contracts.opt_space)
         self.reporter.prepare()
 
+        best_result, baseline_scores, next_trial_index = self._run_baselines(contracts, options)
+        search = CMAESStrategyRunner(
+            trials=self.trials,
+            trace_callback=self.reporter.append_trace,
+            warning_callback=self.reporter.warnings.append,
+        ).run(
+            contracts=contracts,
+            options=options,
+            strategy=strategy,
+            trial_index=next_trial_index,
+            best_result=best_result,
+        )
+        best_result = search.best_result
+
+        best_render_dir = self._write_and_render_best(best_result, options)
+        verification = self.reporter.write_verification(best_result, best_render_dir, contracts.target_spec)
+        return self.reporter.write_report(
+            contracts=contracts,
+            options=options,
+            baseline_scores=baseline_scores,
+            best_result=best_result,
+            best_render_dir=best_render_dir,
+            verification_path=self.reporter.verification_report_path if verification else None,
+            default_initial_sigma=CONFIGS.opt.runner_default_initial_sigma,
+            strategy_report=strategy_report(strategy, search.phase_reports, search.stop_reason),
+        )
+
+    def write_failed_report(self, failure: str) -> dict[str, Any]:
+        return self.reporter.write_failed_report(failure)
+
+    def _run_baselines(
+        self,
+        contracts: OptContracts,
+        options: RunOptOptions,
+    ) -> tuple[TrialResult | None, list[float], int]:
         best_result: TrialResult | None = None
         baseline_scores: list[float] = []
         trial_index = 0
@@ -89,76 +124,25 @@ class _OptRunner:
             )
             self.reporter.append_trace(result.entry)
             baseline_scores.append(float(result.score.score) if result.score.score is not None else 0.0)
-            best_result = self._choose_best(best_result, result, contracts)
+            best_result = choose_best(best_result, result, maximize=maximize(contracts))
             trial_index += 1
+        return best_result, baseline_scores, trial_index
 
-        active_variables = contracts.active_variables
-        default_vector = vector_from_payload(active_variables, contracts.default_params)
-        initial_sigmas = [
-            normalized_initial_sigma(variable) or CONFIGS.opt.runner_default_initial_sigma
-            for variable in active_variables
-        ]
-        optimizer = CMAESOptimizer(
-            dim=len(active_variables),
-            mean=default_vector,
-            initial_sigmas=initial_sigmas,
-            population_size=options.population_size,
-            seed=options.seed,
+    def _write_and_render_best(self, best_result: TrialResult | None, options: RunOptOptions) -> Path | None:
+        if best_result is None:
+            return None
+        best_payload = payload_for_trial(
+            best_result.params_payload,
+            source="best",
+            trial_index=int(best_result.entry["trial_index"]),
+            metadata={"selected_by": "code_agent.opt", "score": best_result.score.score},
         )
-        remaining = options.max_trials
-        while remaining > 0:
-            count = min(optimizer.population_size, remaining)
-            candidates = optimizer.ask(count=count)
-            candidate_scores: list[float] = []
-            for candidate in candidates:
-                candidate_payload = payload_from_vector(
-                    active_variables,
-                    candidate,
-                    base_payload=contracts.default_params,
-                    source="trial",
-                    trial_index=trial_index,
-                    metadata={"kind": "cma_es", "optimizer_state": asdict(optimizer.state())},
-                )
-                result = self.trials.run_trial(
-                    trial_index=trial_index,
-                    params_payload=candidate_payload,
-                    options=options,
-                    contracts=contracts,
-                )
-                self.reporter.append_trace(result.entry)
-                candidate_scores.append(float(result.score.score) if result.score.score is not None else 0.0)
-                best_result = self._choose_best(best_result, result, contracts)
-                trial_index += 1
-                remaining -= 1
-            optimizer.tell(candidates[: len(candidate_scores)], candidate_scores, maximize=self._maximize(contracts))
-
-        best_render_dir: Path | None = None
-        if best_result is not None:
-            best_payload = payload_for_trial(
-                best_result.params_payload,
-                source="best",
-                trial_index=int(best_result.entry["trial_index"]),
-                metadata={"selected_by": "code_agent.opt", "score": best_result.score.score},
-            )
-            write_params_payload(self.reporter.best_params_path, best_payload)
-            write_params_payload(options.current_params_path, best_payload)
-            if options.render_best:
-                best_render_dir = options.best_out_dir
-                self.trials.run_best_render(best_payload, options)
-
-        verification = self.reporter.write_verification(best_result, best_render_dir, contracts.target_spec)
-        return self.reporter.write_report(
-            contracts=contracts,
-            options=options,
-            baseline_scores=baseline_scores,
-            best_result=best_result,
-            best_render_dir=best_render_dir,
-            verification_path=self.reporter.verification_report_path if verification else None,
-            default_initial_sigma=CONFIGS.opt.runner_default_initial_sigma,
-        )
-
-    def write_failed_report(self, failure: str) -> dict[str, Any]:
-        return self.reporter.write_failed_report(failure)
+        write_params_payload(self.reporter.best_params_path, best_payload)
+        write_params_payload(options.current_params_path, best_payload)
+        if not options.render_best:
+            return None
+        self.trials.run_best_render(best_payload, options)
+        return options.best_out_dir
 
     def _resolve_options(self, contracts: OptContracts) -> RunOptOptions:
         budget = contracts.opt_space.get("budget", {})
@@ -215,27 +199,6 @@ class _OptRunner:
             best_out_dir=best_out_dir,
             current_params_path=current_params_path,
         )
-
-    def _choose_best(
-        self,
-        current_best: TrialResult | None,
-        candidate: TrialResult,
-        contracts: OptContracts,
-    ) -> TrialResult:
-        if current_best is None:
-            return candidate
-        candidate_score = candidate.score.score
-        best_score = current_best.score.score
-        if candidate_score is None:
-            return current_best
-        if best_score is None:
-            return candidate
-        if self._maximize(contracts):
-            return candidate if candidate_score > best_score else current_best
-        return candidate if candidate_score < best_score else current_best
-
-    def _maximize(self, contracts: OptContracts) -> bool:
-        return contracts.target_spec["objective"]["direction"] == "maximize"
 
     def _workspace_path(self, value: Any, field_name: str) -> Path:
         text = str(value)

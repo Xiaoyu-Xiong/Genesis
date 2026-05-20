@@ -39,11 +39,78 @@
       },
       "additionalProperties": false
     },
+    "strategy": {
+      "type": "object",
+      "properties": {
+        "early_stop": { "$ref": "#/$defs/early_stop" },
+        "restarts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/restart" }
+        },
+        "phases": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/phase" }
+        }
+      },
+      "additionalProperties": false
+    },
     "assumptions": { "type": "array", "items": { "type": "string" } },
     "unresolved_risks": { "type": "array", "items": { "type": "string" } }
   },
   "additionalProperties": false,
   "$defs": {
+    "early_stop": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "patience_generations": { "type": "integer", "minimum": 1 },
+        "min_delta": { "type": "number", "minimum": 0 },
+        "stop_on_success": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "restart": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "max_trials": { "type": ["integer", "null"], "minimum": 1 },
+        "sigma_scale": { "type": "number", "exclusiveMinimum": 0 },
+        "seed": { "type": ["integer", "null"] },
+        "population_size": { "type": ["integer", "null"], "minimum": 2 },
+        "start_from_best": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "phase": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "groups": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/$defs/variable_group" }
+        },
+        "variables": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+          }
+        },
+        "max_trials": { "type": ["integer", "null"], "minimum": 1 },
+        "sigma_scale": { "type": "number", "exclusiveMinimum": 0 },
+        "population_size": { "type": ["integer", "null"], "minimum": 2 },
+        "start_from_best": { "type": "boolean" },
+        "restarts": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/$defs/restart" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "variable_group": {
+      "type": "string",
+      "enum": ["timing", "target", "control", "material", "contact", "solver", "other"]
+    },
     "variable": {
       "type": "object",
       "required": ["name", "type", "default", "bounds", "scale", "owner", "description"],
@@ -61,7 +128,7 @@
           "maxItems": 2
         },
         "scale": { "type": "string", "enum": ["linear", "log"] },
-        "owner": { "type": "string", "enum": ["scene", "body", "action", "rendering"] },
+        "owner": { "type": "string", "enum": ["scene", "body", "action"] },
         "description": { "type": "string", "minLength": 1 },
         "group": {
           "type": ["string", "null"],

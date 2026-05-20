@@ -11,8 +11,8 @@ The active runtime is Planner-led:
    or GitHub mesh/texture files; those assets are copied or downloaded verbatim, sanity-checked once, and exposed as
    `repo_asset` entries in `assets/asset_manifest.json`.
 2. `planner/session.py` runs Planner turns. Planner emits one JSON action at a time.
-3. `planner/action_handlers/` executes actions: start/wait asset jobs, spawn writers, integrate, run, evaluate, repair,
-   or finish.
+3. `planner/action_handlers/` executes actions: start/wait asset jobs, spawn writers, integrate, run, optionally call
+   the Opt subagent, evaluate, repair, or finish.
 4. `writer/` owns four generated modules: `scene.py`, `body.py`, `action.py`, and `rendering.py`.
 5. `evaluation/` combines deterministic artifact checks, visual evidence, and the read-only Codex Critic.
 
@@ -43,6 +43,9 @@ Planner can start mesh or XML/MJCF asset jobs in the background:
 
 Ready assets are merged into `assets/asset_manifest.json`. Writers must use manifest paths and metadata rather than
 guessing filesystem locations.
+
+The optional Opt subagent is controlled by `CONFIGS.opt.enabled` and can be overridden per suite with
+`--enable-opt` / `--disable-opt`.
 
 Layouts can provide ready reusable mesh assets without invoking text-to-mesh generation. These entries use
 `source_type="repo_asset"` and preserve the source file bytes; sanity-check results are reported in

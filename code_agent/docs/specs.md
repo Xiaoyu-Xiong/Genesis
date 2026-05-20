@@ -17,6 +17,7 @@ Current Planner actions:
 - `run_integrator`
 - `run_execution`
 - `run_critic`
+- `run_opt`
 - `request_repair`
 - `run_python`
 - `run_pytest`
@@ -42,7 +43,8 @@ task-appropriate FEM `friction_mu` values per material.
 Optimization contract schemas live under `code_agent/specs/opt_schema/`:
 
 - `target_spec.schema.json`: task target, objective terms, and success criteria.
-- `opt_space.schema.json`: CMA-ES search variables, defaults, bounds, ownership, and trial budget.
+- `opt_space.schema.json`: CMA-ES search variables, defaults, bounds, physical/action ownership, trial budget, and
+  optional strategy knobs for phases, restarts, and early stopping.
 - `opt_params.schema.json`: structured default/current/best parameter payloads consumed by generated modules.
 - `opt_trace_entry.schema.json`: one JSONL record per optimization trial.
 - `opt_report.schema.json`: optimization summary, baseline score, best trial, and report paths.
@@ -51,3 +53,5 @@ Optimization contract schemas live under `code_agent/specs/opt_schema/`:
 
 These schemas define the parameter optimization interface. The current Opt entry point invokes a Codex subagent that can
 prepare generated modules/contracts and call the lower-level optimizer runner.
+Optimization variables may be owned by `scene`, `body`, or `action`; `rendering` is intentionally excluded from the
+optimization surface.

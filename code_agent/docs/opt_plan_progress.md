@@ -67,7 +67,7 @@ Opt owns the optimization pass.
 Opt should:
 
 - Inspect generated source, contracts, artifacts, reports, metrics, and videos.
-- Identify optimizable parameters and their owners.
+- Identify optimizable physical/control parameters and their owners in `scene`, `body`, or `action`.
 - Patch generated code to read opt params when needed.
 - Create or revise `target_spec.json`, `opt_space.json`, and `default_opt_params.json`.
 - Choose an optimizer backend and budget use.
@@ -79,6 +79,7 @@ Opt should not:
 
 - Change task semantics.
 - Add hidden constraints, attachments, suction, or direct post-initialization object state writes.
+- Edit `src/rendering.py` or optimize rendering/camera/visual-only variables.
 - Replace assets or mechanisms without reporting `needs_rewrite`.
 - Become a second Planner.
 
@@ -117,6 +118,7 @@ Example:
   "allowed_edits": [
     "src/action.py",
     "src/body.py for material/contact hooks",
+    "src/scene.py for solver/contact/timestep hooks",
     "contracts/*.json",
     "reports/*.json",
     "artifacts/opt_*"
@@ -124,7 +126,8 @@ Example:
   "forbidden_changes": [
     "Do not change task semantics.",
     "Do not directly write dynamic object state after initialization.",
-    "Do not add hidden constraints or attachments."
+    "Do not add hidden constraints or attachments.",
+    "Do not edit src/rendering.py or optimize rendering/camera/visual-only variables."
   ],
   "optimization_budget": {
     "max_rollouts": 20,
@@ -239,8 +242,10 @@ subagent may call after it has prepared contracts and parameter hooks.
 
 ## Parameter Scope
 
-Opt should be free to propose geometric, schedule, control, material, contact, or solver parameters, as long as they are
-bounded, physically meaningful, and connected to observable metrics.
+Opt should be free to propose geometric, schedule, control, material, contact, or solver parameters owned by
+`scene.py`, `body.py`, or `action.py`, as long as they are bounded, physically meaningful, and connected to observable
+metrics. `rendering.py` is excluded from the optimization surface; camera or visual-evidence failures should be routed
+back to Planner as rendering repair needs.
 
 Examples:
 
@@ -370,12 +375,33 @@ patches code safely, and diagnoses structural failures without pre-existing opt 
 
 ### M4: Planner Integration
 
-Status: pending.
+Status: implemented at action level; needs end-to-end suite validation.
 
-- Add Planner guidance for when to call Opt.
-- Add Planner handling for Opt result statuses.
-- Feed Opt reports into Critic.
-- Preserve the old pipeline for cases that do not need optimization.
+- Added Planner action `run_opt`, routed through `RuntimeActionHandler.run_opt`.
+- `run_opt` is gated by the suite's effective Opt setting. It defaults to `CONFIGS.opt.enabled` and can be overridden
+  with `run-suite --enable-opt` or `run-suite --disable-opt`; when disabled, Planner must use the normal
+  execution/critic/repair path.
+- Planner prompt now describes when to use Opt and when to avoid it.
+- The episode state now tracks Opt enabled/status/attempts/latest result/history.
+- On `success`, `partial_success`, or `needs_more_optimization`, the handler syncs `best_opt_params.json` to
+  `current_opt_params.json` and marks the case for `run_execution` so root artifacts are regenerated from the selected
+  optimized parameters before Critic acceptance.
+- Critic prompts now include Opt reports and opt parameter payloads when present, but still judge the current execution
+  artifacts independently.
+- `run_opt_agent` now recovers fresh lower-level `reports/opt_report.json` evidence when the Codex Opt subagent times
+  out or exits nonzero after running optimization. This prevents completed CMA-ES traces and best-parameter payloads
+  from being discarded just because the reporting subagent missed its final JSON deadline.
+- Planner/Opt decision guidance is now more general: Planner is prompted to call Opt only for runnable cases with
+  continuous measurable residuals and real action/body/scene control handles, and to route structural failures to
+  repair/regeneration.
+- Opt success now requires visual evidence when best rendering is requested. The Opt prompt requires a
+  `video_checked=...` evidence item, and the Planner-facing harness downgrades `success`/`partial_success` to
+  `needs_more_optimization` if the best video path or explicit video/frame inspection evidence is missing.
+- The low-level CMA-ES runner now supports agent-selected `strategy.phases`, `strategy.restarts`, and
+  `strategy.early_stop` entries in `contracts/opt_space.json`. Reports include strategy diagnostics, sparse-objective
+  warnings, and best-parameter boundary warnings.
+- The old pipeline is preserved: if `CONFIGS.opt.enabled` is false or Planner never chooses `run_opt`, generation,
+  execution, critic, and repair proceed as before.
 
 Gate:
 

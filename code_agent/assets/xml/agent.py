@@ -13,7 +13,7 @@ from code_agent.assets.xml.validation_core.manifest import manifest_entry_from_x
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import dump_json
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
-from code_agent.prompts.common import PHYSICAL_CAUSALITY_CONTRACT, SCALE_POLICY_GUIDE
+from code_agent.prompts.common import BUILTIN_ASSET_POLICY_GUIDE, PHYSICAL_CAUSALITY_CONTRACT, SCALE_POLICY_GUIDE
 
 
 def generate_xml_asset(
@@ -22,6 +22,8 @@ def generate_xml_asset(
     output_dir: Path,
     logical_name: str | None = None,
     max_attempts: int = CONFIGS.xml_asset.max_generation_attempts,
+    allow_passive_freejoint: bool = False,
+    allowed_mesh_asset_roots: tuple[Path, ...] = (),
 ) -> dict[str, Any]:
     """Run a standalone Codex XML worker and validate the generated MJCF asset."""
 
@@ -46,6 +48,7 @@ def generate_xml_asset(
             logical_name=logical_name,
             attempt_index=attempt_index,
             previous_context=previous_context,
+            allow_passive_freejoint=allow_passive_freejoint,
         )
         result = run_codex_exec(
             CodexExecRequest(
@@ -58,21 +61,33 @@ def generate_xml_asset(
                 output_jsonl_path=logs_dir / f"codex_xml_attempt_{attempt_index}.jsonl",
                 final_message_path=logs_dir / f"codex_xml_attempt_{attempt_index}.final.json",
                 timeout_sec=CONFIGS.codex.worker_timeout_sec,
+                writable_roots=(output_dir,),
             )
         )
         worker_report, worker_error = _load_worker_report(Path(result.final_message_path))
         resolved_xml_path = _resolve_generated_xml_path(worker_report, output_dir, preferred_path=xml_path)
-        validation_report = validate_xml_asset(resolved_xml_path) if resolved_xml_path else _missing_xml_report(xml_path)
+        validation_report = (
+            validate_xml_asset(
+                resolved_xml_path,
+                allow_passive_freejoint=allow_passive_freejoint,
+                allowed_asset_roots=(output_dir, *allowed_mesh_asset_roots),
+            )
+            if resolved_xml_path
+            else _missing_xml_report(xml_path)
+        )
         preview_report = (
             render_xml_preview(resolved_xml_path, output_dir / "previews" / f"attempt_{attempt_index:02d}")
             if validation_report.get("mujoco_ok") and resolved_xml_path is not None
             else _skipped_preview_report(resolved_xml_path, "MuJoCo validation did not pass.")
         )
-        actuator_response_report = (
-            run_actuator_response_check(resolved_xml_path)
-            if validation_report.get("mujoco_ok") and resolved_xml_path is not None
-            else _skipped_actuator_response_report(resolved_xml_path, "MuJoCo validation did not pass.")
-        )
+        if validation_report.get("passive_freejoint_ok"):
+            actuator_response_report = _passive_freejoint_actuator_response_report(resolved_xml_path)
+        else:
+            actuator_response_report = (
+                run_actuator_response_check(resolved_xml_path)
+                if validation_report.get("mujoco_ok") and resolved_xml_path is not None
+                else _skipped_actuator_response_report(resolved_xml_path, "MuJoCo validation did not pass.")
+            )
         manifest_entry = manifest_entry_from_xml_validation(
             logical_name=logical_name,
             xml_path=resolved_xml_path or xml_path,
@@ -158,6 +173,7 @@ def _xml_worker_prompt(
     logical_name: str,
     attempt_index: int,
     previous_context: dict[str, Any] | None,
+    allow_passive_freejoint: bool,
 ) -> str:
     repair_context = ""
     if previous_context is not None:
@@ -165,6 +181,16 @@ def _xml_worker_prompt(
             "\nPrevious attempt failed. Repair the XML instead of hand-waving around the failure.\n"
             f"{json.dumps(previous_context, indent=2, ensure_ascii=False)}\n"
         )
+    passive_rules = ""
+    if allow_passive_freejoint:
+        passive_rules = """
+        Passive projectile exception:
+        - This asset request is for a passive free rigid object, not an actively controlled mechanism.
+        - You may create one movable body with exactly one named <freejoint> and collision geoms.
+        - In this passive-projectile mode, an <actuator> section is optional and should usually be omitted.
+        - The Action Worker will set initial pose/velocity or interact through external robot/contact code; do not add
+          fake motors just to satisfy an articulated-asset convention.
+        """
     return textwrap.dedent(
         f"""
         You are the standalone XML/MJCF asset worker for the Genesis code-agent asset system.
@@ -187,15 +213,18 @@ def _xml_worker_prompt(
           <worldbody>.
         - Include joints, inertials/geoms/sites/tendons/equality constraints only when they belong to this one
           articulated asset.
-        - Include a complete <actuator> section for the articulated body. Actuators must be named, target valid
-          joints/tendons/sites/bodies, and expose useful ctrlrange values when applicable.
+        - Include a complete <actuator> section for actively controlled articulated bodies. Actuators must be named,
+          target valid joints/tendons/sites/bodies, and expose useful ctrlrange values when applicable.
         - Do not include scene-level ground, free props, projectiles, bins, ramps, arenas, task obstacles, cameras,
           lights, or global simulation staging.
         - Do not include <option> or other global simulation settings such as gravity, timestep, solver, integrator, or
           global contact options. Those belong to the Scene/Simulation harness, not the asset XML.
-        - Do not use mesh or hfield assets. Use primitive MJCF geoms only.
+        - Mesh geoms are allowed only when the mesh files are generated by you or by the case asset pipeline and live
+          under the output directory or case asset workspace. Do not reference Genesis built-in meshes, repository
+          sample meshes, external downloads, hfields, or texture files.
         - Prefer named joints, named actuators, explicit joint ranges, collision-enabled primitive geoms, and sensible
-          masses/inertias.
+          masses/inertias. Use generated mesh geoms only when primitive geometry is insufficient for the requested
+          asset shape or contact behavior.
         - If the asset may be used as a fixed-base IPC external articulation, every parent and child link participating
           in a driven joint must have collision geometry. Do not leave a logical mount body empty. Add a tiny
           nonzero-volume primitive dummy collision geom to a mount parent when needed; it must not have both `contype`
@@ -203,15 +232,18 @@ def _xml_worker_prompt(
         - The result should satisfy the text prompt and also look physically coherent and visually understandable.
         - If the request implies grasping, gates, locks, buttons, hinges, sliders, latches, or tools, make the actuator
           interface explicit enough for an Action Worker to command it without reverse-engineering the XML.
+        {passive_rules}
         {PHYSICAL_CAUSALITY_CONTRACT}
         {SCALE_POLICY_GUIDE}
+        {BUILTIN_ASSET_POLICY_GUIDE}
 
         Final response requirements:
         - Return JSON matching code_agent/specs/xml_worker_report.schema.json.
         - `xml_path` must be the path to the generated file.
         - `changed_files` must include the XML path.
         - `actuator_contract.actuators` must describe every actuator with name, type/control mode, target, command
-          range, neutral command, and suggested schedule semantics.
+          range, neutral command, and suggested schedule semantics. For a passive-projectile freejoint asset, this list
+          may be empty and the notes should state that the asset is passive.
         {repair_context}
         """
     ).strip()
@@ -299,6 +331,17 @@ def _skipped_actuator_response_report(xml_path: Path | None, reason: str) -> dic
         "errors": [reason],
         "warnings": [],
         "actuators": [],
+    }
+
+
+def _passive_freejoint_actuator_response_report(xml_path: Path | None) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "xml_path": None if xml_path is None else str(xml_path),
+        "errors": [],
+        "warnings": ["Actuator response probe skipped for an accepted passive freejoint asset."],
+        "actuators": [],
+        "passive_freejoint": True,
     }
 
 

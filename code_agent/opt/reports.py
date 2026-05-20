@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from code_agent.configs import CONFIGS
 from code_agent.io_utils import dump_json
-from code_agent.opt.contracts import OptContracts, normalized_initial_sigma
+from code_agent.opt.contracts import OptContracts, encode_value, get_dotted, normalized_initial_sigma
 from code_agent.opt.trials import RunOptOptions, TrialResult
 
 
@@ -89,6 +90,7 @@ class OptReporter:
         best_render_dir: Path | None,
         verification_path: Path | None,
         default_initial_sigma: float,
+        strategy_report: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         completed_count = sum(1 for entry in self.trace_entries if entry["status"] == "completed")
         status = "completed" if completed_count > 0 else "inconclusive"
@@ -96,6 +98,11 @@ class OptReporter:
         best_trial = None if best_result is None else int(best_result.entry["trial_index"])
         best_score = None if best_result is None else best_result.score.score
         direction = contracts.target_spec["objective"]["direction"]
+        warnings = [
+            *self.warnings,
+            *self._objective_shape_warnings(contracts.target_spec),
+            *self._boundary_warnings(contracts, best_result),
+        ]
         summary = self._summary(status, baseline_score, best_score, direction)
         report = {
             "schema_version": 1,
@@ -122,10 +129,11 @@ class OptReporter:
                 "backend": options.backend,
                 "timeout_sec": options.timeout_sec,
                 "render_best": options.render_best,
+                "strategy": strategy_report,
             },
             "summary": summary,
             "failures": self.failures,
-            "warnings": self.warnings,
+            "warnings": warnings,
         }
         dump_json(report, self.opt_report_path)
         return report
@@ -155,3 +163,44 @@ class OptReporter:
         improved = best_score > baseline_score if direction == "maximize" else best_score < baseline_score
         label = "improved" if improved else "did not improve"
         return f"Optimization {status}; best score {label} over baseline ({best_score:.6g} vs {baseline_score:.6g})."
+
+    def _objective_shape_warnings(self, target_spec: dict[str, Any]) -> list[str]:
+        objective = target_spec.get("objective")
+        terms = objective.get("terms") if isinstance(objective, dict) else None
+        if not isinstance(terms, list) or not terms:
+            return ["Objective has no shaped terms; optimization evidence may be too sparse."]
+        sparse_transforms = {"reward_if_true", "penalty_if_true", "custom"}
+        transforms = {str(term.get("transform")) for term in terms if isinstance(term, dict)}
+        warnings: list[str] = []
+        if transforms and transforms <= sparse_transforms:
+            warnings.append(
+                "Objective terms are binary/custom only; add continuous proxy metrics such as distance, speed, "
+                "event timing, contact count, or pose error for more reliable CMA-ES search."
+            )
+        if not target_spec.get("success_criteria"):
+            warnings.append("No explicit success_criteria were provided; score improvement is not final task success.")
+        return warnings
+
+    def _boundary_warnings(self, contracts: OptContracts, best_result: TrialResult | None) -> list[str]:
+        if best_result is None:
+            return []
+        params = best_result.params_payload.get("params", {})
+        margin = CONFIGS.opt.runner_boundary_near_margin
+        near_bounds: list[str] = []
+        for variable in contracts.active_variables:
+            value = get_dotted(params, variable.name)
+            if value is None:
+                continue
+            normalized = encode_value(variable, value)
+            if normalized <= margin or normalized >= 1.0 - margin:
+                side = "lower" if normalized <= margin else "upper"
+                near_bounds.append(f"{variable.name} near {side} bound ({float(value):.6g})")
+        if not near_bounds:
+            return []
+        fraction = len(near_bounds) / max(1, len(contracts.active_variables))
+        if fraction >= CONFIGS.opt.runner_boundary_warn_fraction:
+            return [
+                "Many best parameters are near search bounds; Opt should review whether ranges are too narrow or "
+                f"the remaining failure is structural: {', '.join(near_bounds)}."
+            ]
+        return [f"Best parameter near search bound: {item}." for item in near_bounds]

@@ -5,9 +5,10 @@ import json
 import textwrap
 from pathlib import Path
 
+from code_agent.assets.builtin_guard import BUILTIN_ASSET_POLICY, source_file_builtin_asset_violations
+from code_agent.configs import CONFIGS
 from code_agent.io_utils import load_json_object
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
-from code_agent.configs import CONFIGS
 
 from . import action, body, rendering, scene
 from code_agent.prompts.worker import FEM_IPC_API_GUIDE, RIGID_API_GUIDE, WORKER_COMMON_RULES
@@ -208,10 +209,18 @@ def _run_worker(
             output_jsonl_path=logs_dir / f"codex_{invocation_role}.jsonl",
             final_message_path=logs_dir / f"codex_{invocation_role}.final.json",
             timeout_sec=CONFIGS.codex.worker_timeout_sec,
+            writable_roots=(case_dir,),
         )
     )
     worker_report, error_message = _parse_worker_report(Path(result.final_message_path))
     target_source = target_path.read_text(encoding="utf-8", errors="replace") if target_path.exists() else ""
+    builtin_asset_violations = source_file_builtin_asset_violations(target_path, case_dir=case_dir)
+    if builtin_asset_violations:
+        error_message = _append_error_message(
+            error_message,
+            "Generated worker source references forbidden Genesis built-in assets: "
+            + "; ".join(builtin_asset_violations),
+        )
     ok = (
         result.success
         and worker_report is not None
@@ -221,6 +230,7 @@ def _run_worker(
         and target_path.exists()
         and target_path.stat().st_size > 0
         and "NotImplementedError" not in target_source
+        and not builtin_asset_violations
     )
     return WorkerDispatchResult(
         role=spec.role,
@@ -283,6 +293,9 @@ def _worker_prompt(
 
         Genesis documentation and local-code context:
         {genesis_context}
+
+        Built-in asset restriction:
+        {BUILTIN_ASSET_POLICY}
 
         Context roots:
         - Repository root: {DEFAULT_REPO_ROOT}
@@ -385,6 +398,12 @@ def _parse_worker_report(path: Path) -> tuple[dict[str, object] | None, str | No
     if not isinstance(data, dict):
         return None, "worker final message is not a JSON object"
     return data, None
+
+
+def _append_error_message(current: str | None, addition: str) -> str:
+    if current:
+        return current + "\n" + addition
+    return addition
 
 
 def _changed_files_include_target(worker_report: dict[str, object], target_file: str) -> bool:

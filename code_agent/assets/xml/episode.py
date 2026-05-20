@@ -144,7 +144,7 @@ def build_xml_manifest(entries: list[dict[str, Any]], *, skipped_names: list[str
         "assets": entries,
         "assumptions": [
             "Generated XML/MJCF assets are written before manifest-dependent code writers run.",
-            "MJCF dimensions are baked into primitive geometry by the XML worker; do not expect mesh-style scaling.",
+            "MJCF dimensions are baked into generated XML geometry by the XML worker; do not expect mesh-style scaling.",
         ],
         "unresolved_risks": unresolved,
     }
@@ -186,6 +186,8 @@ def _generate_one_xml_asset(
         output_dir=output_dir,
         logical_name=logical_name,
         max_attempts=CONFIGS.xml_asset.max_generation_attempts,
+        allow_passive_freejoint=_allows_passive_freejoint_asset(request),
+        allowed_mesh_asset_roots=(output_root.parent,),
     )
     manifest_entry = _manifest_entry_from_generation(request, generation)
     ok = bool(generation.get("ok")) and manifest_entry.get("status") == "ready"
@@ -230,6 +232,62 @@ def _generation_error(generation: dict[str, Any]) -> str:
             if isinstance(validation, dict) and validation.get("errors"):
                 return "; ".join(str(item) for item in validation["errors"])
     return "XML asset generation failed."
+
+
+def _allows_passive_freejoint_asset(request: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(request.get(key, ""))
+        for key in ("name", "asset_type", "purpose", "simulation_role", "texture_needs")
+    ).lower()
+    negative_control_phrases = (
+        "no actuator",
+        "no actuators",
+        "without actuator",
+        "without actuators",
+        "not actuated",
+        "non-actuated",
+    )
+    marker_text = text
+    for phrase in negative_control_phrases:
+        marker_text = marker_text.replace(phrase, "")
+    passive_markers = (
+        "passive",
+        "projectile",
+        "loose",
+        "free rigid",
+        "freejoint",
+        "free joint",
+        "thrown",
+        "toss",
+        "flick",
+        "puck",
+        "ball",
+        "ring",
+        "coin",
+    )
+    controlled_markers = (
+        "robot",
+        "arm",
+        "gripper",
+        "hand",
+        "actuator",
+        "actuated",
+        "motor",
+        "servo",
+        "hinge",
+        "slider",
+        "gate",
+        "windmill",
+        "drawer",
+        "door",
+        "mechanism",
+        "striker",
+        "flipper",
+        "putter",
+    )
+    return any(marker in text for marker in passive_markers) and not any(
+        marker in marker_text for marker in controlled_markers
+    )
 
 
 def _preserved_ready_xml_manifest_entries(manifest_path: Path, selected_names: set[str]) -> list[dict[str, Any]]:

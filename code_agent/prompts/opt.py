@@ -5,7 +5,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from code_agent.prompts.common import PHYSICAL_CAUSALITY_CONTRACT, SOURCE_AWARE_REPAIR_GUIDE
+from code_agent.prompts.common import BUILTIN_ASSET_POLICY_GUIDE, PHYSICAL_CAUSALITY_CONTRACT, SOURCE_AWARE_REPAIR_GUIDE
 
 if TYPE_CHECKING:
     from code_agent.opt.types import OptAgentRequest
@@ -30,30 +30,37 @@ Case workspace summary:
 
 Core responsibilities:
 - Inspect the generated case before editing. Read relevant `src/scene.py`, `src/body.py`, `src/action.py`,
-  `src/rendering.py`, `src/main.py`, existing `contracts/*.json`, `reports/*.json`, and `artifacts/*/metrics.json`.
+  `src/main.py`, existing `contracts/*.json`, `reports/*.json`, and `artifacts/*/metrics.json`. You may read
+  `src/rendering.py` only to understand evidence wiring, but it is outside the optimization/edit surface.
 - Decide from the source and evidence whether optimization is appropriate. If the failure is structural, missing assets,
   missing control handles, impossible geometry, absent metrics, or invalid simulation code, return `needs_rewrite`
   instead of forcing a numeric optimization pass.
 - If optimization is appropriate, identify a compact low-dimensional set of physically meaningful scalar parameters.
   You may expose action targets/timings/controller gains, body material/contact parameters, scene solver/contact
-  parameters, or rendering variables only when they are relevant to the target. Do not optimize irrelevant constants.
+  parameters. Do not expose rendering, camera, lighting, capture, or visual-only variables, and do not optimize
+  irrelevant constants.
 - Patch generated modules so they read `contracts/current_opt_params.json` when present, fall back to
   `contracts/default_opt_params.json`, and remain runnable without optimization. Record loaded opt params and relevant
   measured quantities in `metrics.json`.
 - Create or revise `contracts/target_spec.json`, `contracts/opt_space.json`, and `contracts/default_opt_params.json`
   using the schemas in `code_agent/specs/opt_schema/`.
 - Use the existing runner whenever possible:
-  `uv run python -m code_agent.cli run-opt --case-dir {case_dir} --backend {request.backend}`.
+  `uv run --no-sync python -m code_agent.cli run-opt --case-dir {case_dir} --backend {request.backend}`.
   Add `--max-trials`, `--timeout-sec`, `--steps`, `--duration-sec`, and `--render-fps` only when useful or requested.
 - Render visual evidence when requested. If you need a separate baseline render, run the generated `src/main.py` from
-  the case workspace with `uv run python src/main.py --backend {request.backend} --out-dir artifacts/opt_agent_baseline
-  --render` plus requested timing flags.
+  the case workspace with `uv run --no-sync python src/main.py --backend {request.backend} --out-dir
+  artifacts/opt_agent_baseline --render` plus requested timing flags.
 - After optimization, inspect `reports/opt_report.json`, `reports/verification_report.json`, best params, metrics, and
-  videos. Decide whether the outcome is `success`, `partial_success`, `needs_more_optimization`, `needs_rewrite`, or
-  `failed`.
+  videos. You must inspect visual evidence before returning `success` or `partial_success`: sample frames from the best
+  render/video, compare them against the intended behavior, and include an evidence item beginning with
+  `video_checked=` that names the inspected video or frames and the visual conclusion. Numeric score alone is not
+  sufficient for success. If the metrics look good but the video is missing, unreadable, camera-obscured, or visually
+  contradicts the goal, return `needs_more_optimization`, `needs_rewrite`, or `failed` with the concrete reason.
+  Decide whether the outcome is `success`, `partial_success`, `needs_more_optimization`, `needs_rewrite`, or `failed`.
 
 Hard safety constraints:
 {PHYSICAL_CAUSALITY_CONTRACT}
+{BUILTIN_ASSET_POLICY_GUIDE}
 
 Source-aware diagnosis guidance:
 {SOURCE_AWARE_REPAIR_GUIDE}
@@ -65,10 +72,12 @@ Forbidden changes from Planner:
 {json.dumps(list(request.forbidden_changes), indent=2)}
 
 Implementation rules:
-- Use `uv run ...` for Python commands. Do not run bare `python`, `python -m`, or `pytest`.
+- Use `uv run --no-sync ...` for Python commands. Do not run bare `python`, `python -m`, or `pytest`.
 - Keep edits inside the case workspace unless you are only reading repository documentation/schemas.
 - Do not edit `code_agent/opt/` or repository source during this Opt pass. Your edits should prepare the generated case,
   not alter the optimizer implementation.
+- Do not edit `src/rendering.py`. If visual evidence is unclear because of camera/rendering, report that Planner should
+  route a rendering repair instead of treating rendering as an Opt parameter.
 - Do not add hidden constraints, fake attachments, direct post-initialization object state writes, or task-object
   teleportation. Optimization must tune physical parameters or controls that the generated simulation uses honestly.
 - Do not change the task semantics, required entities, or success target to make the case easier.
@@ -76,6 +85,13 @@ Implementation rules:
 - Prefer `scale: "log"` for positive variables spanning orders of magnitude, such as stiffness, damping, density,
   contact stiffness, tolerances, and controller gains.
 - If you add metrics, make them observable quantities from the simulation state, not values copied from the target.
+  Define shaped objective terms whenever possible: distance-to-target, velocity error, event timing, contact count,
+  closest approach, pose/joint error, stability margin, or task-object retention. Keep binary pass/fail as
+  `success_criteria`, not as the only optimization signal.
+- Use the runner's generic strategy knobs when useful rather than hand-coding task-specific search logic:
+  `strategy.phases` can optimize one variable group at a time, `strategy.restarts` can run multiple seeds/sigma scales,
+  and `strategy.early_stop` can stop after success or several non-improving generations. Do not use low-fidelity
+  timing/render shortcuts unless Planner explicitly asks for them.
 - If you cannot safely expose variables, return `needs_rewrite` with concrete owner guidance.
 
 Required final response:
@@ -95,6 +111,7 @@ The final JSON fields are:
 - `diagnosis`: what happened and why
 - `recommendation`: what Planner should do next
 - `evidence`: concise path/value evidence
+  Include `video_checked=...` when status is `success` or `partial_success`.
 - `opt_report_path`: usually `reports/opt_report.json`, or null if optimization did not run
 - `failures`: concrete blockers or errors
 """.strip()

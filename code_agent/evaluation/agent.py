@@ -8,7 +8,7 @@ from typing import Any
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import load_json_object
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
-from code_agent.prompts.common import SOURCE_AWARE_REPAIR_GUIDE
+from code_agent.prompts.common import BUILTIN_ASSET_POLICY_GUIDE, SOURCE_AWARE_REPAIR_GUIDE
 from code_agent.prompts.critic import (
     CRITIC_ASSET_EVALUATION_GUIDE,
     CRITIC_DECISION_GUIDE,
@@ -43,6 +43,7 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
             output_jsonl_path=logs_dir / "codex_critic.jsonl",
             final_message_path=logs_dir / "codex_critic.final.json",
             timeout_sec=CONFIGS.codex.critic_timeout_sec,
+            writable_roots=(run_dir,),
         )
     )
     report = load_json_object(Path(result.final_message_path))
@@ -86,6 +87,11 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
     planner_output = _read_text(run_dir / "contracts" / "planner_output.json")
     timing_contract = _read_text(run_dir / "contracts" / "timing.json")
     deformable_config = _read_text(run_dir / "contracts" / "deformable_config.json")
+    opt_subagent_report = _read_text(run_dir / "reports" / "opt_subagent_report.json")
+    opt_report = _read_text(run_dir / "reports" / "opt_report.json")
+    opt_verification = _read_text(run_dir / "reports" / "verification_report.json")
+    current_opt_params = _read_text(run_dir / "contracts" / "current_opt_params.json")
+    best_opt_params = _read_text(run_dir / "contracts" / "best_opt_params.json")
     asset_manifest = _read_text(run_dir / "assets" / "asset_manifest.json")
     asset_evidence = _asset_evidence_bundle(run_dir)
     genesis_context = _genesis_context_pointer(run_dir)
@@ -132,6 +138,22 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         FEM/IPC capability/config contract:
         {deformable_config}
 
+        Optimization evidence, if Opt was used:
+        Opt subagent report:
+        {opt_subagent_report}
+
+        Low-level opt report:
+        {opt_report}
+
+        Opt verification report:
+        {opt_verification}
+
+        Current opt params:
+        {current_opt_params}
+
+        Best opt params:
+        {best_opt_params}
+
         Asset manifest:
         {asset_manifest}
 
@@ -161,6 +183,8 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         {CRITIC_ASSET_EVALUATION_GUIDE}
 
         {CRITIC_VISUAL_EVIDENCE_GUIDE}
+
+        {BUILTIN_ASSET_POLICY_GUIDE}
 
         If repair is needed, use `repair_summary` for this guidance:
         {SOURCE_AWARE_REPAIR_GUIDE}
@@ -193,6 +217,11 @@ def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, An
         "planner_output": run_dir / "contracts" / "planner_output.json",
         "timing_contract": run_dir / "contracts" / "timing.json",
         "deformable_config": run_dir / "contracts" / "deformable_config.json",
+        "opt_subagent_report": reports_dir / "opt_subagent_report.json",
+        "opt_report": reports_dir / "opt_report.json",
+        "opt_verification": reports_dir / "verification_report.json",
+        "current_opt_params": run_dir / "contracts" / "current_opt_params.json",
+        "best_opt_params": run_dir / "contracts" / "best_opt_params.json",
         "asset_manifest": run_dir / "assets" / "asset_manifest.json",
         "stdout": reports_dir / "stdout.txt",
         "stderr": reports_dir / "stderr.txt",
@@ -229,6 +258,8 @@ def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, An
             "Generated asset source and preview paths are included so asset morphology can be judged directly.",
             "Large evidence files are referenced by path so the critic can inspect them without exceeding input limits.",
             "The event log is complete on disk and should be sampled or searched as needed.",
+            "If Opt was used, compare the Opt report against the current root artifacts; do not treat Opt success as "
+            "final acceptance unless the rerun artifacts and source evidence are physically faithful.",
         ],
     }
     index_path = reports_dir / "critic_evidence_index.json"

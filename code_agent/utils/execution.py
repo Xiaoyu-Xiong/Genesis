@@ -96,7 +96,7 @@ def run_generated_simulation(
                 main_file=main_file,
                 output_dir=reports_dir,
                 timeout_sec=timeout_sec,
-                python_executable="uv run python",
+                python_executable="uv run --no-sync python",
                 extra_args=tuple(extra_args),
                 extra_artifact_paths=("artifacts",),
                 env={"GENESIS_BACKEND": backend},
@@ -153,6 +153,7 @@ def _maybe_render_initial_without_ipc(
     command = [
         "uv",
         "run",
+        "--no-sync",
         "python",
         "-m",
         "code_agent.utils.initial_render",

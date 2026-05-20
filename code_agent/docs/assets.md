@@ -19,6 +19,21 @@ validate partial manifests and merge ready entries into `assets/asset_manifest.j
 `inspect_assets` writes `reports/asset_inspection_report.json` plus preview images for ready mesh/XML assets so Planner
 can distinguish body placement errors from asset topology, scale, or articulation defects.
 
+## Built-In Genesis Assets
+
+Code-agent cases must not use prepackaged files under `genesis/assets`. Agents should build rigid objects from
+primitives, request generated XML/MJCF assets, request generated Meshy assets, or use explicit user-provided layout
+assets copied into the case workspace. XML/MJCF may reference mesh files only when those files are generated
+case-workspace assets, not Genesis prepackaged assets.
+
+This is enforced in two places:
+
+- Codex planner, writer, critic, XML, and Opt invocations run with `genesis/assets` hidden by a `bwrap` sandbox when
+  `CONFIGS.codex.hide_builtin_assets_from_agents` is true.
+- Planner outputs and generated `src/*.py` files are statically rejected if they reference `genesis/assets`,
+  `get_assets_dir()`, Genesis package-path asset derivations such as `gs.__file__`, or built-in-style relative paths
+  like `xml/...`, `urdf/...`, and `meshes/...`.
+
 ## Mesh
 
 `assets/mesh/episode.py` selects mesh requests, calls Meshy, repairs and validates geometry, transfers texture metadata,
@@ -44,9 +59,15 @@ Meshy request. Prompt, geometry, texture, or role changes should still regenerat
 
 ## XML / MJCF
 
-`assets/xml/episode.py` runs one worker per XML/MJCF request. Each asset must be one articulated body tree with its own
-joints and actuators, not a full scene. Validation checks XML structure, MuJoCo import, static previews, and a small
-actuator-response probe.
+`assets/xml/episode.py` runs one worker per XML/MJCF request. Each asset must be one body tree, not a full scene.
+Actively controlled mechanisms need named non-free joints and actuators. XML/MJCF assets may use primitive geoms or
+generated case-workspace mesh files. Mesh references are validated so they cannot point at `genesis/assets`, repository
+sample meshes, external URIs, or paths outside the generated XML/case asset roots. Explicit passive projectiles may
+instead be a single movable body with one named freejoint, collision geoms, and no actuators; validation accepts this
+only when the source asset request clearly describes a passive/free rigid projectile.
+
+Validation checks XML structure, MuJoCo import, static previews, and a small actuator-response probe for actuated
+assets. The actuator-response probe is skipped, with a positive validation note, for accepted passive freejoint assets.
 
 The manifest entry exposes actuator names, joint names, control ranges, base behavior, and placement assumptions so
 Body and Action workers do not reverse-engineer semantics from raw XML.
