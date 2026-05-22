@@ -17,6 +17,8 @@ from code_agent.assets.xml.validation import _validate_mesh_asset_paths, validat
 from code_agent.configs import deformable_config_dict
 from code_agent.opt import agent as opt_agent
 from code_agent.opt.contracts import OptContractError, load_opt_contracts
+from code_agent.opt.objective import evaluate_objective
+from code_agent.opt.optimizers.cma_es import CMAESOptimizer
 from code_agent.opt.types import OptAgentRequest
 from code_agent.planner.session import PlannerSession, PlannerSessionConfig
 from code_agent.utils import codex
@@ -194,6 +196,59 @@ def test_run_opt_agent_downgrades_success_without_video_evidence(tmp_path, monke
 
     assert result.status == "needs_more_optimization"
     assert "missing_explicit_video_evidence" in result.failures
+
+
+def test_run_opt_agent_downgrades_unvalidated_xml_patch(tmp_path, monkeypatch):
+    case_dir = tmp_path / "case"
+    case_dir.mkdir()
+    (case_dir / "artifacts" / "opt_best").mkdir(parents=True)
+    (case_dir / "artifacts" / "opt_best" / "render.mp4").write_bytes(b"fake")
+    payload = {
+        "status": "success",
+        "case_type": "test_case",
+        "edited_files": ["assets/xml/robot/robot.xml"],
+        "optimized_variables": ["xml.actuator.wrist_kp"],
+        "baseline": {"success": False},
+        "best": {"success": True, "video_path": "artifacts/opt_best/render.mp4"},
+        "diagnosis": "xml kp improved behavior",
+        "recommendation": "accept best params",
+        "evidence": ["video_checked=sampled artifacts/opt_best/render.mp4 and behavior is visible"],
+        "opt_report_path": "reports/opt_report.json",
+        "failures": [],
+    }
+
+    def fake_run_codex_exec(request):
+        request.output_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+        request.final_message_path.write_text(json.dumps(payload), encoding="utf-8")
+        request.output_jsonl_path.write_text("", encoding="utf-8")
+        stderr_path = request.output_jsonl_path.with_suffix(request.output_jsonl_path.suffix + ".stderr")
+        stderr_path.write_text("", encoding="utf-8")
+        return codex.CodexExecResult(
+            role=request.role,
+            success=True,
+            exit_code=0,
+            duration_sec=1.0,
+            command=["codex"],
+            cwd=str(request.cwd),
+            sandbox=request.sandbox,
+            output_jsonl_path=str(request.output_jsonl_path),
+            final_message_path=str(request.final_message_path),
+            output_schema_path=str(request.output_schema_path),
+            codex_version="codex-test",
+            error_type=None,
+            error_message=None,
+            stderr_path=str(stderr_path),
+            timed_out=False,
+            started_at_unix=time.time(),
+            ended_at_unix=time.time() + 1.0,
+        )
+
+    monkeypatch.setattr(opt_agent, "run_codex_exec", fake_run_codex_exec)
+
+    result = opt_agent.run_opt_agent(OptAgentRequest(case_dir=case_dir, original_prompt="test"))
+
+    assert result.status == "needs_more_optimization"
+    assert "missing_xml_scalar_patch_validation" in result.failures
 
 
 def test_run_opt_agent_recovers_fresh_opt_report_after_timeout(tmp_path, monkeypatch):
@@ -421,6 +476,83 @@ def test_opt_contract_rejects_rendering_owner(tmp_path):
         raise AssertionError("rendering owner should be rejected by opt contracts")
 
 
+def test_opt_contract_accepts_xml_scalar_owner(tmp_path):
+    case_dir = tmp_path / "case"
+    contracts_dir = case_dir / "contracts"
+    contracts_dir.mkdir(parents=True)
+    (contracts_dir / "target_spec.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "task_family": "unit_xml_opt",
+                "objective": {
+                    "type": "weighted_terms",
+                    "direction": "minimize",
+                    "terms": [
+                        {
+                            "name": "angle_error",
+                            "metric_path": "angle_error",
+                            "weight": 1.0,
+                            "transform": "identity",
+                        }
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (contracts_dir / "opt_space.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "optimizer": "cma_es",
+                "variables": [
+                    {
+                        "name": "xml.actuator.wrist_kp",
+                        "type": "float",
+                        "default": 120.0,
+                        "bounds": [30.0, 500.0],
+                        "scale": "log",
+                        "owner": "xml",
+                        "group": "actuator",
+                        "description": "Existing XML actuator kp scalar.",
+                    },
+                    {
+                        "name": "body.initial.card_lean",
+                        "type": "float",
+                        "default": 0.08,
+                        "bounds": [-0.15, 0.15],
+                        "scale": "linear",
+                        "owner": "body",
+                        "group": "initial",
+                        "description": "Initial lean angle for a balance setup.",
+                    },
+                ],
+                "budget": {"max_trials": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (contracts_dir / "default_opt_params.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "source": "default",
+                "params": {
+                    "xml": {"actuator": {"wrist_kp": 120.0}},
+                    "body": {"initial": {"card_lean": 0.08}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    contracts = load_opt_contracts(case_dir=case_dir)
+
+    assert [variable.owner for variable in contracts.active_variables] == ["xml", "body"]
+    assert [variable.group for variable in contracts.active_variables] == ["actuator", "initial"]
+
+
 def test_opt_contract_accepts_generic_strategy_knobs(tmp_path):
     case_dir = tmp_path / "case"
     contracts_dir = case_dir / "contracts"
@@ -491,6 +623,103 @@ def test_opt_contract_accepts_generic_strategy_knobs(tmp_path):
 
     assert [variable.name for variable in contracts.active_variables] == ["action.force", "body.friction"]
     assert contracts.opt_space["strategy"]["phases"][0]["groups"] == ["control"]
+
+
+def test_opt_contract_rejects_custom_objective_transform(tmp_path):
+    case_dir = tmp_path / "case"
+    contracts_dir = case_dir / "contracts"
+    contracts_dir.mkdir(parents=True)
+    (contracts_dir / "target_spec.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "task_family": "unit_test",
+                "objective": {
+                    "type": "weighted_terms",
+                    "direction": "maximize",
+                    "terms": [
+                        {
+                            "name": "custom_score",
+                            "metric_path": "score",
+                            "weight": 1.0,
+                            "transform": "custom",
+                        }
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (contracts_dir / "opt_space.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "optimizer": "cma_es",
+                "variables": [
+                    {
+                        "name": "action.force",
+                        "type": "float",
+                        "default": 1.0,
+                        "bounds": [0.0, 2.0],
+                        "scale": "linear",
+                        "owner": "action",
+                        "description": "Test variable.",
+                    }
+                ],
+                "budget": {"max_trials": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        load_opt_contracts(case_dir=case_dir)
+    except OptContractError as exc:
+        assert "unsupported" in str(exc)
+    else:
+        raise AssertionError("custom objective transforms should be rejected")
+
+
+def test_objective_without_success_criteria_is_not_successful():
+    score = evaluate_objective(
+        target_spec={
+            "schema_version": 1,
+            "task_family": "unit_test",
+            "objective": {
+                "type": "weighted_terms",
+                "direction": "maximize",
+                "terms": [
+                    {"name": "score", "metric_path": "score", "weight": 1.0, "transform": "identity"}
+                ],
+            },
+        },
+        metrics={"score": 10.0},
+    )
+
+    assert score.score == 10.0
+    assert score.success is False
+    assert any("success_criteria" in warning for warning in score.warnings)
+
+
+def test_cma_es_keeps_candidates_in_unit_interval():
+    optimizer = CMAESOptimizer(dim=2, mean=[0.98, 0.02], initial_sigmas=[0.9, 0.9], seed=0, population_size=12)
+    samples = optimizer.ask(count=32)
+
+    assert all(0.0 <= value <= 1.0 for sample in samples for value in sample)
+    assert any(0.0 < value < 1.0 for sample in samples for value in sample)
+
+
+def test_cma_es_handles_tail_batches_without_pycma_update():
+    optimizer = CMAESOptimizer(dim=1, mean=[0.5], seed=0, population_size=3)
+    for count in (1, 2, 3):
+        samples = optimizer.ask(count=count)
+        assert len(samples) == count
+        assert all(0.0 <= sample[0] <= 1.0 for sample in samples)
+        optimizer.tell(samples, [-(sample[0] - 0.7) ** 2 for sample in samples], maximize=True)
+
+    state = optimizer.state()
+    assert state.iteration == 1
+    assert state.best_score is not None
 
 
 def test_xml_validator_accepts_explicit_passive_freejoint_projectile(tmp_path):

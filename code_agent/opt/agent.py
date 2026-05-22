@@ -101,6 +101,7 @@ def run_opt_agent(request: OptAgentRequest) -> OptAgentResult:
         )
 
     _enforce_video_evidence(case_dir, request, result)
+    _enforce_xml_patch_evidence(result)
     _enforce_builtin_asset_policy(case_dir, result)
     _write_agent_report(case_dir, request, result, codex_result=codex_result.to_dict())
     return result
@@ -283,6 +284,8 @@ def _recovered_edited_files(opt_space: dict[str, Any]) -> list[str]:
         for owner in owners:
             if owner in {"scene", "body", "action"}:
                 files.add(f"src/{owner}.py")
+            elif owner == "xml":
+                files.add("assets/xml/**/*.xml")
     files.update({"reports/opt_report.json", "reports/verification_report.json"})
     return sorted(files)
 
@@ -393,6 +396,33 @@ def _enforce_video_evidence(case_dir: Path, request: OptAgentRequest, result: Op
     result.recommendation = (
         "Planner should ask Opt to inspect the best render/video evidence and only accept success if the video supports "
         "the metric result."
+    )
+
+
+_XML_PATCH_EVIDENCE_MARKERS = (
+    "xml_scalar_patch_validated",
+    "xml scalar patch validated",
+)
+
+
+def _enforce_xml_patch_evidence(result: OptAgentResult) -> None:
+    if result.status not in {"success", "partial_success", "needs_more_optimization"}:
+        return
+    touched_xml = any(str(path).startswith("assets/xml/") for path in result.edited_files)
+    touched_xml = touched_xml or any(str(name).startswith("xml.") for name in result.optimized_variables)
+    if not touched_xml:
+        return
+    evidence_text = " ".join(str(item) for item in [*(result.evidence or []), result.diagnosis or ""]).lower()
+    if any(marker in evidence_text for marker in _XML_PATCH_EVIDENCE_MARKERS):
+        return
+    result.status = "needs_more_optimization"
+    result.failures.append("missing_xml_scalar_patch_validation")
+    result.evidence.append(
+        "Opt result was downgraded because XML asset parameters were edited or optimized without explicit "
+        "xml_scalar_patch_validated evidence that only whitelisted numeric attributes changed."
+    )
+    result.recommendation = (
+        "Planner should ask Opt to validate XML scalar changes or route an XML asset rewrite if topology must change."
     )
 
 

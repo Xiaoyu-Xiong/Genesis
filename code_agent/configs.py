@@ -51,6 +51,7 @@ class OptConfigs:
     runner_timeout_sec: float = 1500.0
     runner_render_best: bool = True
     runner_baseline_trials: int = 1
+    runner_best_repeat_trials: int = 2
     runner_default_initial_sigma: float = 0.25
     runner_early_stop_enabled: bool = True
     runner_early_stop_patience_generations: int = 3
@@ -149,6 +150,9 @@ class CriticConfigs:
     sample_every_sec: float = 0.5
     max_frames: int = 30
     max_width: int = 640
+    max_attempts: int = 2
+    prompt_inline_json_chars: int = 50000
+    prompt_inline_text_chars: int = 24000
 
 
 @dataclass(slots=True, frozen=True)

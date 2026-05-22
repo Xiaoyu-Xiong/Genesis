@@ -33,7 +33,10 @@ sensitive values in generated modules. Examples include:
 - Grasp target positions.
 - Release timing and placement.
 - PD gains, damping, motor force limits, and velocity limits.
+- Initial pose, lean angle, spacing, preload, mass distribution, and other balance-sensitive setup parameters.
 - Material stiffness, density, friction, restitution, and damping.
+- Existing XML/MJCF actuator, joint, and geom scalar attributes such as `kp`, `forcerange`, `damping`, `armature`,
+  `range`, and friction.
 - Solver/contact parameters such as substeps, contact distance, and tolerance.
 
 Planner should not need to guess these values. The original generation agents also should not be forced to expose every
@@ -67,7 +70,8 @@ Opt owns the optimization pass.
 Opt should:
 
 - Inspect generated source, contracts, artifacts, reports, metrics, and videos.
-- Identify optimizable physical/control parameters and their owners in `scene`, `body`, or `action`.
+- Identify optimizable physical/control/setup parameters and their owners in `scene`, `body`, `action`, or validated XML
+  scalar patches.
 - Patch generated code to read opt params when needed.
 - Create or revise `target_spec.json`, `opt_space.json`, and `default_opt_params.json`.
 - Choose an optimizer backend and budget use.
@@ -114,11 +118,12 @@ Example:
 {
   "case_dir": "code_agent/workspaces/.../fetch_robot_rigid_grasp",
   "original_prompt": "Create a Fetch-style manipulator grasping and releasing a ball into a dish.",
-  "planner_intent": "Optimize if generated behavior is parameter-limited.",
+  "planner_intent": "Optimize if generated behavior is limited by bounded continuous parameters.",
   "allowed_edits": [
     "src/action.py",
-    "src/body.py for material/contact hooks",
+    "src/body.py for material/contact/initial-setting hooks",
     "src/scene.py for solver/contact/timestep hooks",
+    "assets/xml/**/*.xml for validated scalar actuator/joint/geom patches",
     "contracts/*.json",
     "reports/*.json",
     "artifacts/opt_*"
@@ -127,7 +132,8 @@ Example:
     "Do not change task semantics.",
     "Do not directly write dynamic object state after initialization.",
     "Do not add hidden constraints or attachments.",
-    "Do not edit src/rendering.py or optimize rendering/camera/visual-only variables."
+    "Do not edit src/rendering.py or optimize rendering/camera/visual-only variables.",
+    "Do not change XML topology during Opt."
   ],
   "optimization_budget": {
     "max_rollouts": 20,
@@ -242,10 +248,10 @@ subagent may call after it has prepared contracts and parameter hooks.
 
 ## Parameter Scope
 
-Opt should be free to propose geometric, schedule, control, material, contact, or solver parameters owned by
-`scene.py`, `body.py`, or `action.py`, as long as they are bounded, physically meaningful, and connected to observable
-metrics. `rendering.py` is excluded from the optimization surface; camera or visual-evidence failures should be routed
-back to Planner as rendering repair needs.
+Opt should be free to propose initial-setting, layout, geometric, schedule, control, actuator, material, contact, XML
+scalar, or solver parameters owned by `scene.py`, `body.py`, `action.py`, or existing XML/MJCF assets, as long as they
+are bounded, physically meaningful, and connected to observable metrics. `rendering.py` is excluded from the
+optimization surface; camera or visual-evidence failures should be routed back to Planner as rendering repair needs.
 
 Examples:
 
@@ -254,9 +260,13 @@ Examples:
 - `control.gripper_kp`
 - `control.arm_kv`
 - `control.motor_force_limit`
+- `initial.card_lean_angle`
+- `layout.stack_gap`
 - `material.ball_friction`
 - `material.soft_body_density`
 - `material.youngs_modulus`
+- `xml.actuator.wrist_kp`
+- `xml.joint.hinge_damping`
 - `solver.substeps`
 - `contact.d_hat`
 
@@ -333,7 +343,7 @@ Gate:
 Status: partial.
 
 - Document how Opt should inspect generated code.
-- Document safe parameter-hook patterns for `scene.py`, `body.py`, and `action.py`.
+- Document safe parameter-hook patterns for `scene.py`, `body.py`, `action.py`, and constrained XML scalar patches.
 - Document how to expose controller gains, material parameters, contact parameters, and solver parameters.
 - Document how to add metrics without changing task semantics.
 
@@ -391,15 +401,22 @@ Status: implemented at action level; needs end-to-end suite validation.
 - `run_opt_agent` now recovers fresh lower-level `reports/opt_report.json` evidence when the Codex Opt subagent times
   out or exits nonzero after running optimization. This prevents completed CMA-ES traces and best-parameter payloads
   from being discarded just because the reporting subagent missed its final JSON deadline.
-- Planner/Opt decision guidance is now more general: Planner is prompted to call Opt only for runnable cases with
-  continuous measurable residuals and real action/body/scene control handles, and to route structural failures to
-  repair/regeneration.
+- Planner/Opt decision guidance is now more general: Planner is prompted to call Opt for runnable cases with continuous
+  measurable residuals over action, initial setting/layout, material/contact, actuator/XML scalar, or solver/contact
+  parameters, and to route structural failures to repair/regeneration.
+- Opt contracts now allow `owner: "xml"` plus `actuator`, `initial`, `layout`, and `geometry` groups. XML edits are
+  restricted to validated scalar patches on existing actuator, joint, or geom attributes; topology changes should return
+  `needs_rewrite`.
 - Opt success now requires visual evidence when best rendering is requested. The Opt prompt requires a
   `video_checked=...` evidence item, and the Planner-facing harness downgrades `success`/`partial_success` to
   `needs_more_optimization` if the best video path or explicit video/frame inspection evidence is missing.
 - The low-level CMA-ES runner now supports agent-selected `strategy.phases`, `strategy.restarts`, and
   `strategy.early_stop` entries in `contracts/opt_space.json`. Reports include strategy diagnostics, sparse-objective
   warnings, and best-parameter boundary warnings.
+- The CMA-ES backend now uses `pycma` while preserving the existing ask/tell wrapper. Runner scoring uses
+  direction-aware worst scores for invalid trials, rejects `transform: "custom"`, treats missing `success_criteria` as
+  non-successful verification, and repeats the selected best params before final rendering with strict-majority success
+  for better noise robustness.
 - The old pipeline is preserved: if `CONFIGS.opt.enabled` is false or Planner never chooses `run_opt`, generation,
   execution, critic, and repair proceed as before.
 

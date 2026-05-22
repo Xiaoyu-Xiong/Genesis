@@ -1,6 +1,6 @@
 """Writer-worker prompt clauses."""
 
-from code_agent.prompts.common import PHYSICAL_CAUSALITY_CONTRACT, SCALE_POLICY_GUIDE
+from code_agent.prompts.common import COLLISION_CONTACT_CONTRACT, PHYSICAL_CAUSALITY_CONTRACT, SCALE_POLICY_GUIDE
 from code_agent.prompts.ipc import (
     EXTERNAL_ARTICULATION_MJCF_GUIDE,
     FEM_MATERIAL_SELECTION_GUIDE,
@@ -20,6 +20,7 @@ Use ASCII only. Keep code compact and robust for local GPU execution.
 The generated code will run through the repository uv environment on the dedicated local GPU later, but you must not
 execute it yourself.
 {PHYSICAL_CAUSALITY_CONTRACT}
+{COLLISION_CONTACT_CONTRACT}
 {SCALE_POLICY_GUIDE}
 """.strip()
 

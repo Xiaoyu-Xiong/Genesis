@@ -29,25 +29,50 @@ PROMPT_TEXT_LIMITS = {
 def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any]) -> dict[str, Any]:
     reports_dir = run_dir / "reports"
     logs_dir = run_dir / "logs"
-    prompt = _critic_prompt(run_dir=run_dir, task=task, artifact_report=artifact_report)
+    evidence_index = _write_critic_evidence_index(run_dir=run_dir, artifact_report=artifact_report)
     image_paths = _critic_image_paths(run_dir)
-    result = run_codex_exec(
-        CodexExecRequest(
-            role="critic",
-            prompt=prompt,
-            cwd=DEFAULT_REPO_ROOT,
-            sandbox=CONFIGS.codex.critic_sandbox,
-            model=CONFIGS.codex.critic_model,
-            output_schema_path=Path("code_agent/specs/critic_report.schema.json"),
-            image_paths=image_paths,
-            output_jsonl_path=logs_dir / "codex_critic.jsonl",
-            final_message_path=logs_dir / "codex_critic.final.json",
-            timeout_sec=CONFIGS.codex.critic_timeout_sec,
-            writable_roots=(run_dir,),
+    max_attempts = max(1, int(CONFIGS.critic.max_attempts))
+    attempts: list[dict[str, Any]] = []
+    previous_failure: dict[str, Any] | None = None
+    report: dict[str, Any] | None = None
+    result = None
+
+    for attempt_index in range(max_attempts):
+        prompt = _critic_prompt(
+            run_dir=run_dir,
+            task=task,
+            artifact_report=artifact_report,
+            evidence_index=evidence_index,
+            attempt_index=attempt_index,
+            previous_failure=previous_failure,
         )
-    )
-    report = load_json_object(Path(result.final_message_path))
+        jsonl_path = logs_dir / ("codex_critic.jsonl" if attempt_index == 0 else f"codex_critic_retry_{attempt_index:02d}.jsonl")
+        result = run_codex_exec(
+            CodexExecRequest(
+                role="critic",
+                prompt=prompt,
+                cwd=DEFAULT_REPO_ROOT,
+                sandbox=CONFIGS.codex.critic_sandbox,
+                model=CONFIGS.codex.critic_model,
+                output_schema_path=Path("code_agent/specs/critic_report.schema.json"),
+                image_paths=image_paths,
+                output_jsonl_path=jsonl_path,
+                final_message_path=logs_dir / "codex_critic.final.json",
+                timeout_sec=CONFIGS.codex.critic_timeout_sec,
+                writable_roots=(run_dir,),
+            )
+        )
+        report = load_json_object(Path(result.final_message_path))
+        attempt_record = _critic_attempt_record(result=result, attempt_index=attempt_index)
+        attempts.append(attempt_record)
+        if report is not None:
+            break
+        previous_failure = attempt_record
+        if not _should_retry_critic(result=result, attempt_index=attempt_index, max_attempts=max_attempts):
+            break
+
     if report is None:
+        assert result is not None
         if result.error_type == "codex_usage_limit":
             observations = ["Codex critic was blocked by usage limits and did not evaluate the run."]
             failure_modes = ["critic.codex_usage_limit"]
@@ -64,6 +89,7 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
             "asset_diagnostics": None,
             "evidence": {"metrics": [], "frames": [], "video": None, "event_logs": []},
         }
+    assert result is not None
     report["codex_result"] = {
         "returncode": result.exit_code,
         "ok": result.success,
@@ -73,35 +99,52 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
         "error_type": result.error_type,
         "error_message": result.error_message,
     }
+    report["critic_attempts"] = attempts
+    report["critic_infra_status"] = _critic_infra_status(report)
     (reports_dir / "codex_critic_report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report
 
 
-def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any]) -> str:
-    evidence_index = _write_critic_evidence_index(run_dir=run_dir, artifact_report=artifact_report)
-    metrics = _read_text(run_dir / "artifacts" / "metrics.json")
-    render_stats = _read_text(run_dir / "artifacts" / "render_stats.json")
-    visual_evaluation = _read_text(run_dir / "reports" / "visual_evaluation.json")
-    execution_report = _read_text(run_dir / "reports" / "execution_report.json", max_chars=PROMPT_TEXT_LIMITS["execution_report"])
-    generated_source = _generated_source_bundle(run_dir)
-    planner_output = _read_text(run_dir / "contracts" / "planner_output.json")
-    timing_contract = _read_text(run_dir / "contracts" / "timing.json")
-    deformable_config = _read_text(run_dir / "contracts" / "deformable_config.json")
-    opt_subagent_report = _read_text(run_dir / "reports" / "opt_subagent_report.json")
-    opt_report = _read_text(run_dir / "reports" / "opt_report.json")
-    opt_verification = _read_text(run_dir / "reports" / "verification_report.json")
-    current_opt_params = _read_text(run_dir / "contracts" / "current_opt_params.json")
-    best_opt_params = _read_text(run_dir / "contracts" / "best_opt_params.json")
-    asset_manifest = _read_text(run_dir / "assets" / "asset_manifest.json")
-    asset_evidence = _asset_evidence_bundle(run_dir)
+def _critic_prompt(
+    *,
+    run_dir: Path,
+    task: str,
+    artifact_report: dict[str, Any],
+    evidence_index: dict[str, Any],
+    attempt_index: int,
+    previous_failure: dict[str, Any] | None,
+) -> str:
+    metrics = _compact_file(run_dir / "artifacts" / "metrics.json")
+    render_stats = _compact_file(run_dir / "artifacts" / "render_stats.json")
+    visual_evaluation = _visual_digest(run_dir / "reports" / "visual_evaluation.json")
+    execution_report = _execution_digest(run_dir / "reports" / "execution_report.json")
+    planner_output = _compact_file(run_dir / "contracts" / "planner_output.json")
+    timing_contract = _compact_file(run_dir / "contracts" / "timing.json")
+    deformable_config = _compact_file(run_dir / "contracts" / "deformable_config.json")
+    opt_subagent_report = _compact_file(run_dir / "reports" / "opt_subagent_report.json")
+    opt_report = _compact_file(run_dir / "reports" / "opt_report.json")
+    opt_verification = _compact_file(run_dir / "reports" / "verification_report.json")
+    current_opt_params = _compact_file(run_dir / "contracts" / "current_opt_params.json")
+    best_opt_params = _compact_file(run_dir / "contracts" / "best_opt_params.json")
+    asset_manifest = _compact_file(run_dir / "assets" / "asset_manifest.json")
     genesis_context = _genesis_context_pointer(run_dir)
-    summary = _read_text(run_dir / "artifacts" / "summary.json")
-    run_result = _read_text(run_dir / "artifacts" / "run_result.json")
-    stdout = _read_text(run_dir / "reports" / "stdout.txt", max_chars=PROMPT_TEXT_LIMITS["stdout_stderr"])
-    stderr = _read_text(run_dir / "reports" / "stderr.txt", max_chars=PROMPT_TEXT_LIMITS["stdout_stderr"])
+    summary = _compact_file(run_dir / "artifacts" / "summary.json")
+    run_result = _compact_file(run_dir / "artifacts" / "run_result.json")
+    stdout = _read_text(run_dir / "reports" / "stdout.txt", max_chars=CONFIGS.critic.prompt_inline_text_chars)
+    stderr = _read_text(run_dir / "reports" / "stderr.txt", max_chars=CONFIGS.critic.prompt_inline_text_chars)
+    source_paths = _source_paths_for_prompt(run_dir)
+    asset_evidence_paths = _asset_evidence_paths_for_prompt(run_dir)
+    retry_note = ""
+    if previous_failure is not None:
+        retry_note = "\nPrevious critic attempt failed; retry with this compact evidence packet:\n" + json.dumps(
+            previous_failure, indent=2
+        )
     return textwrap.dedent(
         f"""
         {CRITIC_GENERAL_RULES}
+
+        Critic attempt: {attempt_index + 1} of {max(1, int(CONFIGS.critic.max_attempts))}
+        {retry_note}
 
         Original task prompt:
         {task}
@@ -112,24 +155,30 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         Evidence index:
         {json.dumps(evidence_index, indent=2)}
 
+        Important: the evidence index contains file paths and sizes. Read files on demand from disk instead of assuming
+        every detail is inlined here. The inlined sections below are compact digests to keep this critic call reliable.
+
         {CRITIC_EVIDENCE_READING_GUIDE}
 
-        Execution report:
+        Deterministic artifact report digest:
+        {json.dumps(_artifact_report_digest(artifact_report), indent=2)}
+
+        Execution report digest:
         {execution_report}
 
-        Metrics:
+        Metrics digest:
         {metrics}
 
         Event log:
-        Full event log is available at {run_dir / "artifacts" / "event_log.json"}.
+        Full event log is available at {run_dir / "artifacts" / "event_log.json"}. Read only relevant event slices.
 
-        Render stats:
+        Render stats digest:
         {render_stats}
 
-        Visual evidence:
+        Visual evidence digest:
         {visual_evaluation}
 
-        Planner output:
+        Planner output digest:
         {planner_output}
 
         Timing contract:
@@ -154,17 +203,17 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         Best opt params:
         {best_opt_params}
 
-        Asset manifest:
+        Asset manifest digest:
         {asset_manifest}
 
-        Generated asset source and preview evidence:
-        {asset_evidence}
+        Generated asset source and preview paths:
+        {json.dumps(asset_evidence_paths, indent=2)}
 
         Genesis documentation and local-code context:
         {genesis_context}
 
-        Generated source:
-        {generated_source}
+        Generated source paths:
+        {json.dumps(source_paths, indent=2)}
 
         Summary artifact:
         {summary}
@@ -197,6 +246,194 @@ def _critic_prompt(*, run_dir: Path, task: str, artifact_report: dict[str, Any])
         Use `needs_repair` when there is a clear owner-routed fix.
         """
     ).strip()
+
+
+def _critic_attempt_record(*, result: Any, attempt_index: int) -> dict[str, Any]:
+    stderr_tail = ""
+    stderr_path = Path(result.stderr_path) if result.stderr_path else None
+    if stderr_path is not None and stderr_path.exists():
+        stderr_tail = _read_text(stderr_path, max_chars=4000)
+    return {
+        "attempt": attempt_index + 1,
+        "returncode": result.exit_code,
+        "ok": result.success,
+        "error_type": result.error_type,
+        "error_message": result.error_message,
+        "output_jsonl_path": result.output_jsonl_path,
+        "final_message_path": result.final_message_path,
+        "stderr_path": result.stderr_path,
+        "stderr_tail": stderr_tail,
+        "infra_status": _infra_status_from_error(
+            error_type=result.error_type,
+            error_message=result.error_message,
+            stderr_tail=stderr_tail,
+        ),
+    }
+
+
+def _should_retry_critic(*, result: Any, attempt_index: int, max_attempts: int) -> bool:
+    if attempt_index + 1 >= max_attempts:
+        return False
+    if result.error_type == "codex_usage_limit":
+        return False
+    return True
+
+
+def _critic_infra_status(report: dict[str, Any]) -> str:
+    codex_result = report.get("codex_result")
+    attempts = report.get("critic_attempts")
+    latest_attempt = attempts[-1] if isinstance(attempts, list) and attempts else None
+    if isinstance(latest_attempt, dict):
+        status = latest_attempt.get("infra_status")
+        if isinstance(status, str) and status != "ok":
+            return status
+    if isinstance(codex_result, dict):
+        status = _infra_status_from_error(
+            error_type=codex_result.get("error_type") if isinstance(codex_result.get("error_type"), str) else None,
+            error_message=codex_result.get("error_message") if isinstance(codex_result.get("error_message"), str) else None,
+            stderr_tail="",
+        )
+        if status != "ok":
+            return status
+    failure_modes = report.get("failure_modes")
+    if isinstance(failure_modes, list) and "critic.parse_failed" in failure_modes:
+        return "critic_parse_failed"
+    return "ok"
+
+
+def _infra_status_from_error(*, error_type: str | None, error_message: str | None, stderr_tail: str) -> str:
+    text = "\n".join(item for item in (error_type or "", error_message or "", stderr_tail) if item).lower()
+    if "usage limit" in text or "purchase more credits" in text:
+        return "quota_blocked"
+    if error_type == "codex_auth_failed" or "401 unauthorized" in text:
+        return "auth_failed"
+    if error_type == "codex_input_too_large" or "input exceeds the maximum length" in text:
+        return "critic_prompt_too_large"
+    if error_type == "timeout":
+        return "critic_timeout"
+    if error_type:
+        return "critic_exec_failed"
+    return "ok"
+
+
+def _artifact_report_digest(artifact_report: dict[str, Any]) -> dict[str, Any]:
+    checks = artifact_report.get("checks")
+    failed_checks = []
+    if isinstance(checks, list):
+        failed_checks = [item for item in checks if isinstance(item, dict) and item.get("status") == "fail"]
+    visual_report = artifact_report.get("visual_report")
+    visual_digest = None
+    if isinstance(visual_report, dict):
+        sampled = visual_report.get("sampled_frames")
+        visual_digest = {
+            "contact_sheet_path": visual_report.get("contact_sheet_path"),
+            "num_sampled_frames": len(sampled) if isinstance(sampled, list) else 0,
+            "warnings": visual_report.get("warnings"),
+            "sampling": visual_report.get("sampling"),
+        }
+    return {
+        "passed": artifact_report.get("passed"),
+        "failure_classes": artifact_report.get("failure_classes"),
+        "recommended_owner": artifact_report.get("recommended_owner"),
+        "repair_summary": artifact_report.get("repair_summary"),
+        "failed_checks": failed_checks[:8],
+        "visual_report": visual_digest,
+    }
+
+
+def _compact_file(path: Path) -> str:
+    payload = load_json_object(path)
+    if isinstance(payload, dict):
+        return json.dumps(_compact_json_payload(payload), indent=2)
+    return _read_text(path, max_chars=CONFIGS.critic.prompt_inline_text_chars)
+
+
+def _compact_json_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key, value in payload.items():
+        if key in {"artifacts", "frames", "sampled_frames", "frame_summaries"}:
+            if isinstance(value, list):
+                compact[key] = {"count": len(value), "first": value[:2], "last": value[-2:]}
+            elif isinstance(value, dict):
+                compact[key] = {"count": len(value), "sample_keys": list(value)[:12]}
+            else:
+                compact[key] = value
+            continue
+        compact[key] = value
+    text = json.dumps(compact, indent=2)
+    if len(text) <= CONFIGS.critic.prompt_inline_json_chars:
+        return compact
+    return {
+        "truncated_digest": True,
+        "top_level_keys": list(payload.keys()),
+        "head": _clip_middle(text, CONFIGS.critic.prompt_inline_json_chars),
+    }
+
+
+def _execution_digest(path: Path) -> str:
+    payload = load_json_object(path)
+    if not isinstance(payload, dict):
+        return _read_text(path, max_chars=CONFIGS.critic.prompt_inline_text_chars)
+    keys = (
+        "command",
+        "returncode",
+        "timed_out",
+        "duration_sec",
+        "stdout_path",
+        "stderr_path",
+        "artifacts_dir",
+        "error_type",
+        "error_message",
+    )
+    digest = {key: payload.get(key) for key in keys if key in payload}
+    artifacts = payload.get("artifacts")
+    if isinstance(artifacts, dict):
+        digest["artifact_keys"] = list(artifacts)[:80]
+        digest["num_artifacts"] = len(artifacts)
+    return json.dumps(digest, indent=2)
+
+
+def _visual_digest(path: Path) -> str:
+    payload = load_json_object(path)
+    if not isinstance(payload, dict):
+        return _read_text(path, max_chars=CONFIGS.critic.prompt_inline_text_chars)
+    sampled = payload.get("sampled_frames")
+    frame_summaries = payload.get("frame_summaries")
+    digest = {
+        "contact_sheet_path": payload.get("contact_sheet_path"),
+        "sampling": payload.get("sampling"),
+        "num_sampled_frames": len(sampled) if isinstance(sampled, list) else 0,
+        "sampled_frames_head": sampled[:3] if isinstance(sampled, list) else [],
+        "sampled_frames_tail": sampled[-3:] if isinstance(sampled, list) else [],
+        "diagnostic_frames": payload.get("diagnostic_frames"),
+        "texture_summaries": payload.get("texture_summaries"),
+        "texture_presence": payload.get("texture_presence"),
+        "warnings": payload.get("warnings"),
+        "num_frame_summaries": len(frame_summaries) if isinstance(frame_summaries, list) else 0,
+    }
+    return json.dumps(digest, indent=2)
+
+
+def _source_paths_for_prompt(run_dir: Path) -> dict[str, str]:
+    paths = {
+        "scene": run_dir / "src" / "scene.py",
+        "body": run_dir / "src" / "body.py",
+        "action": run_dir / "src" / "action.py",
+        "rendering": run_dir / "src" / "rendering.py",
+        "main": run_dir / "src" / "main.py",
+    }
+    return {name: str(path) for name, path in paths.items() if path.exists()}
+
+
+def _asset_evidence_paths_for_prompt(run_dir: Path) -> dict[str, list[str]]:
+    return {
+        "asset_sources": [str(path) for path in _asset_source_paths(run_dir)],
+        "asset_preview_reports": [str(path) for path in _asset_preview_report_paths(run_dir)],
+        "asset_preview_images": [str(path) for path in _asset_preview_image_paths(run_dir)],
+        "asset_generation_reports": [
+            str(path) for path in sorted((run_dir / "assets").glob("**/xml_asset_generation_report.json"))[:8]
+        ],
+    }
 
 
 def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, Any]) -> dict[str, Any]:
@@ -254,7 +491,7 @@ def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, An
         "asset_preview_reports": asset_preview_reports,
         "asset_source_paths": asset_source_paths,
         "notes": [
-            "Generated source is also inlined in the critic prompt for source-aware review.",
+            "Generated source is referenced by path. Read only the source files needed for source-aware review.",
             "Generated asset source and preview paths are included so asset morphology can be judged directly.",
             "Large evidence files are referenced by path so the critic can inspect them without exceeding input limits.",
             "The event log is complete on disk and should be sampled or searched as needed.",

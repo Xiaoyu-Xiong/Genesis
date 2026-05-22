@@ -37,13 +37,9 @@ def evaluate_generated_run(
         run_codex_critic(run_dir=run_dir, task=task, artifact_report=artifact_report) if use_codex_critic else None
     )
     codex_passed = codex_report is None or codex_report.get("verdict") == "pass"
-    codex_usage_blocked = bool(
-        isinstance(codex_report, dict)
-        and codex_report.get("verdict") == "inconclusive"
-        and isinstance(codex_report.get("codex_result"), dict)
-        and codex_report["codex_result"].get("error_type") == "codex_usage_limit"
-    )
-    if execution_ok and artifact_report["passed"] and codex_usage_blocked:
+    critic_infra_status = _critic_infra_status(codex_report)
+    critic_infra_blocked = critic_infra_status not in {"ok", "not_used"}
+    if execution_ok and artifact_report["passed"] and critic_infra_blocked:
         verdict = "inconclusive"
     else:
         verdict = "pass" if execution_ok and artifact_report["passed"] and codex_passed else "fail"
@@ -84,8 +80,41 @@ def evaluate_generated_run(
         "task_completion_score": 0.6 if verdict == "pass" else 0.2,
         "visual_clarity_score": 0.6 if render_ok else 0.0,
         "summary": deterministic_repair_summary or "Combined artifact checks and Codex critic.",
+        "critic_infra_status": critic_infra_status,
+        "critic_attempts": _critic_attempt_count(codex_report),
         "artifact_report": artifact_report,
         "codex_critic_report": codex_report,
     }
     (reports_dir / "critic_report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report
+
+
+def _critic_infra_status(codex_report: dict[str, Any] | None) -> str:
+    if codex_report is None:
+        return "not_used"
+    status = codex_report.get("critic_infra_status")
+    if isinstance(status, str) and status:
+        return status
+    codex_result = codex_report.get("codex_result")
+    if not isinstance(codex_result, dict):
+        return "ok"
+    error_type = codex_result.get("error_type")
+    error_message = str(codex_result.get("error_message") or "").lower()
+    if error_type == "codex_usage_limit" or "usage limit" in error_message:
+        return "quota_blocked"
+    if error_type == "codex_auth_failed" or "401 unauthorized" in error_message:
+        return "auth_failed"
+    if error_type == "codex_input_too_large" or "input exceeds the maximum length" in error_message:
+        return "critic_prompt_too_large"
+    if error_type == "timeout":
+        return "critic_timeout"
+    if error_type:
+        return "critic_exec_failed"
+    return "ok"
+
+
+def _critic_attempt_count(codex_report: dict[str, Any] | None) -> int:
+    if not isinstance(codex_report, dict):
+        return 0
+    attempts = codex_report.get("critic_attempts")
+    return len(attempts) if isinstance(attempts, list) else 1

@@ -2,6 +2,7 @@
 
 from code_agent.prompts.common import (
     BUILTIN_ASSET_POLICY_GUIDE,
+    COLLISION_CONTACT_CONTRACT,
     GENERATED_RESULT_QUALITY_GUIDE,
     PHYSICAL_CAUSALITY_CONTRACT,
     SCALE_POLICY_GUIDE,
@@ -130,6 +131,7 @@ Available actions:
   initialization-only. After stepping begins, motion should be expressed through physically meaningful controls:
   actuator commands, DOF controllers, motors, external forces/torques, or initial velocities set before the first step.
   {PHYSICAL_CAUSALITY_CONTRACT}
+  {COLLISION_CONTACT_CONTRACT}
   Any object whose requested appearance depends on texture, patterned surface detail, decorative material variation,
   image-like surface content, or nontrivial visual ornamentation must be represented by a Meshy-generated asset request,
   even when the task does not explicitly say "mesh". Do not ask writers to fake those textured objects with plain
@@ -179,13 +181,14 @@ Available actions:
 - run_integrator: wire generated modules into src/main.py.
 - run_execution: run generated code through the harness on the local GPU.
 - run_critic: ask the read-only critic to evaluate execution artifacts.
-- run_opt: invoke the dedicated Opt Codex subagent for a generated case that appears parameter-limited or
-  control-sensitive. Current CONFIGS.opt.enabled={opt_enabled}. If false, do not choose this action. If true, use it
+- run_opt: invoke the dedicated Opt Codex subagent for a generated case that appears limited by bounded continuous
+  parameters. Current CONFIGS.opt.enabled={opt_enabled}. If false, do not choose this action. If true, use it
   after integration and preferably after execution/critic evidence shows the case is runnable: code runs, video/metrics
   exist, required entities are present, and the physical causal story is basically plausible, but the target is missed.
   Good Opt candidates have continuous measurable residuals such as distance, speed, angle, timing, pose, friction,
-  damping, gain, material/contact, or solver/contact sensitivity, and the generated action/body/scene code exposes real
-  control handles that Opt can safely parameterize. Bad Opt candidates are structural failures: missing entities,
+  damping, gain, initial pose/layout, mass distribution, actuator limits, material/contact, XML actuator/joint scalar,
+  or solver/contact sensitivity. A task can be an Opt candidate even without an obvious action policy when the remaining
+  problem is a fine initial-setting or balance parameter. Bad Opt candidates are structural failures: missing entities,
   invalid assets, broken imports, impossible geometry, wrong joint axes, caged/stuck objects, missing metrics, invisible
   rendering, or task semantics that need rewriting. If the same owner has already received one or two local repairs and
   the remaining failure is still "behavior is close but off", prefer run_opt before exhausting all repair rounds. The
@@ -243,21 +246,24 @@ Action policy:
 - If CONFIGS.opt.enabled is true, use this generic Opt decision policy:
   if execution failed, assets are invalid, imports are broken, metrics are absent, or the scene cannot render the
   relevant behavior, choose repair/regeneration instead of Opt.
-  elif critic failed and required entities/control handles exist and the miss has a continuous measurable residual,
-  choose run_opt before repeated source repair.
+  elif critic failed and required entities exist, physical causality is basically plausible, and the miss has a
+  continuous measurable residual over action, initial-setting/layout, material/contact, actuator/XML scalar, or
+  solver/contact parameters, choose run_opt before repeated source repair.
   elif critic failed and the evidence is structural, choose request_repair or asset regeneration.
   elif Opt returns success, partial_success, or needs_more_optimization with a useful best, choose run_execution next.
   elif Opt returns needs_rewrite, route repair/regeneration using Opt's diagnosis.
   Opt candidates include missed grasp/release timing, close target misses, plausible-but-unstable contact,
-  material/friction/density/damping sensitivity, target pose offsets, controller gain sensitivity, or solver/contact
-  tolerance sensitivity. Do not choose run_opt for missing entities, invalid assets, broken imports, impossible
-  geometry, caged/stuck mechanisms, absent metrics, invisible target behavior, or cases where task semantics need to be
-  rewritten.
+  delicate balance/stacking setup, material/friction/density/damping sensitivity, target pose offsets, controller gain
+  sensitivity, XML actuator/joint scalar sensitivity, or solver/contact tolerance sensitivity. Do not choose run_opt for
+  missing entities, invalid assets, broken imports, impossible geometry, caged/stuck mechanisms, absent metrics,
+  invisible target behavior, or cases where task semantics need to be rewritten.
 - After run_opt returns success, partial_success, or needs_more_optimization, choose run_execution next so
   artifacts/metrics/render and reports/execution_report.json are regenerated from the selected current opt params.
 - Only choose finish pass after the latest critic verdict is pass.
-- If the latest critic verdict is inconclusive because `codex_result.error_type` is `codex_usage_limit`, choose finish
-  with verdict inconclusive; do not request code repair from a missing/blocked critic review.
+- If the latest critic verdict is inconclusive because the critic infrastructure failed after its configured retries
+  (`critic_infra_status` such as quota/auth/timeout/prompt-too-large/parse failure), choose finish with verdict
+  inconclusive; do not request code repair from a missing or blocked critic review. A formal pass still requires a
+  latest critic verdict of `pass`.
 - If critic fails and repair budget remains, choose request_repair for the most relevant source owner unless the critic
   routes the defect to Planner-owned asset regeneration. When critic recommends `planner` because a generated mesh or
   XML/MJCF asset is intrinsically wrong for the task, revise the affected asset request in a complete planner_output and

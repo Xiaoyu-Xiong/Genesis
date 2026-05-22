@@ -7,7 +7,7 @@ from typing import Any
 from code_agent.configs import CONFIGS
 
 
-DEFAULT_PLANNER_INTENT = "Optimize generated behavior if parameters appear to limit success."
+DEFAULT_PLANNER_INTENT = "Optimize generated behavior if bounded continuous parameters appear to limit success."
 
 
 @dataclass(slots=True, frozen=True)
@@ -16,9 +16,10 @@ class OptAgentRequest:
     original_prompt: str | None = None
     planner_intent: str = DEFAULT_PLANNER_INTENT
     allowed_edits: tuple[str, ...] = (
-        "src/action.py for control schedules, target poses, controller gains, and action hooks",
-        "src/body.py for material, contact, density, friction, and body-parameter hooks only",
+        "src/action.py for control schedules, target poses, controller gains, force limits, and action hooks",
+        "src/body.py for material, contact, density, friction, initial setting, layout, and body-parameter hooks only",
         "src/scene.py for solver/contact/timestep hooks only",
+        "assets/xml/**/*.xml for validated scalar actuator/joint/geom parameter patches only; no topology edits",
         "contracts/*.json",
         "reports/*.json",
         "artifacts/opt_*",
@@ -27,6 +28,7 @@ class OptAgentRequest:
         "Do not change task semantics.",
         "Do not directly write dynamic object state after initialization.",
         "Do not add hidden constraints or attachments.",
+        "Do not add/remove XML bodies, joints, geoms, actuators, meshes, or change XML topology during Opt.",
         "Do not edit src/rendering.py or optimize rendering/camera/visual-only variables.",
     )
     max_rollouts: int | None = None

@@ -69,9 +69,6 @@ def evaluate_objective(
             "weight": term["weight"],
             "contribution": contribution,
         }
-        if term["transform"] == "custom":
-            warnings.append(f"custom transform for {term_name!r} is treated as zero in version 1")
-
     success = _success_from_criteria(target_spec.get("success_criteria", []), metrics, measured, warnings)
     return ObjectiveScore(
         score=float(score),
@@ -119,7 +116,7 @@ def _failure_penalty(raw_penalty: Any, direction: str) -> float:
 def _transform_value(value: Any, term: dict[str, Any]) -> float:
     transform = str(term["transform"])
     if transform == "custom":
-        return 0.0
+        raise ValueError("custom transform is not supported; write custom scores to metrics and use identity")
     if transform == "reward_if_true":
         return 1.0 if bool(value) else 0.0
     if transform == "penalty_if_true":
@@ -155,7 +152,8 @@ def _success_from_criteria(
     warnings: list[str],
 ) -> bool:
     if not criteria:
-        return True
+        warnings.append("missing success_criteria; score improvement alone cannot verify task success")
+        return False
     all_passed = True
     for criterion in criteria:
         metric_path = str(criterion["metric_path"])

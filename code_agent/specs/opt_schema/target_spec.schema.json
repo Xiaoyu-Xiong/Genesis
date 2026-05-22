@@ -59,8 +59,7 @@
             "threshold_min",
             "threshold_max",
             "reward_if_true",
-            "penalty_if_true",
-            "custom"
+            "penalty_if_true"
           ]
         },
         "target": { "$ref": "#/$defs/json_value" },

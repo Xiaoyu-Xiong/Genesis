@@ -18,9 +18,10 @@
       "required": ["max_trials"],
       "properties": {
         "max_trials": { "type": "integer", "minimum": 1 },
-        "population_size": { "type": ["integer", "null"], "minimum": 2 },
+        "population_size": { "type": ["integer", "null"], "minimum": 3 },
         "seed": { "type": ["integer", "null"] },
         "baseline_trials": { "type": "integer", "minimum": 0 },
+        "best_repeat_trials": { "type": "integer", "minimum": 1 },
         "timeout_sec": { "type": ["number", "null"], "exclusiveMinimum": 0 },
         "backend": { "type": ["string", "null"], "enum": ["gpu", "cpu", null] },
         "render_best": { "type": "boolean" }
@@ -76,7 +77,7 @@
         "max_trials": { "type": ["integer", "null"], "minimum": 1 },
         "sigma_scale": { "type": "number", "exclusiveMinimum": 0 },
         "seed": { "type": ["integer", "null"] },
-        "population_size": { "type": ["integer", "null"], "minimum": 2 },
+        "population_size": { "type": ["integer", "null"], "minimum": 3 },
         "start_from_best": { "type": "boolean" }
       },
       "additionalProperties": false
@@ -98,7 +99,7 @@
         },
         "max_trials": { "type": ["integer", "null"], "minimum": 1 },
         "sigma_scale": { "type": "number", "exclusiveMinimum": 0 },
-        "population_size": { "type": ["integer", "null"], "minimum": 2 },
+        "population_size": { "type": ["integer", "null"], "minimum": 3 },
         "start_from_best": { "type": "boolean" },
         "restarts": {
           "type": ["array", "null"],
@@ -109,7 +110,19 @@
     },
     "variable_group": {
       "type": "string",
-      "enum": ["timing", "target", "control", "material", "contact", "solver", "other"]
+      "enum": [
+        "timing",
+        "target",
+        "control",
+        "actuator",
+        "initial",
+        "layout",
+        "geometry",
+        "material",
+        "contact",
+        "solver",
+        "other"
+      ]
     },
     "variable": {
       "type": "object",
@@ -128,11 +141,24 @@
           "maxItems": 2
         },
         "scale": { "type": "string", "enum": ["linear", "log"] },
-        "owner": { "type": "string", "enum": ["scene", "body", "action"] },
+        "owner": { "type": "string", "enum": ["scene", "body", "action", "xml"] },
         "description": { "type": "string", "minLength": 1 },
         "group": {
           "type": ["string", "null"],
-          "enum": ["timing", "target", "control", "material", "contact", "solver", "other", null]
+          "enum": [
+            "timing",
+            "target",
+            "control",
+            "actuator",
+            "initial",
+            "layout",
+            "geometry",
+            "material",
+            "contact",
+            "solver",
+            "other",
+            null
+          ]
         },
         "units": { "type": ["string", "null"] },
         "active": { "type": "boolean" },

@@ -11,8 +11,21 @@ from code_agent.io_utils import dump_json, load_json_object
 
 
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
-_OWNERS = {"scene", "body", "action"}
+_OWNERS = {"scene", "body", "action", "xml"}
 _SCALES = {"linear", "log"}
+_GROUPS = {
+    "timing",
+    "target",
+    "control",
+    "actuator",
+    "initial",
+    "layout",
+    "geometry",
+    "material",
+    "contact",
+    "solver",
+    "other",
+}
 _TRANSFORMS = {
     "identity",
     "absolute_error",
@@ -21,7 +34,6 @@ _TRANSFORMS = {
     "threshold_max",
     "reward_if_true",
     "penalty_if_true",
-    "custom",
 }
 _OPS = {"<", "<=", ">", ">=", "==", "!="}
 
@@ -334,9 +346,14 @@ def _variables_from_space(opt_space: dict[str, Any], path: Path) -> list[OptVari
         raise OptContractError(f"{path} budget.max_trials must be an integer >= 1.")
     population_size = budget.get("population_size")
     if population_size is not None and (
-        not isinstance(population_size, int) or isinstance(population_size, bool) or population_size < 2
+        not isinstance(population_size, int) or isinstance(population_size, bool) or population_size < 3
     ):
-        raise OptContractError(f"{path} budget.population_size must be null or an integer >= 2.")
+        raise OptContractError(f"{path} budget.population_size must be null or an integer >= 3.")
+    best_repeat_trials = budget.get("best_repeat_trials")
+    if best_repeat_trials is not None and (
+        not isinstance(best_repeat_trials, int) or isinstance(best_repeat_trials, bool) or best_repeat_trials < 1
+    ):
+        raise OptContractError(f"{path} budget.best_repeat_trials must be an integer >= 1.")
     _validate_strategy(opt_space.get("strategy"), path)
     variables_payload = opt_space.get("variables")
     if not isinstance(variables_payload, list) or not variables_payload:
@@ -377,6 +394,9 @@ def _variable_from_payload(payload: Any, path: Path, index: int) -> OptVariable:
     description = payload.get("description")
     if not isinstance(description, str) or not description:
         raise OptContractError(f"{path} variable {name!r} must define description.")
+    group = payload.get("group")
+    if group is not None and group not in _GROUPS:
+        raise OptContractError(f"{path} variable {name!r} has unsupported group.")
     active = payload.get("active", True)
     if not isinstance(active, bool):
         raise OptContractError(f"{path} variable {name!r} active must be boolean when provided.")
@@ -393,7 +413,7 @@ def _variable_from_payload(payload: Any, path: Path, index: int) -> OptVariable:
         scale=scale,
         owner=owner,
         description=description,
-        group=payload.get("group"),
+        group=group,
         units=payload.get("units"),
         active=active,
         initial_sigma=initial_sigma,
@@ -502,8 +522,8 @@ def _optional_positive_int(value: Any, label: str) -> None:
 def _optional_population(value: Any, label: str) -> None:
     if value is None:
         return
-    if not isinstance(value, int) or isinstance(value, bool) or value < 2:
-        raise OptContractError(f"{label} must be null or an integer >= 2.")
+    if not isinstance(value, int) or isinstance(value, bool) or value < 3:
+        raise OptContractError(f"{label} must be null or an integer >= 3.")
 
 
 def _optional_positive_number(value: Any, label: str) -> None:

@@ -244,7 +244,7 @@ def _optional_positive_int(value: Any) -> int | None:
 def _optional_population(value: Any) -> int | None:
     if value is None:
         return None
-    return max(2, int(value))
+    return max(3, int(value))
 
 
 def _optional_str_tuple(value: Any) -> tuple[str, ...] | None:

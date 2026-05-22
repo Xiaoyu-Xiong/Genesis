@@ -5,7 +5,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from code_agent.prompts.common import BUILTIN_ASSET_POLICY_GUIDE, PHYSICAL_CAUSALITY_CONTRACT, SOURCE_AWARE_REPAIR_GUIDE
+from code_agent.prompts.common import (
+    BUILTIN_ASSET_POLICY_GUIDE,
+    COLLISION_CONTACT_CONTRACT,
+    PHYSICAL_CAUSALITY_CONTRACT,
+    SOURCE_AWARE_REPAIR_GUIDE,
+)
 
 if TYPE_CHECKING:
     from code_agent.opt.types import OptAgentRequest
@@ -18,9 +23,10 @@ def build_opt_prompt(request: OptAgentRequest) -> str:
     return f"""
 You are the Opt Codex subagent for one generated Genesis simulation workspace.
 
-Your job is to decide whether this generated case is parameter-limited and, if so, make the smallest safe set of
-source/contract edits needed to expose optimizable parameters, run optimization, verify the result, and report evidence
-back to Planner. You are not a fixed adapter and you must not rely on benchmark-specific string recipes.
+Your job is to decide whether this generated case is limited by bounded continuous parameters and, if so, make the
+smallest safe set of source/contract edits needed to expose optimizable parameters, run optimization, verify the
+result, and report evidence back to Planner. You are not a fixed adapter and you must not rely on benchmark-specific
+string recipes.
 
 Planner-to-Opt request:
 {request_text}
@@ -32,13 +38,25 @@ Core responsibilities:
 - Inspect the generated case before editing. Read relevant `src/scene.py`, `src/body.py`, `src/action.py`,
   `src/main.py`, existing `contracts/*.json`, `reports/*.json`, and `artifacts/*/metrics.json`. You may read
   `src/rendering.py` only to understand evidence wiring, but it is outside the optimization/edit surface.
-- Decide from the source and evidence whether optimization is appropriate. If the failure is structural, missing assets,
-  missing control handles, impossible geometry, absent metrics, or invalid simulation code, return `needs_rewrite`
-  instead of forcing a numeric optimization pass.
+- Decide from the source and evidence whether optimization is appropriate. Good candidates are failures that can
+  plausibly be solved by a compact continuous search over action, initial-setting, layout, material/contact, actuator,
+  XML scalar, or solver/contact parameters. If the failure is structural, missing assets, impossible geometry, absent
+  metrics, invalid simulation code, or missing physical affordances, return `needs_rewrite` instead of forcing a numeric
+  optimization pass.
 - If optimization is appropriate, identify a compact low-dimensional set of physically meaningful scalar parameters.
-  You may expose action targets/timings/controller gains, body material/contact parameters, scene solver/contact
-  parameters. Do not expose rendering, camera, lighting, capture, or visual-only variables, and do not optimize
+  You may expose action targets/timings/controller gains, body material/contact parameters, initial poses/layout
+  gaps/lean angles, mass/COM/damping/friction values, scene solver/contact parameters, and XML actuator/joint/geom
+  scalar attributes. Do not expose rendering, camera, lighting, capture, or visual-only variables, and do not optimize
   irrelevant constants.
+- Prefer runtime hooks for XML actuator tuning when Genesis APIs can express them, e.g. patch generated body/action code
+  to call `set_dofs_kp`, `set_dofs_kv`, `set_dofs_force_range`, or equivalent control APIs from opt params. Use
+  direct XML edits only for scalar attributes that cannot be set reliably at runtime.
+- If you edit or generate per-run copies of `assets/xml/**/*.xml`, keep the source asset topology unchanged. Only
+  numeric attributes on existing named elements may change: actuator `kp`, `forcerange`, `ctrlrange`; joint `damping`,
+  `armature`, `range`; and geom/contact scalars such as `friction`, `solref`, `solimp`, `density`, `mass` when
+  physically meaningful. Do not add/remove/rename bodies, joints, geoms, actuators, meshes, defaults, or change joint
+  axes. Validate the XML diff yourself; when reporting a useful result that touched XML, include evidence beginning
+  with `xml_scalar_patch_validated=` describing the allowed scalar attributes changed.
 - Patch generated modules so they read `contracts/current_opt_params.json` when present, fall back to
   `contracts/default_opt_params.json`, and remain runnable without optimization. Record loaded opt params and relevant
   measured quantities in `metrics.json`.
@@ -60,6 +78,7 @@ Core responsibilities:
 
 Hard safety constraints:
 {PHYSICAL_CAUSALITY_CONTRACT}
+{COLLISION_CONTACT_CONTRACT}
 {BUILTIN_ASSET_POLICY_GUIDE}
 
 Source-aware diagnosis guidance:
@@ -81,6 +100,8 @@ Implementation rules:
 - Do not add hidden constraints, fake attachments, direct post-initialization object state writes, or task-object
   teleportation. Optimization must tune physical parameters or controls that the generated simulation uses honestly.
 - Do not change the task semantics, required entities, or success target to make the case easier.
+- Do not move the goal to the object or relax the requested target. Initial-setting/layout variables may only tune the
+  setup within the prompt's intended scene family.
 - Keep the search space small. Prefer 2-8 variables unless evidence justifies more.
 - Prefer `scale: "log"` for positive variables spanning orders of magnitude, such as stiffness, damping, density,
   contact stiffness, tolerances, and controller gains.
@@ -88,6 +109,9 @@ Implementation rules:
   Define shaped objective terms whenever possible: distance-to-target, velocity error, event timing, contact count,
   closest approach, pose/joint error, stability margin, or task-object retention. Keep binary pass/fail as
   `success_criteria`, not as the only optimization signal.
+- Always define explicit `success_criteria`. Score improvement alone is not task success.
+- Do not use `transform: "custom"` in `target_spec.json`. If the task needs a custom score, compute that scalar inside
+  the generated case metrics and reference it with `transform: "identity"`.
 - Use the runner's generic strategy knobs when useful rather than hand-coding task-specific search logic:
   `strategy.phases` can optimize one variable group at a time, `strategy.restarts` can run multiple seeds/sigma scales,
   and `strategy.early_stop` can stop after success or several non-improving generations. Do not use low-fidelity
@@ -126,6 +150,7 @@ def _request_payload(request: OptAgentRequest) -> dict[str, object]:
 def _workspace_summary(case_dir: Path) -> dict[str, object]:
     paths = {
         "src": _relative_files(case_dir, "src", 20),
+        "assets_xml": _relative_files(case_dir, "assets/xml", 40),
         "contracts": _relative_files(case_dir, "contracts", 30),
         "reports": _relative_files(case_dir, "reports", 30),
         "artifacts": _relative_files(case_dir, "artifacts", 40),

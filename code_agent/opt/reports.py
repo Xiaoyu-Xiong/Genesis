@@ -119,6 +119,7 @@ class OptReporter:
             "budget": {
                 "max_trials": options.max_trials,
                 "baseline_trials": options.baseline_trials,
+                "best_repeat_trials": options.best_repeat_trials,
                 "population_size": options.population_size,
                 "seed": options.seed,
                 "default_initial_sigma": default_initial_sigma,
@@ -169,12 +170,12 @@ class OptReporter:
         terms = objective.get("terms") if isinstance(objective, dict) else None
         if not isinstance(terms, list) or not terms:
             return ["Objective has no shaped terms; optimization evidence may be too sparse."]
-        sparse_transforms = {"reward_if_true", "penalty_if_true", "custom"}
+        sparse_transforms = {"reward_if_true", "penalty_if_true"}
         transforms = {str(term.get("transform")) for term in terms if isinstance(term, dict)}
         warnings: list[str] = []
         if transforms and transforms <= sparse_transforms:
             warnings.append(
-                "Objective terms are binary/custom only; add continuous proxy metrics such as distance, speed, "
+                "Objective terms are binary only; add continuous proxy metrics such as distance, speed, "
                 "event timing, contact count, or pose error for more reliable CMA-ES search."
             )
         if not target_spec.get("success_criteria"):

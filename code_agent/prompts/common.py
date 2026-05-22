@@ -19,6 +19,21 @@ Physical causality contract:
 """.strip()
 
 
+COLLISION_CONTACT_CONTRACT = """
+Collision/contact contract:
+- Task-critical physical participants must have real collision geometry, not visual-only geometry. This includes passive
+  objects, supports, containers, targets that receive contact, robot/tool contact surfaces, ground/table surfaces, and
+  obstacles named in the prompt.
+- Enable collision between task-critical objects that are expected to touch, roll, slide, stack, block, catch, bounce,
+  or contain each other. Do not rely on objects passing through each other, one-sided visual shells, hidden supports, or
+  disabled collision masks to make the result look plausible.
+- Avoid initial interpenetration. Use positive clearances, task-appropriate gaps, and metrics/logs that can reveal
+  penetration, support loss, or ghost contact in contact-sensitive scenes.
+- Robot internal self-collision may be limited when necessary to avoid actuator self-locking, but this must not disable
+  collision between the robot/tool contact surfaces and the task objects they manipulate.
+""".strip()
+
+
 SCALE_POLICY_GUIDE = """
 Scale policy:
 - Avoid non-uniform scale by default. Unless the input task prompt explicitly requests an exceptional anisotropic

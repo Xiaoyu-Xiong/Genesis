@@ -433,6 +433,10 @@ def _classify_codex_failure(*, jsonl_path: Path, stderr_path: Path) -> tuple[str
         marker in combined for marker in USAGE_LIMIT_MARKERS[:2]
     ):
         return "codex_usage_limit", _first_nonempty(messages)
+    if "401 unauthorized" in combined:
+        return "codex_auth_failed", _first_nonempty(messages)
+    if "input exceeds the maximum length" in combined:
+        return "codex_input_too_large", _first_nonempty(messages)
     return None, None
 
 

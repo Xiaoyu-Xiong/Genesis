@@ -164,9 +164,16 @@ class RuntimeActionHandler:
             original_prompt=self.session.config.task,
             planner_intent=self._opt_planner_intent(action),
             allowed_edits=(
-                "src/action.py for control schedules, target poses, controller gains, and action hooks",
-                "src/body.py for material, contact, density, friction, and body-parameter hooks only",
+                "src/action.py for control schedules, target poses, controller gains, force limits, and action hooks",
+                (
+                    "src/body.py for material, contact, density, friction, initial setting, layout, and "
+                    "body-parameter hooks only"
+                ),
                 "src/scene.py for solver/contact/timestep hooks only",
+                (
+                    "assets/xml/**/*.xml for validated scalar actuator/joint/geom parameter patches only; no "
+                    "topology edits"
+                ),
                 "contracts/*.json",
                 "reports/*.json",
                 "artifacts/opt_*",
@@ -175,6 +182,7 @@ class RuntimeActionHandler:
                 "Do not change task semantics or required entities.",
                 "Do not directly write dynamic object state after initialization.",
                 "Do not add hidden constraints, attachments, suction, fake joints, or task-object teleportation.",
+                "Do not add/remove XML bodies, joints, geoms, actuators, meshes, or change XML topology during Opt.",
                 "Do not edit src/rendering.py or optimize rendering/camera/visual-only variables.",
                 "Do not edit repository-level pipeline code during the Opt pass.",
             ),
@@ -316,7 +324,11 @@ class RuntimeActionHandler:
 
     def _opt_planner_intent(self, action: dict[str, Any]) -> str:
         parts = [
-            "Optimize the generated case only if the evidence suggests a compact parameter/control search can improve it.",
+            (
+                "Optimize the generated case only if the evidence suggests a compact continuous-parameter search can "
+                "improve it. Candidate variables may include action controls, initial settings/layout, "
+                "material/contact properties, actuator gains/limits, XML scalar parameters, or solver/contact settings."
+            ),
             f"Planner rationale: {action.get('rationale') or '<none>'}",
         ]
         notes = action.get("notes")

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import math
+import statistics
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import load_json_object
+from code_agent.opt.objective import ObjectiveScore
 from code_agent.opt.contracts import (
     OptContractError,
     OptContracts,
@@ -85,6 +88,12 @@ class _OptRunner:
         )
         best_result = search.best_result
 
+        best_result, _ = self._confirm_best_result(
+            contracts,
+            options,
+            best_result,
+            search.next_trial_index,
+        )
         best_render_dir = self._write_and_render_best(best_result, options)
         verification = self.reporter.write_verification(best_result, best_render_dir, contracts.target_spec)
         return self.reporter.write_report(
@@ -123,10 +132,79 @@ class _OptRunner:
                 contracts=contracts,
             )
             self.reporter.append_trace(result.entry)
-            baseline_scores.append(float(result.score.score) if result.score.score is not None else 0.0)
+            baseline_scores.append(_score_for_report(result, maximize=maximize(contracts)))
             best_result = choose_best(best_result, result, maximize=maximize(contracts))
             trial_index += 1
         return best_result, baseline_scores, trial_index
+
+    def _confirm_best_result(
+        self,
+        contracts: OptContracts,
+        options: RunOptOptions,
+        best_result: TrialResult | None,
+        trial_index: int,
+    ) -> tuple[TrialResult | None, int]:
+        if best_result is None or options.best_repeat_trials <= 1:
+            return best_result, trial_index
+
+        results = [best_result]
+        source_trial = int(best_result.entry["trial_index"])
+        for repeat_index in range(options.best_repeat_trials - 1):
+            payload = payload_for_trial(
+                best_result.params_payload,
+                source="trial",
+                trial_index=trial_index,
+                metadata={
+                    "kind": "best_confirmation",
+                    "source_trial": source_trial,
+                    "repeat_index": repeat_index,
+                },
+            )
+            result = self.trials.run_trial(
+                trial_index=trial_index,
+                params_payload=payload,
+                options=options,
+                contracts=contracts,
+            )
+            self.reporter.append_trace(result.entry)
+            results.append(result)
+            trial_index += 1
+
+        return self._aggregate_confirmed_best(results), trial_index
+
+    def _aggregate_confirmed_best(self, results: list[TrialResult]) -> TrialResult:
+        scored = [
+            result
+            for result in results
+            if isinstance(result.score.score, int | float) and math.isfinite(float(result.score.score))
+        ]
+        if not scored:
+            return results[0]
+        median_score = float(statistics.median(float(result.score.score) for result in scored))
+        representative = min(scored, key=lambda result: abs(float(result.score.score) - median_score))
+        success_count = sum(1 for result in results if result.score.success)
+        success = success_count * 2 > len(results)
+        warnings = [
+            *representative.score.warnings,
+            (
+                f"best params confirmed with {len(results)} rollout(s); median_score={median_score:.6g}; "
+                f"success_count={success_count}/{len(results)}"
+            ),
+        ]
+        score = ObjectiveScore(
+            score=median_score,
+            success=success,
+            terms=representative.score.terms,
+            measured=representative.score.measured,
+            failure_penalty=representative.score.failure_penalty,
+            failure_reason=representative.score.failure_reason,
+            warnings=warnings,
+        )
+        entry = dict(representative.entry)
+        entry["score"] = score.score
+        entry["objective"] = score.to_report()
+        entry["warnings"] = warnings
+        return TrialResult(entry=entry, score=score, params_payload=representative.params_payload)
 
     def _write_and_render_best(self, best_result: TrialResult | None, options: RunOptOptions) -> Path | None:
         if best_result is None:
@@ -171,6 +249,7 @@ class _OptRunner:
             else bool(budget.get("render_best", CONFIGS.opt.runner_render_best))
         )
         baseline_trials = max(1, int(budget.get("baseline_trials", CONFIGS.opt.runner_baseline_trials)))
+        best_repeat_trials = max(1, int(budget.get("best_repeat_trials", CONFIGS.opt.runner_best_repeat_trials)))
         trial_root = self._workspace_path(
             execution.get("trial_root", CONFIGS.opt.runner_trial_root),
             "execution.trial_root",
@@ -195,6 +274,7 @@ class _OptRunner:
             target_video_frames=target_video_frames,
             render_best=render_best,
             baseline_trials=baseline_trials,
+            best_repeat_trials=best_repeat_trials,
             trial_root=trial_root,
             best_out_dir=best_out_dir,
             current_params_path=current_params_path,
@@ -222,3 +302,10 @@ def _first_float(*values: Any) -> float | None:
             continue
         return float(value)
     return None
+
+
+def _score_for_report(result: TrialResult, *, maximize: bool) -> float:
+    score = result.score.score
+    if isinstance(score, int | float) and math.isfinite(float(score)):
+        return float(score)
+    return -1.0e12 if maximize else 1.0e12

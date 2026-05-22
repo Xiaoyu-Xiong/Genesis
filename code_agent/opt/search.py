@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -191,7 +192,8 @@ class CMAESStrategyRunner:
             population_size=restart.population_size or phase.population_size or options.population_size,
             seed=self._restart_seed(options.seed, restart.seed, phase_index, restart_index),
         )
-        early_stop = EarlyStopState(strategy.early_stop, maximize(contracts), has_success_criteria(contracts))
+        maximize_objective = maximize(contracts)
+        early_stop = EarlyStopState(strategy.early_stop, maximize_objective, has_success_criteria(contracts))
         remaining = restart_budget
         trials_used = 0
         stop_reason: str | None = None
@@ -213,9 +215,9 @@ class CMAESStrategyRunner:
                     optimizer=optimizer,
                     trial_index=trial_index,
                 )
-                candidate_scores.append(float(result.score.score) if result.score.score is not None else 0.0)
-                best_result = choose_best(best_result, result, maximize=maximize(contracts))
-                generation_best = choose_best(generation_best, result, maximize=maximize(contracts))
+                candidate_scores.append(_optimizer_score(result, maximize=maximize_objective))
+                best_result = choose_best(best_result, result, maximize=maximize_objective)
+                generation_best = choose_best(generation_best, result, maximize=maximize_objective)
                 generation_success = generation_success or bool(result.score.success)
                 trial_index += 1
                 remaining -= 1
@@ -317,3 +319,9 @@ class CMAESStrategyRunner:
         offset = CONFIGS.opt.runner_restart_seed_stride
         return int(base_seed) + offset * (phase_index + 1) + restart_index
 
+
+def _optimizer_score(result: TrialResult, *, maximize: bool) -> float:
+    score = result.score.score
+    if isinstance(score, int | float) and math.isfinite(float(score)):
+        return float(score)
+    return -1.0e12 if maximize else 1.0e12

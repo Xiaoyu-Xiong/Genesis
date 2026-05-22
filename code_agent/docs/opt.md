@@ -56,17 +56,20 @@ Planner should call Opt when:
 - The generated case is runnable: code executes, required entities exist, video/metrics are produced, and the physical
   causal story is basically plausible.
 - The failure looks like a continuous parameter residual rather than a missing structure: distance is close but off,
-  speed/angle/timing is wrong, contact happens in the wrong place, a PD gain is unstable, or friction/damping/density is
-  sensitive.
-- There are real control handles in `src/action.py`, `src/body.py`, or `src/scene.py` that Opt can safely expose.
+  speed/angle/timing is wrong, contact happens in the wrong place, a PD gain is unstable, an initial balance setting is
+  slightly wrong, or friction/damping/density is sensitive.
+- There are real bounded continuous parameters that Opt can safely expose. These may live in action schedules,
+  body/material setup, initial placement/layout, scene/contact settings, actuator gains/limits, or validated XML/MJCF
+  scalar attributes.
 - The prompt explicitly asks for inverse design, controllability, tuning, or target matching.
 - A critic or execution report suggests that repeated local repair is converging to "almost works, but wrong numbers".
 
 Planner may skip Opt when:
 
 - The default generated rollout already satisfies the task.
-- The failure is clearly structural, such as missing required bodies, invalid assets, missing control handles, wrong
-  joint axes, caged/stuck task objects, impossible geometry, absent metrics, or invisible target behavior.
+- The failure is clearly structural, such as missing required bodies, invalid assets, missing physical affordances or
+  continuous parameter hooks, wrong joint axes, caged/stuck task objects, impossible geometry, absent metrics, or
+  invisible target behavior.
 - The task is purely visual or rendering-only.
 - The optimization budget is too small to produce useful evidence.
 
@@ -96,6 +99,8 @@ It should:
   reports, and metrics. It may read `src/rendering.py` only to understand available evidence, not as an edit target.
 - Identify sensitive values that are safe to optimize.
 - Decide whether parameters belong to `scene`, `body`, or `action`.
+- Decide whether actuator or joint tuning should be applied through runtime Genesis APIs or through a constrained XML
+  scalar patch.
 - Patch generated code so it can read opt parameters while remaining runnable without Opt.
 - Emit or revise `contracts/target_spec.json`, `contracts/opt_space.json`, and
   `contracts/default_opt_params.json`.
@@ -152,6 +157,8 @@ Opt may usually edit:
 - `src/body.py` to expose material, density, friction, restitution, geometry-scale, initial placement, and object
   parameter hooks.
 - `src/scene.py` to expose carefully bounded solver/contact parameters when the value is a genuine simulation setting.
+- `assets/xml/**/*.xml` only for validated scalar patches on existing actuator, joint, or geom attributes. Prefer
+  runtime hooks such as `set_dofs_kp`, `set_dofs_kv`, and `set_dofs_force_range` when they can express the same tuning.
 - `contracts/*.json` for optimization specs and parameter payloads.
 - `reports/*.json` and optimization artifacts.
 
@@ -161,8 +168,9 @@ Opt must not edit:
 
 Opt should avoid editing:
 
-- Generated assets, except for tiny parameterization hooks. If the asset or mechanism is structurally wrong, Opt should
-  report `needs_rewrite` to Planner.
+- Generated assets, except for scalar XML/MJCF parameter patches that preserve the same bodies, joints, geoms,
+  actuators, meshes, names, and joint axes. If the asset or mechanism is structurally wrong, Opt should report
+  `needs_rewrite` to Planner.
 - Task text, success semantics, or entity set.
 
 If visual evidence is unclear because the camera or renderer is wrong, Opt should report that Planner needs a rendering
@@ -187,8 +195,9 @@ Planner should call the Opt subagent with a structured brief. A representative r
   "planner_intent": "Optimize generated behavior if parameters, not structure, appear to limit success.",
   "allowed_edits": [
     "src/action.py",
-    "src/body.py only for material/contact hooks",
+    "src/body.py only for material/contact/initial-setting hooks",
     "src/scene.py only for solver/contact/timestep hooks",
+    "assets/xml/**/*.xml only for validated scalar actuator/joint/geom patches",
     "contracts/*.json",
     "reports/*.json",
     "artifacts/opt_*"
@@ -198,6 +207,7 @@ Planner should call the Opt subagent with a structured brief. A representative r
     "Do not directly write dynamic object state after initialization.",
     "Do not add hidden constraints or attachments.",
     "Do not edit src/rendering.py or optimize rendering/camera/visual-only variables.",
+    "Do not change XML topology during Opt.",
     "Do not replace generated assets without reporting needs_rewrite."
   ],
   "optimization_budget": {
@@ -305,7 +315,9 @@ For `needs_rewrite`, Opt should include owner guidance through the existing sche
 
 ## Parameterization Scope
 
-Opt can expose any bounded scalar that is physically meaningful and read at the correct simulation lifecycle point.
+Opt can expose any bounded scalar that is physically meaningful and read at the correct simulation lifecycle point. This
+includes tasks with no obvious action policy, such as card-house, arch, stack, or balance scenes, when the remaining
+failure is a fine initial-setting/material/contact parameter rather than a structural impossibility.
 
 Common `action.py` variables:
 
@@ -318,13 +330,22 @@ Common `body.py` variables:
 
 - Object density, mass scale, friction, restitution, damping.
 - FEM Young's modulus, Poisson ratio, material damping, bending/rod stiffness, plasticity parameters.
-- Geometry scale and initial placement, if changing them preserves prompt semantics.
+- Geometry scale, initial placement, lean angle, layout gap, preload, and center-of-mass offsets, if changing them
+  preserves prompt semantics.
 - Contact material parameters.
 
 Common `scene.py` variables:
 
 - Timestep, substeps, solver tolerances, contact stiffness, contact distance, IPC/contact settings.
 - These should be bounded tightly and used only when they represent solver tuning rather than task cheating.
+
+Common XML/MJCF scalar variables:
+
+- Existing actuator `kp`, `ctrlrange`, and `forcerange` values.
+- Existing joint `damping`, `armature`, and `range` values.
+- Existing geom/contact scalar attributes such as friction, density, mass, `solref`, or `solimp` when meaningful.
+- XML tuning should not add/remove/rename bodies, joints, geoms, actuators, meshes, defaults, or change joint axes.
+  Prefer runtime Genesis control APIs when the same parameter can be applied after asset loading.
 
 Use `scale: "log"` for positive variables spanning orders of magnitude, such as stiffness, damping, density, solver
 tolerances, and many controller gains. Use `scale: "linear"` for signed offsets, schedule fractions, moderate friction
@@ -339,12 +360,16 @@ CMA-ES is useful because:
 - It does not need gradients.
 - It tolerates noisy metrics better than grid search.
 - It fits low-dimensional continuous tuning.
-- It can tune geometry, control, material, contact, and solver scalars through one contract format.
+- It can tune initial setting, layout, geometry, control, actuator, material, contact, XML scalar, and solver values
+  through one contract format.
 
 CMA-ES details currently supported:
 
 - Variables are normalized to `[0, 1]`.
-- `population_size` may be explicit or auto-selected.
+- The backend uses `pycma`'s bounded CMA-ES implementation instead of the earlier in-repo CMA-ES update code. Returned
+  candidates are still validated inside `[0, 1]` before trial execution.
+- `population_size` may be explicit or auto-selected. Explicit values must be at least 3 because pycma cannot update
+  from smaller populations.
 - If omitted, `population_size` uses:
 
 ```text
@@ -369,8 +394,13 @@ else:
   bad basin.
 - `strategy.early_stop` may stop a phase/restart when success criteria are met or when several generations fail to
   improve by `min_delta`.
-- The runner reports objective-shaping warnings when the objective is only binary/custom, and boundary warnings when
-  the selected best parameters cluster near search bounds.
+- The runner repeats the selected best parameter rollout before final rendering by default and uses the median repeated
+  score plus strict-majority success for verification, reducing one-off noisy contact successes.
+- The runner reports objective-shaping warnings when the objective is only binary, and boundary warnings when the
+  selected best parameters cluster near search bounds.
+- `transform: "custom"` is intentionally rejected. Generated code should write any custom scalar score into
+  `metrics.json`, and `target_spec.json` should read that metric with `transform: "identity"`.
+- Missing `success_criteria` means score can improve but verification success is false.
 - Low-fidelity first is intentionally not part of the current runner strategy because changing duration, fps, or solver
   fidelity can make early evidence disagree with the final rendered rollout.
 
@@ -473,7 +503,8 @@ agent.
   "budget": {
     "max_trials": 24,
     "population_size": null,
-    "seed": 0
+    "seed": 0,
+    "best_repeat_trials": 2
   },
   "strategy": {
     "early_stop": {
@@ -526,6 +557,7 @@ Ownership guidance:
 - `scene.py` owns solver/contact lifecycle parameters.
 - `body.py` owns material, geometry, initial placement, density, friction, and object parameter hooks.
 - `action.py` owns policy schedule, phase timings, trajectory targets, PD gains, force limits, and control parameters.
+- `assets/xml/**/*.xml` owns existing MJCF actuator/joint/geom scalar defaults when runtime Genesis APIs are not enough.
 - `rendering.py` is excluded from Opt parameterization. Rendering defects should be routed back to the rendering worker.
 
 ## Validation Rules
@@ -554,7 +586,9 @@ Supported in version 1:
 - `type: "float"`
 - `scale: "linear"`
 - `scale: "log"` for positive-valued variables
-- owners `scene`, `body`, or `action`, with most variables expected in `body` or `action`
+- owners `scene`, `body`, `action`, or `xml`, with most variables expected in `body` or `action`
+- groups `timing`, `target`, `control`, `actuator`, `initial`, `layout`, `geometry`, `material`, `contact`, `solver`,
+  or `other`
 
 Rejected in version 1:
 
@@ -562,6 +596,9 @@ Rejected in version 1:
 - Per-step action arrays.
 - Categorical variables.
 - Variables that enable hidden constraints, direct target-following, or direct post-initialization object state writes.
+- XML variables that require topology edits instead of scalar changes on existing elements.
+- `transform: "custom"` objective terms.
+- Objectives without `success_criteria` when Opt wants to claim final success.
 - Variables with defaults outside bounds.
 - Log-scale variables with non-positive bounds.
 - Variables whose effects cannot be observed in trial metrics or visual evidence.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+import cma
 import numpy as np
 
 from code_agent.configs import CONFIGS
@@ -31,7 +32,7 @@ def default_population_size(dim: int) -> int:
 
 
 class CMAESOptimizer:
-    """Small bounded CMA-ES implementation over normalized vectors in [0, 1]."""
+    """Pycma-backed bounded CMA-ES over normalized vectors in [0, 1]."""
 
     def __init__(
         self,
@@ -49,55 +50,44 @@ class CMAESOptimizer:
         self.population_size = int(
             population_size if population_size is not None else default_population_size(self.dim)
         )
-        if self.population_size < 2:
-            raise ValueError("population_size must be >= 2")
-        self.mu = max(1, self.population_size // 2)
-        raw_weights = np.log(self.mu + 0.5) - np.log(np.arange(1, self.mu + 1, dtype=np.float64))
-        self.weights = raw_weights / np.sum(raw_weights)
-        self.mu_eff = float(1.0 / np.sum(self.weights**2))
+        if self.population_size < 3:
+            raise ValueError("population_size must be >= 3 for pycma")
 
-        self.mean = np.clip(np.asarray(mean, dtype=np.float64), 0.0, 1.0).reshape(self.dim)
+        start_mean = _unit_vector(mean, self.dim)
         if initial_sigmas is None:
-            base_sigma = CONFIGS.opt.runner_default_initial_sigma if sigma is None else sigma
-            self.sigma = float(np.clip(base_sigma, 1e-4, 1.0))
-            self.cov = np.eye(self.dim, dtype=np.float64)
+            sigma0 = CONFIGS.opt.runner_default_initial_sigma if sigma is None else float(sigma)
+            self._initial_axis_sigmas = np.full(self.dim, _clamp_sigma(sigma0), dtype=np.float64)
+            cma_stds = None
         else:
-            axis_sigmas = _normalized_sigmas(initial_sigmas, self.dim)
-            self.sigma = float(np.clip(np.median(axis_sigmas), 1e-4, 1.0))
-            self.cov = np.diag((axis_sigmas / self.sigma) ** 2)
-        self.pc = np.zeros(self.dim, dtype=np.float64)
-        self.ps = np.zeros(self.dim, dtype=np.float64)
-        self.basis = np.eye(self.dim, dtype=np.float64)
-        self.diag = np.ones(self.dim, dtype=np.float64)
-        self.invsqrt_cov = np.eye(self.dim, dtype=np.float64)
-        self.rng = np.random.default_rng(seed)
+            self._initial_axis_sigmas = _normalized_sigmas(initial_sigmas, self.dim)
+            sigma0 = float(np.median(self._initial_axis_sigmas))
+            cma_stds = self._initial_axis_sigmas / max(sigma0, 1e-12)
+        sigma0 = _clamp_sigma(sigma0)
 
-        self.cc = (4.0 + self.mu_eff / self.dim) / (self.dim + 4.0 + 2.0 * self.mu_eff / self.dim)
-        self.cs = (self.mu_eff + 2.0) / (self.dim + self.mu_eff + 5.0)
-        self.c1 = 2.0 / ((self.dim + 1.3) ** 2 + self.mu_eff)
-        self.cmu = min(
-            1.0 - self.c1,
-            2.0 * (self.mu_eff - 2.0 + 1.0 / self.mu_eff) / ((self.dim + 2.0) ** 2 + self.mu_eff),
-        )
-        self.damps = 1.0 + 2.0 * max(0.0, math.sqrt((self.mu_eff - 1.0) / (self.dim + 1.0)) - 1.0) + self.cs
-        self.chi_n = math.sqrt(self.dim) * (1.0 - 1.0 / (4.0 * self.dim) + 1.0 / (21.0 * self.dim**2))
-        self.iteration = 0
+        options: dict[str, object] = {
+            "bounds": [0.0, 1.0],
+            "popsize": self.population_size,
+            "verbose": -9,
+            "verb_disp": 0,
+            "verb_log": 0,
+        }
+        if seed is not None:
+            options["seed"] = int(seed)
+        if cma_stds is not None:
+            options["CMA_stds"] = cma_stds.astype(float).tolist()
+
+        self._es = cma.CMAEvolutionStrategy(start_mean.astype(float).tolist(), sigma0, options)
+        self._rng = np.random.default_rng(seed)
         self.best_score: float | None = None
         self.best_vector: np.ndarray | None = None
-        self._update_eigensystem()
 
     def ask(self, count: int | None = None) -> list[list[float]]:
         count = int(count or self.population_size)
         if count < 1:
             return []
-        samples = []
-        transform = self.basis @ np.diag(self.diag)
-        for _ in range(count):
-            z = self.rng.standard_normal(self.dim)
-            y = transform @ z
-            candidate = np.clip(self.mean + self.sigma * y, 0.0, 1.0)
-            samples.append(candidate.astype(float).tolist())
-        return samples
+        if count < 3:
+            return [self._tail_sample().astype(float).tolist() for _ in range(count)]
+        return [_unit_vector(candidate, self.dim).astype(float).tolist() for candidate in self._es.ask(number=count)]
 
     def tell(self, candidates: list[list[float]], scores: list[float], *, maximize: bool) -> None:
         if not candidates:
@@ -112,67 +102,58 @@ class CMAESOptimizer:
         order = np.argsort(s)
         if maximize:
             order = order[::-1]
-        selected = x[order[: self.mu]]
-        if len(selected) < self.mu:
-            weights = self.weights[: len(selected)]
-            weights = weights / np.sum(weights)
-        else:
-            weights = self.weights
-
-        best_index = order[0]
+        best_index = int(order[0])
         best_score = float(s[best_index])
         if self.best_score is None or (best_score > self.best_score if maximize else best_score < self.best_score):
             self.best_score = best_score
             self.best_vector = x[best_index].copy()
 
-        old_mean = self.mean.copy()
-        y_k = (selected - old_mean) / self.sigma
-        y_w = np.sum(y_k * weights[:, None], axis=0)
-        self.mean = np.clip(old_mean + self.sigma * y_w, 0.0, 1.0)
-
-        self.ps = (1.0 - self.cs) * self.ps + math.sqrt(self.cs * (2.0 - self.cs) * self.mu_eff) * (
-            self.invsqrt_cov @ y_w
-        )
-        norm_ps = float(np.linalg.norm(self.ps))
-        correction = math.sqrt(max(1e-12, 1.0 - (1.0 - self.cs) ** (2.0 * (self.iteration + 1))))
-        hsig = norm_ps / correction / self.chi_n < (1.4 + 2.0 / (self.dim + 1.0))
-        hsig_float = 1.0 if hsig else 0.0
-        self.pc = (1.0 - self.cc) * self.pc + hsig_float * math.sqrt(self.cc * (2.0 - self.cc) * self.mu_eff) * y_w
-
-        rank_mu = np.zeros_like(self.cov)
-        for weight, y in zip(weights, y_k):
-            rank_mu += float(weight) * np.outer(y, y)
-        delta_hsig = (1.0 - hsig_float) * self.cc * (2.0 - self.cc)
-        self.cov = (
-            (1.0 - self.c1 - self.cmu + self.c1 * delta_hsig) * self.cov
-            + self.c1 * np.outer(self.pc, self.pc)
-            + self.cmu * rank_mu
-        )
-        self.cov = (self.cov + self.cov.T) * 0.5
-        self.sigma *= math.exp((self.cs / self.damps) * (norm_ps / self.chi_n - 1.0))
-        self.sigma = float(np.clip(self.sigma, 1e-4, 1.0))
-        self.iteration += 1
-        self._update_eigensystem()
+        # Pycma rejects tiny population updates. This only happens at the tail of a rollout budget;
+        # the candidate still contributes to best-trial tracking above, but not to distribution adaptation.
+        if len(candidates) < 3:
+            return
+        objective_values = (-s if maximize else s).astype(float).tolist()
+        self._es.tell(_unit_matrix(x, self.dim).astype(float).tolist(), objective_values)
 
     def state(self) -> CMAESState:
         return CMAESState(
-            iteration=self.iteration,
-            mean=self.mean.astype(float).tolist(),
-            sigma=float(self.sigma),
-            axis_sigmas=(self.sigma * np.sqrt(np.clip(np.diag(self.cov), 1e-12, None))).astype(float).tolist(),
+            iteration=int(getattr(self._es, "countiter", 0)),
+            mean=_unit_vector(getattr(self._es, "mean", np.zeros(self.dim)), self.dim).astype(float).tolist(),
+            sigma=float(getattr(self._es, "sigma", 0.0)),
+            axis_sigmas=self._axis_sigmas().astype(float).tolist(),
             best_score=self.best_score,
             best_vector=None if self.best_vector is None else self.best_vector.astype(float).tolist(),
         )
 
-    def _update_eigensystem(self) -> None:
-        if not np.all(np.isfinite(self.cov)):
-            self.cov = np.eye(self.dim, dtype=np.float64)
-        self.cov += np.eye(self.dim, dtype=np.float64) * 1e-12
-        diag_squared, basis = np.linalg.eigh(self.cov)
-        diag_squared = np.clip(diag_squared, 1e-12, 1e12)
-        self.diag = np.sqrt(diag_squared)
-        self.basis = basis
-        self.invsqrt_cov = basis @ np.diag(1.0 / self.diag) @ basis.T
+    def _axis_sigmas(self) -> np.ndarray:
+        stds = getattr(self._es, "stds", None)
+        if stds is not None:
+            values = np.asarray(stds, dtype=np.float64).reshape(-1)
+            if values.size == self.dim and np.all(np.isfinite(values)):
+                return np.clip(values, 1e-4, 1.0)
+        sigma = float(getattr(self._es, "sigma", 0.0))
+        variances = np.asarray(getattr(self._es.sm, "variances", np.ones(self.dim)), dtype=np.float64).reshape(-1)
+        if variances.size == self.dim and np.all(np.isfinite(variances)):
+            return np.clip(sigma * np.sqrt(np.clip(variances, 1e-12, None)), 1e-4, 1.0)
+        return self._initial_axis_sigmas.copy()
+
+    def _tail_sample(self) -> np.ndarray:
+        mean = _unit_vector(getattr(self._es, "mean", np.zeros(self.dim)), self.dim)
+        return np.clip(mean + self._axis_sigmas() * self._rng.standard_normal(self.dim), 0.0, 1.0)
+
+
+def _unit_vector(values: object, dim: int) -> np.ndarray:
+    vector = np.asarray(values, dtype=np.float64).reshape(dim)
+    if not np.all(np.isfinite(vector)):
+        raise ValueError("CMA-ES vectors must be finite")
+    return np.clip(vector, 0.0, 1.0)
+
+
+def _unit_matrix(values: object, dim: int) -> np.ndarray:
+    matrix = np.asarray(values, dtype=np.float64).reshape(-1, dim)
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("CMA-ES candidates must be finite")
+    return np.clip(matrix, 0.0, 1.0)
 
 
 def _normalized_sigmas(sigmas: list[float] | tuple[float, ...], dim: int) -> np.ndarray:
@@ -184,3 +165,7 @@ def _normalized_sigmas(sigmas: list[float] | tuple[float, ...], dim: int) -> np.
     if np.any(values <= 0.0):
         raise ValueError("initial_sigmas must be positive")
     return np.clip(values, 1e-4, 1.0)
+
+
+def _clamp_sigma(value: float) -> float:
+    return float(np.clip(value, 1e-4, 1.0))

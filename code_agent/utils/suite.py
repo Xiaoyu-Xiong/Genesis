@@ -310,6 +310,15 @@ def _suite_summary(
     summary["num_passed"] = sum(1 for item in results if item.get("verdict") == "pass")
     summary["num_failed"] = sum(1 for item in results if item.get("verdict") == "fail")
     summary["num_inconclusive"] = sum(1 for item in results if item.get("verdict") == "inconclusive")
+    summary["num_infra_blocked"] = sum(1 for item in results if item.get("outcome_class") == "infra_blocked")
+    summary["num_semantic_inconclusive"] = sum(
+        1 for item in results if item.get("outcome_class") == "semantic_inconclusive"
+    )
+    summary["retry_candidates"] = [
+        item.get("case_id")
+        for item in results
+        if item.get("retry_recommended") and isinstance(item.get("case_id"), str)
+    ]
     summary["results"] = results
     return summary
 
@@ -322,7 +331,9 @@ def _case_exception_summary(*, case: Case, case_dir: Path, exc: Exception) -> di
     summary = {
         "case_id": case.case_id,
         "verdict": "fail",
+        "outcome_class": "fail",
         "execution_ok": False,
+        "retry_recommended": False,
         "recommended_owner": "none",
         "repair_attempts": 0,
         "case_dir": str(case_dir),
@@ -342,7 +353,9 @@ def _missing_case_summary(case: Case, case_dir: Path) -> dict[str, Any]:
     return {
         "case_id": case.case_id,
         "verdict": "fail",
+        "outcome_class": "fail",
         "execution_ok": False,
+        "retry_recommended": False,
         "recommended_owner": "none",
         "repair_attempts": 0,
         "case_dir": str(case_dir),

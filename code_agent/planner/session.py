@@ -294,11 +294,18 @@ class PlannerSession:
         verdict = status if status in {"pass", "fail", "inconclusive"} else "fail"
         if verdict == "pass" and critic and critic.get("verdict") != "pass":
             verdict = "fail"
+        critic_infra_status = self._critic_infra_status(critic)
+        infra_blocked_reason = self._infra_blocked_reason(critic_infra_status=critic_infra_status)
+        outcome_class = self._outcome_class(verdict=verdict, infra_blocked_reason=infra_blocked_reason)
         return {
             "case_id": self.config.case_id,
             "verdict": verdict,
             "status": status,
+            "outcome_class": outcome_class,
             "execution_ok": bool(execution.get("ok")),
+            "critic_infra_status": critic_infra_status,
+            "infra_blocked_reason": infra_blocked_reason,
+            "retry_recommended": outcome_class == "infra_blocked",
             "recommended_owner": critic.get("recommended_owner", "none") if isinstance(critic, dict) else "none",
             "repair_attempts": self.state["budgets"]["repair_attempts"],
             "case_dir": str(self.case_dir),
@@ -315,6 +322,42 @@ class PlannerSession:
             "deformable_config_path": str(self.deformable_config_path),
             "opt": self.state.get("opt"),
         }
+
+    def _critic_infra_status(self, critic: dict[str, Any]) -> str:
+        status = critic.get("critic_infra_status") if isinstance(critic, dict) else None
+        return status if isinstance(status, str) and status else "ok"
+
+    def _infra_blocked_reason(self, *, critic_infra_status: str) -> str | None:
+        if critic_infra_status not in {"ok", "not_used"}:
+            return critic_infra_status
+        blocked_reason = self.state.get("blocked_reason")
+        if isinstance(blocked_reason, dict):
+            blocked_type = str(blocked_reason.get("type") or "")
+            if blocked_type == "codex_usage_limit":
+                return "quota_blocked"
+            if blocked_type == "codex_auth_failed":
+                return "auth_failed"
+            if blocked_type == "codex_input_too_large":
+                return "planner_prompt_too_large"
+            if blocked_type == "timeout":
+                return "planner_timeout"
+        stop_reason = str(self.state.get("stop_reason") or "").lower()
+        if "usage limit" in stop_reason or "purchase more credits" in stop_reason:
+            return "quota_blocked"
+        if "401 unauthorized" in stop_reason:
+            return "auth_failed"
+        if "input exceeds the maximum length" in stop_reason:
+            return "critic_prompt_too_large"
+        return None
+
+    def _outcome_class(self, *, verdict: str, infra_blocked_reason: str | None) -> str:
+        if verdict == "pass":
+            return "pass"
+        if infra_blocked_reason is not None:
+            return "infra_blocked"
+        if verdict == "fail":
+            return "fail"
+        return "semantic_inconclusive"
 
     def refresh_opt_state_from_report(self) -> None:
         """Reconcile Opt state with a structured report that landed after timeout.

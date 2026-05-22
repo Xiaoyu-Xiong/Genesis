@@ -50,7 +50,7 @@ class EpisodePlanner:
             }
         )
         if not result.success:
-            if result.error_type == "codex_usage_limit":
+            if result.error_type in {"codex_usage_limit", "codex_auth_failed", "codex_input_too_large", "timeout"}:
                 control = self.session.state.get("control")
                 pending = [
                     name
@@ -58,7 +58,7 @@ class EpisodePlanner:
                     if bool(active)
                 ]
                 blocked = {
-                    "type": "codex_usage_limit",
+                    "type": result.error_type,
                     "message": result.error_message,
                     "turn": turn,
                     "output_jsonl_path": result.output_jsonl_path,
@@ -74,10 +74,10 @@ class EpisodePlanner:
                 )
                 return {
                     "action": "finish",
-                    "rationale": "Planner is blocked by Codex usage limits, not by generated-code execution.",
+                    "rationale": "Planner is blocked by Codex infrastructure, not by generated-code execution.",
                     "verdict": "inconclusive",
                     "summary": (
-                        "Planner blocked by Codex usage limit; retry after quota resets or credits are available."
+                        f"Planner blocked by Codex infrastructure ({result.error_type}); retry this case later."
                         f"{stale_note} See {result.output_jsonl_path}."
                     ),
                 }
@@ -160,12 +160,12 @@ class EpisodePlanner:
         if state.get("planner_output_path") is None:
             guide.append("planner_output missing: next valid action is write_plan.")
             return guide
-        usage_blockers = self._codex_usage_limit_blockers()
-        if usage_blockers:
+        infra_blockers = self._codex_infra_blockers()
+        if infra_blockers:
             guide.append(
-                "Codex usage limit blocked one or more agent calls: "
-                f"{', '.join(usage_blockers)}. Choose finish with verdict inconclusive; do not route this as a code "
-                "repair failure."
+                "Codex or critic infrastructure blocked one or more required agent calls: "
+                f"{', '.join(infra_blockers)}. Choose finish with verdict inconclusive; do not route this as a "
+                "generated-code repair failure."
             )
             return guide
         planner_output = self.session.current_planner_output()
@@ -242,22 +242,23 @@ class EpisodePlanner:
                     guide.append("critic did not pass: repair if budget remains, otherwise finish fail.")
         return guide
 
-    def _codex_usage_limit_blockers(self) -> list[str]:
+    def _codex_infra_blockers(self) -> list[str]:
         blockers: list[str] = []
         critic = self.session.state.get("critic")
         if isinstance(critic, dict):
-            codex_report = critic.get("codex_critic_report")
-            codex_result = codex_report.get("codex_result") if isinstance(codex_report, dict) else None
-            if isinstance(codex_result, dict) and codex_result.get("error_type") == "codex_usage_limit":
-                blockers.append("critic")
+            infra_status = critic.get("critic_infra_status")
+            if critic.get("verdict") == "inconclusive" and isinstance(infra_status, str) and infra_status != "ok":
+                blockers.append(f"critic:{infra_status}")
         workers = self.session.state.get("workers")
         if isinstance(workers, dict):
             for role, data in workers.items():
                 if not isinstance(data, dict) or data.get("ok"):
                     continue
                 codex = data.get("codex")
-                if isinstance(codex, dict) and codex.get("error_type") == "codex_usage_limit":
-                    blockers.append(f"{role}_worker")
+                if isinstance(codex, dict):
+                    error_type = codex.get("error_type")
+                    if error_type in {"codex_usage_limit", "codex_auth_failed", "codex_input_too_large", "timeout"}:
+                        blockers.append(f"{role}_worker:{error_type}")
         return blockers
 
     def _asset_manifest(self) -> dict[str, Any] | None:

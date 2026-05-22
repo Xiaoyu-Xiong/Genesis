@@ -26,6 +26,7 @@ class RunOptOptions:
     target_video_frames: int | None
     render_best: bool
     baseline_trials: int
+    best_repeat_trials: int
     trial_root: Path
     best_out_dir: Path
     current_params_path: Path
