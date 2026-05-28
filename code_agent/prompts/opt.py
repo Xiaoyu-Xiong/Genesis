@@ -60,14 +60,29 @@ Core responsibilities:
 - Patch generated modules so they read `contracts/current_opt_params.json` when present, fall back to
   `contracts/default_opt_params.json`, and remain runnable without optimization. Record loaded opt params and relevant
   measured quantities in `metrics.json`.
+- Make the optimization contract match the actual runtime hooks. If generated action/body code has version gates,
+  sign-sensitive schedule guards, controller floors, clamps, or XML/joint range limits, encode those invariants in
+  `contracts/default_opt_params.json` and `contracts/opt_space.json`: include required version fields in default params,
+  omit variables that will be ignored, and keep defaults/bounds inside the post-clamp effective range. Do not expose a
+  variable whose sampled values are immediately overwritten by generated code.
+- Before reporting success, run at least one baseline and one perturbed optimization rollout, then compare requested
+  opt params against metrics-reported effective controls/material/layout values. If active variables are ignored,
+  clamped to constants, or missing from metrics, fix the hooks/contracts and rerun optimization; do not call that a
+  useful opt result merely because the simulation itself completed.
+- For expensive FEM+IPC cases, the optimizer runs trial groups with isolated subprocesses according to GPU memory
+  capacity. Do not create case-specific in-process or n-env batch runners during Opt; focus the generated hooks on
+  correct parameter loading, effective-parameter reporting, and stable single-trial execution.
 - Create or revise `contracts/target_spec.json`, `contracts/opt_space.json`, and `contracts/default_opt_params.json`
   using the schemas in `code_agent/specs/opt_schema/`.
 - Use the existing runner whenever possible:
   `uv run --no-sync python -m code_agent.cli run-opt --case-dir {case_dir} --backend {request.backend}`.
   Add `--max-trials`, `--timeout-sec`, `--steps`, `--duration-sec`, and `--render-fps` only when useful or requested.
-- Render visual evidence when requested. If you need a separate baseline render, run the generated `src/main.py` from
-  the case workspace with `uv run --no-sync python src/main.py --backend {request.backend} --out-dir
-  artifacts/opt_agent_baseline --render` plus requested timing flags.
+- Render visual evidence when requested. If you need a separate generated-code run or baseline render, use the local
+  execution wrapper so Genesis/IPC gets the repository CUDA environment and cross-process execution lock:
+  `uv run --no-sync python -m code_agent.utils.local_execution {case_dir} --main-file src/main.py --output-dir
+  {case_dir}/reports/opt_agent_baseline --backend {request.backend} -- --backend {request.backend} --out-dir
+  artifacts/opt_agent_baseline --render` plus requested timing flags. Do not invoke `src/main.py` directly for FEM+IPC
+  probes unless the wrapper itself is the thing you are debugging.
 - After optimization, inspect `reports/opt_report.json`, `reports/verification_report.json`, best params, metrics, and
   videos. You must inspect visual evidence before returning `success` or `partial_success`: sample frames from the best
   render/video, compare them against the intended behavior, and include an evidence item beginning with
@@ -92,6 +107,8 @@ Forbidden changes from Planner:
 
 Implementation rules:
 - Use `uv run --no-sync ...` for Python commands. Do not run bare `python`, `python -m`, or `pytest`.
+- For FEM+IPC rollouts, prefer `code_agent.cli run-opt` or `code_agent.utils.local_execution` over raw `src/main.py`
+  commands; those wrappers preserve `LD_LIBRARY_PATH`, WSL GPU paths, cache directories, and the Genesis execution lock.
 - Keep edits inside the case workspace unless you are only reading repository documentation/schemas.
 - Do not edit `code_agent/opt/` or repository source during this Opt pass. Your edits should prepare the generated case,
   not alter the optimizer implementation.

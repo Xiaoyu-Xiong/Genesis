@@ -12,6 +12,7 @@ from typing import Literal
 
 from code_agent.assets.builtin_guard import builtin_asset_denied_roots
 from code_agent.configs import CONFIGS
+from code_agent.utils.local_execution import build_local_execution_env
 
 CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -160,6 +161,7 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
                 stderr_path,
             )
     command = build_codex_exec_command(request, resolved_codex=resolved_codex)
+    run_env = build_local_execution_env()
     final_path.unlink(missing_ok=True)
 
     if resolved_codex is None:
@@ -189,6 +191,7 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
             process = subprocess.Popen(
                 command,
                 cwd=request.cwd,
+                env=run_env,
                 stdout=subprocess.PIPE,
                 stderr=stderr_file,
                 stdin=subprocess.PIPE,

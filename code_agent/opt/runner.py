@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import shutil
 import statistics
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,7 @@ from code_agent.opt.contracts import (
     write_params_payload,
 )
 from code_agent.opt.optimizers.cma_es import default_population_size
+from code_agent.opt.parallel_policy import resolve_parallel_policy
 from code_agent.opt.reports import OptReporter
 from code_agent.opt.search import CMAESStrategyRunner
 from code_agent.opt.strategy import choose_best, maximize, resolve_strategy, strategy_report
@@ -73,6 +75,7 @@ class _OptRunner:
         options = self._resolve_options(contracts)
         strategy = resolve_strategy(contracts.opt_space)
         self.reporter.prepare()
+        self._clean_previous_run_artifacts(options)
 
         best_result, baseline_scores, next_trial_index = self._run_baselines(contracts, options)
         search = CMAESStrategyRunner(
@@ -109,6 +112,12 @@ class _OptRunner:
 
     def write_failed_report(self, failure: str) -> dict[str, Any]:
         return self.reporter.write_failed_report(failure)
+
+    def _clean_previous_run_artifacts(self, options: RunOptOptions) -> None:
+        for path in (options.trial_root, options.best_out_dir):
+            if path.resolve() == self.case_dir:
+                continue
+            shutil.rmtree(path, ignore_errors=True)
 
     def _run_baselines(
         self,
@@ -278,6 +287,7 @@ class _OptRunner:
             trial_root=trial_root,
             best_out_dir=best_out_dir,
             current_params_path=current_params_path,
+            parallel_policy=resolve_parallel_policy(contracts.opt_space),
         )
 
     def _workspace_path(self, value: Any, field_name: str) -> Path:

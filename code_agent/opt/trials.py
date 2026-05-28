@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import copy
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from code_agent.io_utils import load_json_object
-from code_agent.opt.contracts import OptContracts, write_params_payload
+from code_agent.opt.contracts import OptContracts, get_dotted, write_params_payload
 from code_agent.opt.objective import ObjectiveScore, evaluate_objective
+from code_agent.opt.parallel_policy import OptParallelPolicy, TrialExecutionPlan, plan_trial_execution
 from code_agent.utils.execution import _exclusive_genesis_execution_lock
 from code_agent.utils.local_execution import LocalRunConfig, run_local
 
@@ -30,12 +31,30 @@ class RunOptOptions:
     trial_root: Path
     best_out_dir: Path
     current_params_path: Path
+    parallel_policy: OptParallelPolicy = field(default_factory=OptParallelPolicy)
 
 
 @dataclass(slots=True)
 class TrialResult:
     entry: dict[str, Any]
     score: ObjectiveScore
+    params_payload: dict[str, Any]
+
+
+@dataclass(slots=True, frozen=True)
+class TrialRequest:
+    trial_index: int
+    params_payload: dict[str, Any]
+    variable_names: tuple[str, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class _PreparedTrial:
+    trial_index: int
+    trial_name: str
+    artifacts_dir: Path
+    report_dir: Path
+    params_path: Path
     params_payload: dict[str, Any]
 
 
@@ -54,6 +73,110 @@ class TrialExecutor:
         options: RunOptOptions,
         contracts: OptContracts,
     ) -> TrialResult:
+        prepared = self._prepare_trial(
+            trial_index=trial_index,
+            params_payload=params_payload,
+            options=options,
+        )
+        raw_report = self._run_main(
+            artifacts_dir=prepared.artifacts_dir,
+            report_dir=prepared.report_dir,
+            options=options,
+            render=False,
+        )
+        return self._result_from_report(prepared, raw_report, contracts)
+
+    def run_trials(
+        self,
+        requests: list[TrialRequest],
+        *,
+        options: RunOptOptions,
+        contracts: OptContracts,
+    ) -> list[TrialResult]:
+        """Run a generation-sized batch of trial requests.
+
+        This compatibility path deliberately preserves the old serial
+        subprocess behavior. Specialized backends can take over here without
+        changing the optimizer's ask/tell loop.
+        """
+
+        plan = plan_trial_execution(
+            policy=options.parallel_policy,
+            contracts=contracts,
+            contracts_dir=self.contracts_dir,
+            case_dir=self.case_dir,
+            request_variable_names=_request_variable_names(requests),
+            request_count=len(requests),
+        )
+        return self._run_trials_with_plan(requests, options=options, contracts=contracts, plan=plan)
+
+    def _run_trials_with_plan(
+        self,
+        requests: list[TrialRequest],
+        *,
+        options: RunOptOptions,
+        contracts: OptContracts,
+        plan: TrialExecutionPlan,
+    ) -> list[TrialResult]:
+        if len(requests) > plan.batch_size:
+            results: list[TrialResult] = []
+            for offset in range(0, len(requests), plan.batch_size):
+                results.extend(
+                    self._run_trials_with_plan(
+                        requests[offset : offset + plan.batch_size],
+                        options=options,
+                        contracts=contracts,
+                        plan=plan,
+                    )
+                )
+            return results
+
+        if plan.backend == "subprocess_parallel":
+            from code_agent.opt.execution_backends import SubprocessParallelTrialBackend
+
+            return SubprocessParallelTrialBackend(self, plan).run_trials(
+                requests,
+                options=options,
+                contracts=contracts,
+            )
+        return self._run_trials_subprocess_serial(
+            requests,
+            options=options,
+            contracts=contracts,
+            execution_backend=plan.backend,
+            execution_plan=plan,
+        )
+
+    def _run_trials_subprocess_serial(
+        self,
+        requests: list[TrialRequest],
+        *,
+        options: RunOptOptions,
+        contracts: OptContracts,
+        execution_backend: str = "subprocess_serial",
+        execution_plan: TrialExecutionPlan | None = None,
+    ) -> list[TrialResult]:
+        results: list[TrialResult] = []
+        for request in requests:
+            result = self.run_trial(
+                trial_index=request.trial_index,
+                params_payload=request.params_payload,
+                options=options,
+                contracts=contracts,
+            )
+            result.entry["execution_backend"] = execution_backend
+            if execution_plan is not None:
+                result.entry["execution_plan"] = _plan_report(execution_plan)
+            results.append(result)
+        return results
+
+    def _prepare_trial(
+        self,
+        *,
+        trial_index: int,
+        params_payload: dict[str, Any],
+        options: RunOptOptions,
+    ) -> _PreparedTrial:
         trial_name = f"trial_{trial_index:03d}"
         artifacts_dir = options.trial_root / trial_name
         report_dir = self.reports_dir / "opt_trials" / trial_name
@@ -71,13 +194,22 @@ class TrialExecutor:
             metadata={"trial_params_path": self.rel(params_path)},
         )
         write_params_payload(options.current_params_path, current_payload)
-        raw_report = self._run_main(
+        return _PreparedTrial(
+            trial_index=trial_index,
+            trial_name=trial_name,
             artifacts_dir=artifacts_dir,
             report_dir=report_dir,
-            options=options,
-            render=False,
+            params_path=params_path,
+            params_payload=params_payload,
         )
-        metrics_path = self._metrics_path(raw_report, artifacts_dir)
+
+    def _result_from_report(
+        self,
+        prepared: _PreparedTrial,
+        raw_report: dict[str, Any],
+        contracts: OptContracts,
+    ) -> TrialResult:
+        metrics_path = self._metrics_path(raw_report, prepared.artifacts_dir)
         metrics = load_json_object(metrics_path) if metrics_path is not None else None
         execution_failed = int(raw_report.get("exit_code", 1)) != 0 or metrics is None
         failure_reason = None
@@ -91,23 +223,33 @@ class TrialExecutor:
             execution_failed=execution_failed,
             failure_reason=failure_reason,
         )
+        runtime_warnings = _runtime_opt_warnings(
+            metrics=metrics,
+            params_payload=prepared.params_payload,
+            contracts=contracts,
+        )
+        plan_warnings = _execution_plan_warnings(raw_report.get("execution_plan"))
         status = _trace_status(raw_report, metrics)
         entry = {
             "schema_version": 1,
-            "trial_index": trial_index,
+            "trial_index": prepared.trial_index,
             "status": status,
-            "params_path": self.rel(params_path),
-            "artifacts_dir": self.rel(artifacts_dir),
+            "params_path": self.rel(prepared.params_path),
+            "artifacts_dir": self.rel(prepared.artifacts_dir),
             "metrics_path": None if metrics_path is None else self.rel(metrics_path),
             "execution_report_path": self.rel(Path(str(raw_report.get("execution_report_path")))),
             "score": score.score,
             "duration_sec": float(raw_report.get("duration_sec", 0.0)),
             "exit_code": int(raw_report.get("exit_code", 1)),
+            "execution_backend": str(raw_report.get("execution_backend") or "subprocess_serial"),
             "objective": score.to_report(),
             "errors": [] if status == "completed" else [score.failure_reason or status],
-            "warnings": score.warnings,
+            "warnings": [*score.warnings, *runtime_warnings, *plan_warnings],
         }
-        return TrialResult(entry=entry, score=score, params_payload=params_payload)
+        execution_plan = raw_report.get("execution_plan")
+        if isinstance(execution_plan, dict):
+            entry["execution_plan"] = execution_plan
+        return TrialResult(entry=entry, score=score, params_payload=prepared.params_payload)
 
     def run_best_render(self, params_payload: dict[str, Any], options: RunOptOptions) -> None:
         self._clean_dir(options.best_out_dir)
@@ -213,3 +355,226 @@ def _trace_status(raw_report: dict[str, Any], metrics: dict[str, Any] | None) ->
     if metrics is None:
         return "failed"
     return "completed"
+
+
+def _runtime_opt_warnings(
+    *,
+    metrics: dict[str, Any] | None,
+    params_payload: dict[str, Any],
+    contracts: OptContracts,
+) -> list[str]:
+    if not isinstance(metrics, dict):
+        return []
+    active_names = {variable.name for variable in contracts.active_variables}
+    warnings: list[str] = []
+    covered_names: set[str] = set()
+
+    opt_params = metrics.get("opt_params") if isinstance(metrics.get("opt_params"), dict) else {}
+    if isinstance(opt_params.get("loaded"), dict):
+        loaded_params = opt_params["loaded"]
+    elif isinstance(metrics.get("opt_params_loaded"), dict) and isinstance(metrics["opt_params_loaded"].get("params"), dict):
+        loaded_params = metrics["opt_params_loaded"]["params"]
+    elif isinstance(metrics.get("opt_param_overrides"), dict):
+        loaded_params = metrics["opt_param_overrides"]
+    elif isinstance(metrics.get("profile"), dict):
+        loaded_params = metrics["profile"]
+    else:
+        loaded_params = opt_params
+    loaded_mismatches = _loaded_param_mismatches(
+        active_names=active_names,
+        loaded_params=loaded_params,
+        params_payload=params_payload,
+        covered_names=covered_names,
+    )
+    if loaded_mismatches:
+        warnings.append(
+            "Generated metrics echoed opt params that differ from the requested trial params: "
+            + ", ".join(loaded_mismatches[:8])
+            + ("." if len(loaded_mismatches) <= 8 else f", ... ({len(loaded_mismatches)} total).")
+        )
+
+    action_diag = (
+        opt_params.get("action_param_diagnostics")
+        if isinstance(opt_params.get("action_param_diagnostics"), dict)
+        else {}
+    )
+    ignored_keys = _string_items(action_diag.get("sign_sensitive_opt_keys_ignored"))
+    ignored_active = sorted(f"action.{key}" for key in ignored_keys if f"action.{key}" in active_names)
+    if ignored_active:
+        warnings.append(
+            "Generated action opt hook ignored active sign-sensitive variables: "
+            + ", ".join(ignored_active)
+            + ". Add the required schedule/version guard to default/current opt params or remove these variables."
+        )
+
+    control_params = metrics.get("control_params") if isinstance(metrics.get("control_params"), dict) else None
+    if control_params is not None:
+        changed = _changed_action_params(
+            params_payload=params_payload,
+            control_params=control_params,
+            active_names=active_names,
+            covered_names=covered_names,
+        )
+        if changed:
+            warnings.append(
+                "Generated action opt hook changed or clamped active variables before simulation: "
+                + ", ".join(changed[:8])
+                + ("." if len(changed) <= 8 else f", ... ({len(changed)} total).")
+            )
+    _cover_effective_params(
+        opt_params=opt_params,
+        params_payload=params_payload,
+        active_names=active_names,
+        covered_names=covered_names,
+        warnings=warnings,
+    )
+    missing = sorted(active_names - covered_names)
+    if missing:
+        warnings.append(
+            "Generated metrics do not echo requested or effective values for active opt variables: "
+            + ", ".join(missing[:8])
+            + (
+                ". Record loaded/effective opt params in metrics so Opt can detect ignored or clamped variables."
+                if len(missing) <= 8
+                else f", ... ({len(missing)} total). Record loaded/effective opt params in metrics."
+            )
+        )
+    return warnings
+
+
+def _execution_plan_warnings(execution_plan: Any) -> list[str]:
+    if not isinstance(execution_plan, dict):
+        return []
+    return []
+
+
+def _changed_action_params(
+    *,
+    params_payload: dict[str, Any],
+    control_params: dict[str, Any],
+    active_names: set[str],
+    covered_names: set[str],
+) -> list[str]:
+    params = params_payload.get("params", {})
+    changed: list[str] = []
+    for name in sorted(active_names):
+        if not name.startswith("action."):
+            continue
+        key = name.split(".", maxsplit=1)[1]
+        requested = get_dotted(params, name)
+        effective = control_params.get(key)
+        if isinstance(effective, int | float) and not isinstance(effective, bool):
+            covered_names.add(name)
+        if not _different_numbers(requested, effective):
+            continue
+        changed.append(f"{name} requested={float(requested):.6g} effective={float(effective):.6g}")
+    return changed
+
+
+def _loaded_param_mismatches(
+    *,
+    active_names: set[str],
+    loaded_params: dict[str, Any],
+    params_payload: dict[str, Any],
+    covered_names: set[str],
+) -> list[str]:
+    params = params_payload.get("params", {})
+    mismatches: list[str] = []
+    for name in sorted(active_names):
+        requested = get_dotted(params, name)
+        loaded = _loaded_value(loaded_params, name)
+        if loaded is None:
+            continue
+        covered_names.add(name)
+        if _different_numbers(requested, loaded):
+            mismatches.append(f"{name} requested={float(requested):.6g} loaded={float(loaded):.6g}")
+    return mismatches
+
+
+def _cover_effective_params(
+    *,
+    opt_params: dict[str, Any],
+    params_payload: dict[str, Any],
+    active_names: set[str],
+    covered_names: set[str],
+    warnings: list[str],
+) -> None:
+    params = params_payload.get("params", {})
+    for container_name in ("body_params", "scene_params", "material_params", "effective_params"):
+        container = opt_params.get(container_name)
+        if not isinstance(container, dict):
+            continue
+        mismatches: list[str] = []
+        for name in sorted(active_names - covered_names):
+            key = name.split(".", maxsplit=1)[1] if "." in name else name
+            effective = container.get(key)
+            requested = get_dotted(params, name)
+            if effective is None:
+                continue
+            covered_names.add(name)
+            if _different_numbers(requested, effective):
+                mismatches.append(f"{name} requested={float(requested):.6g} effective={float(effective):.6g}")
+        if mismatches:
+            warnings.append(
+                f"Generated {container_name} changed or clamped active variables before simulation: "
+                + ", ".join(mismatches[:8])
+                + ("." if len(mismatches) <= 8 else f", ... ({len(mismatches)} total).")
+            )
+
+
+def _loaded_value(loaded_params: dict[str, Any], name: str) -> Any:
+    value = get_dotted(loaded_params, name)
+    if value is not None:
+        return value
+    if name in loaded_params:
+        return loaded_params[name]
+    if "." in name:
+        _, key = name.split(".", maxsplit=1)
+        if key in loaded_params:
+            return loaded_params[key]
+    return None
+
+
+def _different_numbers(left: Any, right: Any) -> bool:
+    if isinstance(left, bool) or isinstance(right, bool):
+        return False
+    if not isinstance(left, int | float) or not isinstance(right, int | float):
+        return False
+    return abs(float(left) - float(right)) > max(1e-9, 1e-6 * max(1.0, abs(float(left)), abs(float(right))))
+
+
+def _string_items(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item]
+
+
+def _request_variable_names(requests: list[TrialRequest]) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for request in requests:
+        for name in request.variable_names:
+            if name not in seen:
+                names.append(name)
+                seen.add(name)
+    return tuple(names)
+
+
+def _plan_report(plan: TrialExecutionPlan) -> dict[str, Any]:
+    return {
+        "backend": plan.backend,
+        "workers": plan.workers,
+        "batch_size": plan.batch_size,
+        "reason": plan.reason,
+        "variables": list(plan.variable_profile.variable_names),
+        "variable_parallel_reasons": list(plan.variable_profile.reasons),
+        "requires_scene_rebuild": plan.variable_profile.requires_scene_rebuild,
+        "has_topology_changing": plan.variable_profile.has_topology_changing,
+        "memory": {
+            "usable_gpu_memory_gb": plan.memory_profile.usable_gpu_memory_gb,
+            "reserve_gb": plan.memory_profile.reserve_gb,
+            "subprocess_increment_gb": plan.memory_profile.subprocess_increment_gb,
+            "subprocess_capacity": plan.memory_profile.subprocess_capacity,
+            "source": plan.memory_profile.source,
+        },
+    }

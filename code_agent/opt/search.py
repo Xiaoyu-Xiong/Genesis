@@ -22,7 +22,7 @@ from code_agent.opt.strategy import (
     initial_sigmas,
     maximize,
 )
-from code_agent.opt.trials import RunOptOptions, TrialExecutor, TrialResult
+from code_agent.opt.trials import RunOptOptions, TrialExecutor, TrialRequest, TrialResult
 
 
 @dataclass(slots=True)
@@ -203,25 +203,38 @@ class CMAESStrategyRunner:
             candidate_scores: list[float] = []
             generation_best = best_result
             generation_success = False
-            for candidate in candidates:
-                result = self._run_candidate(
-                    contracts=contracts,
-                    options=options,
-                    variables=variables,
-                    candidate=candidate,
-                    base_payload=base_payload,
-                    phase=phase,
-                    restart=restart,
-                    optimizer=optimizer,
-                    trial_index=trial_index,
+            requests = [
+                TrialRequest(
+                    trial_index=trial_index + offset,
+                    variable_names=tuple(variable.name for variable in variables),
+                    params_payload=self._candidate_payload(
+                        contracts=contracts,
+                        variables=variables,
+                        candidate=candidate,
+                        base_payload=base_payload,
+                        phase=phase,
+                        restart=restart,
+                        optimizer=optimizer,
+                        trial_index=trial_index + offset,
+                    ),
                 )
+                for offset, candidate in enumerate(candidates)
+            ]
+            results = self.trials.run_trials(
+                requests,
+                options=options,
+                contracts=contracts,
+            )
+            for result in results:
+                self.trace_callback(result.entry)
                 candidate_scores.append(_optimizer_score(result, maximize=maximize_objective))
                 best_result = choose_best(best_result, result, maximize=maximize_objective)
                 generation_best = choose_best(generation_best, result, maximize=maximize_objective)
                 generation_success = generation_success or bool(result.score.success)
-                trial_index += 1
-                remaining -= 1
-                trials_used += 1
+            completed = len(results)
+            trial_index += completed
+            remaining -= completed
+            trials_used += completed
             optimizer.tell(candidates[: len(candidate_scores)], candidate_scores, maximize=maximize(contracts))
             stop_reason = early_stop.update(generation_best, generation_success)
             if stop_reason is not None:
@@ -244,6 +257,32 @@ class CMAESStrategyRunner:
             },
         )
 
+    def _candidate_payload(
+        self,
+        *,
+        contracts: OptContracts,
+        variables: tuple[OptVariable, ...],
+        candidate: list[float],
+        base_payload: dict[str, Any],
+        phase: PhaseConfig,
+        restart: RestartConfig,
+        optimizer: CMAESOptimizer,
+        trial_index: int,
+    ) -> dict[str, Any]:
+        return payload_from_vector(
+            variables,
+            candidate,
+            base_payload=base_payload,
+            source="trial",
+            trial_index=trial_index,
+            metadata={
+                "kind": "cma_es",
+                "phase": phase.name,
+                "restart": restart.name,
+                "optimizer_state": asdict(optimizer.state()),
+            },
+        )
+
     def _run_candidate(
         self,
         *,
@@ -257,18 +296,15 @@ class CMAESStrategyRunner:
         optimizer: CMAESOptimizer,
         trial_index: int,
     ) -> TrialResult:
-        candidate_payload = payload_from_vector(
-            variables,
-            candidate,
+        candidate_payload = self._candidate_payload(
+            contracts=contracts,
+            variables=variables,
+            candidate=candidate,
             base_payload=base_payload,
-            source="trial",
+            phase=phase,
+            restart=restart,
+            optimizer=optimizer,
             trial_index=trial_index,
-            metadata={
-                "kind": "cma_es",
-                "phase": phase.name,
-                "restart": restart.name,
-                "optimizer_state": asdict(optimizer.state()),
-            },
         )
         result = self.trials.run_trial(
             trial_index=trial_index,

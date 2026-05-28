@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -26,11 +27,15 @@ class OptReporter:
     def prepare(self) -> None:
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self.contracts_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("opt_trials", "opt_best"):
+            shutil.rmtree(self.reports_dir / name, ignore_errors=True)
+        for path in (self.opt_report_path, self.verification_report_path, self.best_params_path):
+            path.unlink(missing_ok=True)
         self.trace_entries.clear()
         self.trace_path.write_text("", encoding="utf-8")
 
     def write_failed_report(self, failure: str) -> dict[str, Any]:
-        self.reports_dir.mkdir(parents=True, exist_ok=True)
+        self.prepare()
         report = {
             "schema_version": 1,
             "status": "failed",
@@ -100,6 +105,7 @@ class OptReporter:
         direction = contracts.target_spec["objective"]["direction"]
         warnings = [
             *self.warnings,
+            *self._trial_warnings(),
             *self._objective_shape_warnings(contracts.target_spec),
             *self._boundary_warnings(contracts, best_result),
         ]
@@ -130,6 +136,7 @@ class OptReporter:
                 "backend": options.backend,
                 "timeout_sec": options.timeout_sec,
                 "render_best": options.render_best,
+                "parallel_policy": options.parallel_policy.to_report(),
                 "strategy": strategy_report,
             },
             "summary": summary,
@@ -180,6 +187,20 @@ class OptReporter:
             )
         if not target_spec.get("success_criteria"):
             warnings.append("No explicit success_criteria were provided; score improvement is not final task success.")
+        return warnings
+
+    def _trial_warnings(self) -> list[str]:
+        warnings: list[str] = []
+        seen: set[str] = set()
+        for entry in self.trace_entries:
+            entry_warnings = entry.get("warnings")
+            if not isinstance(entry_warnings, list):
+                continue
+            for warning in entry_warnings:
+                if not isinstance(warning, str) or not warning or warning in seen:
+                    continue
+                seen.add(warning)
+                warnings.append(f"Trial warning: {warning}")
         return warnings
 
     def _boundary_warnings(self, contracts: OptContracts, best_result: TrialResult | None) -> list[str]:

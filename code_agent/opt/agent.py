@@ -16,8 +16,8 @@ from typing import Any
 from code_agent.assets.builtin_guard import case_source_builtin_asset_violations
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import dump_json, load_json_object
-from code_agent.prompts.opt import build_opt_prompt
 from code_agent.opt.types import OptAgentRequest, OptAgentResult
+from code_agent.prompts.opt import build_opt_prompt
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
 
 
@@ -46,17 +46,19 @@ def run_opt_agent(request: OptAgentRequest) -> OptAgentResult:
     reports_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
 
+    codex_sandbox = _codex_sandbox_for_request(request)
     codex_result = run_codex_exec(
         CodexExecRequest(
             role="opt_subagent",
             prompt=build_opt_prompt(request),
             cwd=DEFAULT_REPO_ROOT,
-            sandbox=CONFIGS.codex.opt_sandbox,
+            sandbox=codex_sandbox,
             model=CONFIGS.codex.opt_model,
             output_schema_path=OPT_SUBAGENT_SCHEMA,
             output_jsonl_path=logs_dir / "codex_opt_subagent.jsonl",
             final_message_path=logs_dir / "codex_opt_subagent.final.json",
             timeout_sec=CONFIGS.codex.opt_timeout_sec,
+            hide_builtin_assets=codex_sandbox != "danger-full-access",
             writable_roots=(case_dir,),
         )
     )
@@ -117,6 +119,12 @@ def _load_opt_result_payload(case_dir: Path, final_message_path: Path, *, min_mt
     report = load_json_object(report_path)
     result = report.get("result") if isinstance(report, dict) else None
     return result if isinstance(result, dict) else None
+
+
+def _codex_sandbox_for_request(request: OptAgentRequest) -> str:
+    if request.backend == "gpu":
+        return "danger-full-access"
+    return CONFIGS.codex.opt_sandbox
 
 
 def _result_from_payload(payload: dict[str, Any]) -> OptAgentResult:

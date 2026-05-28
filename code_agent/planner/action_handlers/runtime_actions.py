@@ -14,6 +14,7 @@ from code_agent.opt.agent import run_opt_agent
 from code_agent.opt.types import OptAgentRequest
 from code_agent.utils.codex import DEFAULT_REPO_ROOT
 from code_agent.utils.execution import run_generated_simulation
+from code_agent.utils.local_execution import build_local_execution_env
 from code_agent.utils.integrator import write_main
 
 
@@ -212,7 +213,9 @@ class RuntimeActionHandler:
         )
         history = opt_state.setdefault("history", [])
         if isinstance(history, list):
-            history.append({"attempt": attempts, "result": result_payload, "request": self.session.json_safe(request_payload)})
+            history.append(
+                {"attempt": attempts, "result": result_payload, "request": self.session.json_safe(request_payload)}
+            )
 
         synced_current = None
         if result.status in {"success", "partial_success", "needs_more_optimization"}:
@@ -270,6 +273,7 @@ class RuntimeActionHandler:
             completed = subprocess.run(
                 command,
                 cwd=cwd,
+                env=build_local_execution_env({"GENESIS_BACKEND": self.session.config.backend}),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -307,8 +311,7 @@ class RuntimeActionHandler:
                 "ok": False,
                 "status": "precondition_failed",
                 "message": (
-                    "Cannot finish while asset generation is still running; choose wait_mesh_assets or "
-                    "wait_xml_assets."
+                    "Cannot finish while asset generation is still running; choose wait_mesh_assets or wait_xml_assets."
                 ),
             }
         verdict = action.get("verdict") or "inconclusive"
