@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "opt_xml_scalar_patch_restriction",
+  "kind": "restriction",
+  "title": "Opt may only patch safe XML scalar attributes",
+  "summary": "When Opt touches XML/MJCF assets, it must preserve topology and only change physically meaningful numeric attributes on existing named elements.",
+  "scopes": ["planner", "opt", "critic"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "opt",
+    "xml",
+    "mjcf",
+    "actuator",
+    "joint",
+    "geom",
+    "scalar_patch",
+    "kp",
+    "forcerange",
+    "damping",
+    "friction"
+  ],
+  "failure_tags": [
+    "xml_topology_changed",
+    "renamed_element",
+    "joint_axis_changed",
+    "missing_xml_validation",
+    "unsafe_xml_patch"
+  ],
+  "restrictions": [
+    "Prefer runtime hooks for XML actuator tuning when Genesis APIs can express them, such as set_dofs_kp, set_dofs_kv, set_dofs_force_range, or equivalent control APIs.",
+    "Use direct XML edits only for scalar attributes that cannot be set reliably at runtime.",
+    "If editing or generating per-run copies of assets/xml/**/*.xml, keep the source asset topology unchanged.",
+    "Only numeric attributes on existing named elements may change: actuator kp, forcerange, ctrlrange; joint damping, armature, range; and physically meaningful geom/contact scalars such as friction, solref, solimp, density, and mass.",
+    "Do not add, remove, or rename bodies, joints, geoms, actuators, meshes, defaults, or change joint axes.",
+    "Validate the XML diff yourself and include evidence beginning with xml_scalar_patch_validated= when reporting a useful XML-touching result."
+  ],
+  "dispatch_hints": [
+    "Send to Opt whenever XML scalar attributes are exposed as optimization variables.",
+    "Send to Critic when checking whether an Opt result changed XML morphology rather than scalar parameters."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/opt.py",
+    "symbols": ["build_opt_prompt"]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "xml_asset_request_contract_guideline",
+  "kind": "guideline",
+  "title": "XML/MJCF asset requests should describe mechanism affordances and preserve actuator contracts",
+  "summary": "Planner should request XML/MJCF assets for articulated mechanisms with explicit joints, actuators, base behavior, dimensions, and downstream body/action contracts.",
+  "scopes": ["planner", "body", "action", "critic"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "xml",
+    "mjcf",
+    "urdf",
+    "articulated",
+    "robot",
+    "gripper",
+    "gate",
+    "latch",
+    "actuator",
+    "joint",
+    "asset_request"
+  ],
+  "failure_tags": [
+    "missing_actuator_contract",
+    "missing_joint_names",
+    "wrong_asset_type",
+    "decorative_xml_misuse",
+    "root_pose_motion",
+    "underspecified_mechanism"
+  ],
+  "guidance": [
+    "For articulated robots, grippers, gates, latches, actuated mechanisms, or any task object best represented as one self-contained MJCF body tree with joints and actuators, add an XML/MJCF asset request with asset_type generated_xml or mjcf.",
+    "Describe the required joints, actuator semantics, base behavior, approximate dimensions, and control affordances in purpose/simulation_role.",
+    "XML/MJCF assets may use primitive geoms or generated case-workspace mesh files, but must never reference Genesis built-in meshes, external mesh downloads, hfields, or texture files.",
+    "Do not use XML/MJCF only for textured decorative mesh objects.",
+    "When the plan uses XML/MJCF actuators, make body/action contracts explicit: body must expose stable actuator names, joint names, DOF groups, or control handles in actors, and action must drive those handles with Genesis actuator/DOF/force control APIs after initialization.",
+    "Do not ask action to create motion for an XML articulated asset by overwriting root pose, qpos, or velocities during simulation.",
+    "If the actuator contract is missing, generated code should fail clearly so critic can assign a source-aware body/action repair."
+  ],
+  "dispatch_hints": [
+    "Send to planner when creating or rewriting XML/MJCF asset requests.",
+    "Send to body/action when generated XML actuators need stable runtime handles and physical control paths.",
+    "Send to critic when mechanism failure may be caused by underspecified asset affordances."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/planner.py",
+    "symbols": ["planner_available_actions_section"]
+  }
+}

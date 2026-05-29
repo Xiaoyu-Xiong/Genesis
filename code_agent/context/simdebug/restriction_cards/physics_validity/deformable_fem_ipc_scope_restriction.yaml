@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "id": "deformable_fem_ipc_scope_restriction",
+  "kind": "restriction",
+  "title": "Soft-body tasks require real FEM+IPC when deformable generation is enabled",
+  "summary": "When a prompt requires soft-body behavior, generated source should use real FEM entities/materials and IPC evidence, not rigid substitutes or unsupported MPM/PBD/SPH shortcuts.",
+  "scopes": ["planner", "body", "action", "critic", "opt"],
+  "physics_modes": ["fem_ipc"],
+  "task_tags": [
+    "soft",
+    "deformable",
+    "fem",
+    "ipc",
+    "elastic",
+    "jelly",
+    "compression",
+    "wobble",
+    "bending",
+    "collapse",
+    "deformation"
+  ],
+  "failure_tags": [
+    "rigid_substitute",
+    "fake_deformation",
+    "mpm",
+    "pbd",
+    "sph",
+    "missing_fem_entity",
+    "missing_deformation_metrics",
+    "mid_sim_fem_state_write"
+  ],
+  "restrictions": [
+    "When deformable_config.enabled is false, generated source must not use FEM materials, FEM entities, or deformation-only APIs.",
+    "If the prompt fundamentally requires soft-body or deformation behavior while deformable is disabled, Planner should finish inconclusive rather than write a rigid-body substitute.",
+    "When deformable_config.ipc_enabled is false, generated source must not instantiate gs.options.IPCCouplerOptions.",
+    "When deformable_config.enabled is false and ipc_enabled is true, IPC is allowed only for rigid/articulated contact; fail fake deformable behavior.",
+    "Do not use MPM, PBD, SPH, cloth-only shortcuts, or rigid-only substitutes for soft-body prompts in this pipeline.",
+    "Do not fake deformation through repeated FEM position or velocity writes after stepping starts.",
+    "Require FEM material/entity construction, explicit E/nu/rho/friction_mu choices, config-driven FEM/IPC/tet parameters, and deformation evidence.",
+    "Fail hardcoded FEM/IPC defaults, missing E/nu/rho, missing friction_mu, attempts to read deformable_cfg[\"fem_friction_mu\"], and mid-simulation FEM position/velocity writes that fake deformation."
+  ],
+  "checks": [
+    "Check generated source for FEM materials/entities and IPC coupler options when deformable generation is enabled.",
+    "Check metrics and video for visible deformation such as wobble, compression, bending, collapse, or spread."
+  ],
+  "dispatch_hints": [
+    "Send to body/action when a soft-body task is being implemented.",
+    "Send to critic when rejecting rigid-only or visually faked soft-body results.",
+    "Send to opt when material or contact parameters are tunable but the source already contains real FEM hooks."
+  ],
+  "provenance": {
+    "prompt_files": ["code_agent/prompts/critic.py", "code_agent/prompts/worker.py", "code_agent/prompts/planner.py"],
+    "symbols": ["DEFORMABLE_CRITIC_GUIDE", "FEM_IPC_API_GUIDE", "planner_fem_ipc_capability_section"]
+  }
+}

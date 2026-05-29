@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "ipc_initial_geometry_failure_diagnosis_guideline",
+  "kind": "guideline",
+  "title": "Initial IPC world failures usually point to geometry, spacing, or asset validity",
+  "summary": "When libuipc reports invalid initial geometry before a rigid ABD accessor exception, route the repair to placement, scale, clearance, orientation, or generated asset topology before blaming IPC capability.",
+  "scopes": ["planner", "scene", "body", "critic"],
+  "physics_modes": ["rigid_ipc", "fem_ipc"],
+  "task_tags": [
+    "ipc",
+    "coupling",
+    "contact",
+    "geometry",
+    "clearance",
+    "interlock",
+    "mesh",
+    "xml",
+    "asset",
+    "initial_placement"
+  ],
+  "failure_tags": [
+    "World is not valid",
+    "SimplicialSurfaceIntersectionCheck",
+    "SimplicialSurfaceDistanceCheck",
+    "barrier",
+    "thickness",
+    "initial_interpenetration",
+    "rigid ABD state retrieval"
+  ],
+  "guidance": [
+    "Treat World-is-not-valid and SimplicialSurfaceIntersectionCheck/DistanceCheck diagnostics as primary evidence of invalid initial IPC geometry.",
+    "Repair the source that controls initial placement, scale, spacing, orientation, duplicate IPC geometry, mesh clearance, or asset topology.",
+    "Preserve the intended IPC contact/coupling model unless a clean no-penetration repro still proves capability is missing.",
+    "Do not mask the issue by disabling IPC, disabling coupling, changing to hidden constraints, or bypassing contact."
+  ],
+  "dispatch_hints": [
+    "Send to scene/body for placement, spacing, orientation, and coupling mode repairs.",
+    "Send to planner when generated mesh/XML assets appear topologically unsuitable and should be regenerated.",
+    "Send to critic when classifying IPC execution logs and avoiding secondary-accessor misdiagnosis."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/ipc.py",
+    "symbols": ["IPC_FAILURE_DIAGNOSTIC_GUIDE"]
+  }
+}

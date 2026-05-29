@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "fem_state_metrics_guideline",
+  "kind": "guideline",
+  "title": "FEM evidence should record deformation proxies without oversampling expensive state",
+  "summary": "Generated FEM tasks should expose useful deformation evidence such as COM, bounding boxes, height, spread, and sparse vertex-state samples while avoiding per-step expensive get_state calls by default.",
+  "scopes": ["planner", "body", "action", "critic", "opt"],
+  "physics_modes": ["fem_ipc"],
+  "task_tags": [
+    "fem",
+    "deformable",
+    "metrics",
+    "event_log",
+    "get_state",
+    "com",
+    "bbox",
+    "height",
+    "spread",
+    "deformation"
+  ],
+  "failure_tags": [
+    "missing_deformation_metrics",
+    "expensive_get_state_loop",
+    "no_fem_evidence",
+    "metrics_not_observable"
+  ],
+  "guidance": [
+    "FEM state sampling can use entity.get_state(); convert state.pos/state.vel tensors to CPU/numpy/lists before writing JSON.",
+    "Event logs and metrics should include COM, bbox/height, spread, and a simple deformation proxy for soft-body tasks.",
+    "entity.get_state() for FEM bodies can be expensive. Sample FEM vertex state sparsely for metrics/evidence, not on every physics step by default."
+  ],
+  "dispatch_hints": [
+    "Send to body/action when FEM metrics or event logs are implemented.",
+    "Send to critic when checking whether a soft-body result has enough deformation evidence.",
+    "Send to opt when FEM material/contact variables need observable effective metrics."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/worker.py",
+    "symbols": ["FEM_IPC_API_GUIDE"]
+  }
+}

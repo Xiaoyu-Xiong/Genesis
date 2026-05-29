@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "fem_ipc_initial_geometry_restriction",
+  "kind": "restriction",
+  "title": "FEM+IPC scenes need one support surface and conservative positive clearances",
+  "summary": "FEM+IPC initialization should avoid duplicate IPC support planes, coincident contact surfaces, and rotated primitive placements that rely on under-estimated extents.",
+  "scopes": ["planner", "scene", "body", "critic"],
+  "physics_modes": ["fem_ipc"],
+  "task_tags": [
+    "fem",
+    "ipc",
+    "initial_geometry",
+    "clearance",
+    "ground",
+    "support",
+    "rotated_box",
+    "tet_resolution"
+  ],
+  "failure_tags": [
+    "duplicate_ipc_plane",
+    "coincident_plane",
+    "initial_interpenetration",
+    "rotated_extent_underestimated",
+    "world_is_not_valid"
+  ],
+  "restrictions": [
+    "Use exactly one IPC ground/support surface for the same contact region.",
+    "If scene.py creates a floor, store it as scene.genesis_static_floor; body.py should reference that entity in actors instead of adding another coincident plane.",
+    "Duplicate overlapping IPC planes are invalid initial geometry.",
+    "Place FEM primitives with strictly positive initial clearance.",
+    "For rotated boxes, compute a conservative half extent such as 0.5 * side * sqrt(3) and stack centers with a positive gap; do not rely on unrotated side/2 when the body has nonzero Euler rotation.",
+    "For primitive soft bodies, use tet_resolution from deformable_cfg."
+  ],
+  "dispatch_hints": [
+    "Send to scene/body when FEM+IPC bodies or support surfaces are created.",
+    "Send to critic when diagnosing initial penetration, World-is-not-valid, or duplicate support geometry."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/worker.py",
+    "symbols": ["FEM_IPC_API_GUIDE"]
+  }
+}

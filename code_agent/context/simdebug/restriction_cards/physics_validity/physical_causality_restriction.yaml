@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "id": "physical_causality_restriction",
+  "kind": "restriction",
+  "title": "Task object motion must come from modeled physics or explicit controls",
+  "summary": "After initialization, passive task objects should move because of dynamics, contact, joints, actuators, or requested physical effects, not because generated code writes them toward the goal.",
+  "scopes": ["planner", "scene", "body", "action", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "passive",
+    "object",
+    "contact",
+    "manipulation",
+    "robot",
+    "mechanism",
+    "gravity",
+    "friction",
+    "joint",
+    "actuator",
+    "force"
+  ],
+  "failure_tags": [
+    "direct_pose_write",
+    "direct_qpos_write",
+    "direct_qvel_write",
+    "teleport",
+    "hidden_constraint",
+    "proxy_force",
+    "object_following",
+    "goal_pose"
+  ],
+  "restrictions": [
+    "Do not move passive task objects after initialization with pose, qpos, qvel, velocity, or root-state writes.",
+    "Do not add hidden constraints, target-following proxy forces, or outcome-directed external forces to make an object succeed.",
+    "Direct state writes such as setting root pose, qpos, entity pose, DOF position, or velocity are acceptable for initialization only; after stepping begins, movement should be driven by actuator commands, DOF controllers, motors, external forces/torques, or pre-step initial velocities.",
+    "External forces are allowed only when they are part of the requested scene physics or a clearly modeled mechanism such as wind, thrust, magnetism, springs, launch impulse, or actuator force.",
+    "Allowed external forces must be applied to the physically appropriate body, recorded in metrics, and must not directly encode the desired task outcome.",
+    "If attachment-like behavior is needed, model it through geometry, joints, contacts, actuator force, or an explicitly requested physical mechanism.",
+    "If the current assets cannot express the physical mechanism, route repair to the owning source instead of hiding the gap.",
+    "For XML/MJCF articulated assets, repairs should preserve the designed actuator/DOF control path or request a body/asset contract fix that exposes a controllable joint; do not recommend mid-simulation pose teleportation as a repair."
+  ],
+  "checks": [
+    "Search generated action/body code for post-build direct state writes to passive task objects.",
+    "Compare numeric success with visual/source evidence; reject success if object-following assistance is the main cause.",
+    "Identify which entities are controlled, which entities are passive task objects, and which APIs modify them during simulation."
+  ],
+  "dispatch_hints": [
+    "Send to action when controls or schedules may directly write task objects.",
+    "Send to critic and opt whenever a numeric objective could be satisfied by a non-physical shortcut."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/common.py",
+    "symbols": ["PHYSICAL_CAUSALITY_CONTRACT", "PHYSICAL_CAUSALITY_CRITIC_GUIDE"]
+  }
+}

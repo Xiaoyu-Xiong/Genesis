@@ -1,0 +1,1494 @@
+{
+  "schema_version": 1,
+  "library": "simdebug",
+  "description": "Planner-selected human debugging experience cards for Genesis simulation generation.",
+  "library_dir": "code_agent/context/simdebug",
+  "card_count": 25,
+  "cards": [
+    {
+      "schema_version": 1,
+      "id": "generated_mesh_manifest_usage_guideline",
+      "kind": "guideline",
+      "title": "Generated mesh workers should use the asset manifest, not guessed paths or ad hoc replacements",
+      "summary": "Generated mesh assets must be instantiated from ready asset_manifest entries with their runtime mesh, visual mesh, scale, coordinate metadata, texture metadata, and simulation role preserved.",
+      "scopes": [
+        "planner",
+        "body",
+        "rendering",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "generated_mesh",
+        "asset_manifest",
+        "runtime_path",
+        "visual_path",
+        "texture_path",
+        "scale",
+        "orientation",
+        "mesh",
+        "asset"
+      ],
+      "failure_tags": [
+        "missing_manifest_entry",
+        "invalid_mesh",
+        "guessed_mesh_path",
+        "wrong_scale",
+        "visual_mesh_instantiated_as_body",
+        "ad_hoc_primitive_replacement"
+      ],
+      "guidance": [
+        "For generated mesh assets, read assets/asset_manifest.json and use entries with source_type == generated_mesh and status == ready.",
+        "Instantiate runtime geometry from entry.runtime_path using the manifest scale, file_meshes_are_zup metadata, visual_path, and intended fixed/dynamic role.",
+        "runtime_path is the strict-manifold simulation/collision mesh.",
+        "visual_path is a seam-aware textured render mesh attached to the same rigid entity, not a separate object to instantiate as an independent simulation body.",
+        "texture_path is evidence metadata for the transferred base-color image and texture preview checks.",
+        "Use the manifest's logical names, scale factors, coordinate metadata, texture paths, and simulation roles instead of guessing mesh paths, sizes, or orientation.",
+        "If a generated mesh manifest entry is missing, failed, invalid, or cannot be imported, fail clearly and report that Planner should regenerate the mesh asset; do not edit mesh files or approximate the object with ad hoc primitives."
+      ],
+      "dispatch_hints": [
+        "Send to body/rendering when generated mesh assets are being instantiated.",
+        "Send to critic when mesh scale, texture, orientation, or manifest consistency is part of the evidence.",
+        "Send to planner when deciding whether to update mesh metadata or regenerate an asset."
+      ],
+      "provenance": {
+        "prompt_files": [
+          "code_agent/prompts/worker.py",
+          "code_agent/prompts/planner.py",
+          "code_agent/prompts/critic.py"
+        ],
+        "symbols": [
+          "RIGID_API_GUIDE",
+          "planner_available_actions_section",
+          "CRITIC_VISUAL_EVIDENCE_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/assets/generated_mesh_manifest_usage_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "planner_asset_retry_guideline",
+      "kind": "guideline",
+      "title": "Planner asset retries should rewrite the owning asset request, not patch around bad assets",
+      "summary": "Planner should distinguish intrinsic generated-asset defects from metadata-only issues and route retries through the correct mesh/XML asset action with a complete revised planner_output.",
+      "scopes": [
+        "planner",
+        "critic",
+        "body",
+        "action",
+        "rendering"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "asset_retry",
+        "generated_mesh",
+        "generated_xml",
+        "meshy",
+        "xml",
+        "mjcf",
+        "asset_manifest",
+        "metadata",
+        "planner_output"
+      ],
+      "failure_tags": [
+        "mesh_prompt_too_long",
+        "failed_manifold_validation",
+        "failed_fem_import",
+        "missing_texture",
+        "wrong_generated_topology",
+        "wrong_bbox_metadata",
+        "underspecified_xml",
+        "asset_intrinsic_defect"
+      ],
+      "guidance": [
+        "Meshy mesh generation accepts at most 800 characters in the final mesh-agent prompt; keep each generated_mesh request concise enough for the assembled prompt.",
+        "When mesh feedback requires a different prompt, rewrite the affected asset request into a concise integrated description instead of appending repair text.",
+        "Put the revised complete planner_output directly on the start_mesh_assets action that retries generation; action rationale, notes, and repair_brief are not sent to the mesh agent.",
+        "Mesh asset generation owns mesh validity. If manifold validation, texture transfer, Genesis FEM import validation, or generated topology fails, regenerate through the mesh asset action.",
+        "Do not ask body/scene/action/rendering workers to rewrite, procedurally repair, reshape, retopologize, or approximate mesh-intrinsic defects.",
+        "If a ready generated mesh has acceptable geometry but wrong runtime scale/bbox metadata, use update_mesh_asset_metadata with a complete revised planner_output rather than retrying mesh generation.",
+        "For XML/MJCF asset feedback, rewrite the affected XML asset request in a revised complete planner_output and put it directly on start_xml_assets; do not rely on rationale, notes, or repair_brief to reach the XML asset worker."
+      ],
+      "dispatch_hints": [
+        "Send to planner when generated mesh/XML asset reports or inspections show defects.",
+        "Send to critic when deciding whether a failure belongs to Planner-owned asset regeneration or local body/action repair."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/planner.py",
+        "symbols": [
+          "planner_available_actions_section",
+          "PLANNER_ACTION_POLICY_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/assets/planner_asset_retry_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "visual_texture_asset_request_guideline",
+      "kind": "guideline",
+      "title": "Texture-dependent objects should be requested as generated assets",
+      "summary": "When requested appearance depends on texture or nontrivial visual ornamentation, Planner should request generated assets instead of asking writers to fake the look with primitive colors.",
+      "scopes": [
+        "planner",
+        "body",
+        "rendering",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "texture",
+        "pattern",
+        "decorative",
+        "visual_ornamentation",
+        "generated_mesh",
+        "asset_request",
+        "surface_detail"
+      ],
+      "failure_tags": [
+        "plain_primitive_fake",
+        "missing_texture",
+        "wrong_visual_appearance",
+        "texture_warning"
+      ],
+      "guidance": [
+        "Any object whose requested appearance depends on texture, patterned surface detail, decorative material variation, image-like surface content, or nontrivial visual ornamentation should be represented by a Meshy-generated asset request, even when the task does not explicitly say mesh.",
+        "Do not ask writers to fake texture-dependent objects with plain primitive colors or simple Genesis surfaces.",
+        "When visual appearance matters, include texture needs and simulation role in the asset request so downstream workers can use manifest texture metadata and critic can verify rendered texture evidence."
+      ],
+      "dispatch_hints": [
+        "Send to planner when writing planner_output asset_requests.",
+        "Send to critic/rendering when visual texture evidence is central to task success."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/planner.py",
+        "symbols": [
+          "planner_available_actions_section"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/assets/visual_texture_asset_request_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "xml_asset_request_contract_guideline",
+      "kind": "guideline",
+      "title": "XML/MJCF asset requests should describe mechanism affordances and preserve actuator contracts",
+      "summary": "Planner should request XML/MJCF assets for articulated mechanisms with explicit joints, actuators, base behavior, dimensions, and downstream body/action contracts.",
+      "scopes": [
+        "planner",
+        "body",
+        "action",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "xml",
+        "mjcf",
+        "urdf",
+        "articulated",
+        "robot",
+        "gripper",
+        "gate",
+        "latch",
+        "actuator",
+        "joint",
+        "asset_request"
+      ],
+      "failure_tags": [
+        "missing_actuator_contract",
+        "missing_joint_names",
+        "wrong_asset_type",
+        "decorative_xml_misuse",
+        "root_pose_motion",
+        "underspecified_mechanism"
+      ],
+      "guidance": [
+        "For articulated robots, grippers, gates, latches, actuated mechanisms, or any task object best represented as one self-contained MJCF body tree with joints and actuators, add an XML/MJCF asset request with asset_type generated_xml or mjcf.",
+        "Describe the required joints, actuator semantics, base behavior, approximate dimensions, and control affordances in purpose/simulation_role.",
+        "XML/MJCF assets may use primitive geoms or generated case-workspace mesh files, but must never reference Genesis built-in meshes, external mesh downloads, hfields, or texture files.",
+        "Do not use XML/MJCF only for textured decorative mesh objects.",
+        "When the plan uses XML/MJCF actuators, make body/action contracts explicit: body must expose stable actuator names, joint names, DOF groups, or control handles in actors, and action must drive those handles with Genesis actuator/DOF/force control APIs after initialization.",
+        "Do not ask action to create motion for an XML articulated asset by overwriting root pose, qpos, or velocities during simulation.",
+        "If the actuator contract is missing, generated code should fail clearly so critic can assign a source-aware body/action repair."
+      ],
+      "dispatch_hints": [
+        "Send to planner when creating or rewriting XML/MJCF asset requests.",
+        "Send to body/action when generated XML actuators need stable runtime handles and physical control paths.",
+        "Send to critic when mechanism failure may be caused by underspecified asset affordances."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/planner.py",
+        "symbols": [
+          "planner_available_actions_section"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/assets/xml_asset_request_contract_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "external_articulation_mjcf_guideline",
+      "kind": "guideline",
+      "title": "External-articulation XML needs fixed-base joints and real collision geoms",
+      "summary": "MJCF/URDF assets coupled through external_articulation should expose fixed-base articulated DOFs, collision geometry on participating links, and actuator-driven motion rather than root teleports.",
+      "scopes": [
+        "planner",
+        "body",
+        "action",
+        "critic"
+      ],
+      "physics_modes": [
+        "rigid_ipc",
+        "fem_ipc"
+      ],
+      "task_tags": [
+        "mjcf",
+        "urdf",
+        "xml",
+        "external_articulation",
+        "articulated",
+        "fixed_base",
+        "joint",
+        "hinge",
+        "actuator",
+        "gripper",
+        "robot",
+        "spool",
+        "paddle",
+        "press"
+      ],
+      "failure_tags": [
+        "empty_parent_body",
+        "missing_collision_geom",
+        "wrong_joint_axis",
+        "root_teleport",
+        "unsupported_state_write",
+        "overstrong_pd",
+        "invalid_link_hierarchy"
+      ],
+      "guidance": [
+        "Use fixed-base articulations with revolute or prismatic child bodies for driven mechanisms.",
+        "Give every IPC-participating link real nonzero collision geometry, including tiny dummy collision geometry on logical mount parents when needed.",
+        "A dummy parent geom may be a primitive MJCF geom such as type=\"box\", but it must be nonzero-volume collision geometry rather than a site, inertial marker, visual-only marker, zero-area plane, line, or empty body.",
+        "A useful dummy mount pattern is contype=\"1\" with conaffinity=\"0\" so the geom remains collision geometry without accepting ordinary contact pairs; do not set both contype and conaffinity to zero.",
+        "Place dummy mount geometry far from the real contact region so it cannot initially intersect the active mechanism, passive rigid bodies, ground, chain links, anchors, or other task geometry.",
+        "Child/driven geoms such as spools, hinges, paddles, presses, and gripper fingers must have real collision geometry; do not provide only visual geometry for IPC contact participants.",
+        "Set joint axes and pivots from the physical mechanism, not from arbitrary bbox positions.",
+        "Keep XML mesh coordinates aligned with the layout/source mesh coordinates. If a fixed euler correction is required on a geom, validate the resulting initial configuration with an IPC sanity or distance check before stepping.",
+        "Drive motion through actuator/DOF controllers such as control_dofs_position_velocity.",
+        "Cap PD gains and force ranges in heavy IPC contact scenes to avoid per-step jumps that look like penetration.",
+        "For diagnostics, do not trust get_dofs_velocity alone on external articulations whose qpos is recovered from IPC; estimate true angular velocity from step-to-step hinge angle differences when needed."
+      ],
+      "restrictions": [
+        "Do not drive external articulations by post-build root/qpos teleports or repeated set_dofs_velocity writes.",
+        "Do not provide only visual geometry for contact participants.",
+        "Do not let dummy mount geometry intersect the real contact region even if the dummy is invisible or transparent."
+      ],
+      "dispatch_hints": [
+        "Send to planner when rewriting XML asset requests.",
+        "Send to body/action when wiring actuator names, DOF handles, and controller paths.",
+        "Send to critic when generated XML morphology cannot plausibly perform the requested contact task."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/ipc.py",
+        "symbols": [
+          "EXTERNAL_ARTICULATION_MJCF_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/ipc/external_articulation_mjcf_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "fem_state_metrics_guideline",
+      "kind": "guideline",
+      "title": "FEM evidence should record deformation proxies without oversampling expensive state",
+      "summary": "Generated FEM tasks should expose useful deformation evidence such as COM, bounding boxes, height, spread, and sparse vertex-state samples while avoiding per-step expensive get_state calls by default.",
+      "scopes": [
+        "planner",
+        "body",
+        "action",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "fem_ipc"
+      ],
+      "task_tags": [
+        "fem",
+        "deformable",
+        "metrics",
+        "event_log",
+        "get_state",
+        "com",
+        "bbox",
+        "height",
+        "spread",
+        "deformation"
+      ],
+      "failure_tags": [
+        "missing_deformation_metrics",
+        "expensive_get_state_loop",
+        "no_fem_evidence",
+        "metrics_not_observable"
+      ],
+      "guidance": [
+        "FEM state sampling can use entity.get_state(); convert state.pos/state.vel tensors to CPU/numpy/lists before writing JSON.",
+        "Event logs and metrics should include COM, bbox/height, spread, and a simple deformation proxy for soft-body tasks.",
+        "entity.get_state() for FEM bodies can be expensive. Sample FEM vertex state sparsely for metrics/evidence, not on every physics step by default."
+      ],
+      "dispatch_hints": [
+        "Send to body/action when FEM metrics or event logs are implemented.",
+        "Send to critic when checking whether a soft-body result has enough deformation evidence.",
+        "Send to opt when FEM material/contact variables need observable effective metrics."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/worker.py",
+        "symbols": [
+          "FEM_IPC_API_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/ipc/fem_state_metrics_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "ipc_fem_material_selection_guideline",
+      "kind": "guideline",
+      "title": "FEM material choices should be explicit and task-scaled",
+      "summary": "For FEM+IPC soft-body tasks, pick explicit Elastic material parameters and contact friction from the task and deformable config bounds instead of relying on hidden defaults.",
+      "scopes": [
+        "planner",
+        "body",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "fem_ipc"
+      ],
+      "task_tags": [
+        "fem",
+        "ipc",
+        "soft",
+        "deformable",
+        "elastic",
+        "material",
+        "youngs",
+        "poisson",
+        "density",
+        "friction",
+        "compression",
+        "wobble",
+        "leveling",
+        "bridge",
+        "column"
+      ],
+      "failure_tags": [
+        "missing_explicit_e_nu_rho",
+        "missing_friction_mu",
+        "too_stiff",
+        "too_soft",
+        "unstable_material"
+      ],
+      "guidance": [
+        "Generated FEM elastic materials should pass explicit E, nu, rho, and friction_mu values.",
+        "Choose E, nu, and rho within deformable_cfg bounds; use defaults unless the task calls for a special material.",
+        "Use E around 1e4-5e4 for very soft gel, 5e4-5e5 for soft rubber, and 5e5-5e6 for firmer elastomer-like bodies.",
+        "Use nu around 0.2 for compressible foam-like objects, 0.35 as a balanced default, and 0.45 only when nearly incompressible behavior is needed.",
+        "Use rho around 300 for light foam-like material, 1000 as a water-like gel/rubber default, and 3000 for a heavy dense soft solid.",
+        "Choose friction_mu from the material/contact role; do not read a nonexistent fem_friction_mu from deformable_cfg.",
+        "Use friction_mu around 0.0-0.1 for slippery contact, 0.2-0.5 for typical soft rubber/plastic contact, and 0.6-1.0 for high-friction sticky contact unless the task clearly justifies an out-of-range value.",
+        "The same FEM material should also pass model, hydroelastic_modulus, contact_resistance, and hessian_invariant from deformable_cfg when the generated worker creates FEM Elastic materials."
+      ],
+      "dispatch_hints": [
+        "Send to body when a generated FEM entity or material is being written or repaired.",
+        "Send to critic when checking whether a soft-body result is genuinely FEM rather than rigid-only.",
+        "Send to opt when material stiffness, density, damping, or friction are plausible continuous tuning variables."
+      ],
+      "provenance": {
+        "prompt_files": [
+          "code_agent/prompts/ipc.py",
+          "code_agent/prompts/worker.py",
+          "code_agent/prompts/planner.py",
+          "code_agent/prompts/critic.py"
+        ],
+        "symbols": [
+          "FEM_MATERIAL_SELECTION_GUIDE",
+          "FEM_IPC_API_GUIDE",
+          "planner_fem_ipc_capability_section",
+          "DEFORMABLE_CRITIC_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/ipc/ipc_fem_material_selection_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "ipc_initial_geometry_failure_diagnosis_guideline",
+      "kind": "guideline",
+      "title": "Initial IPC world failures usually point to geometry, spacing, or asset validity",
+      "summary": "When libuipc reports invalid initial geometry before a rigid ABD accessor exception, route the repair to placement, scale, clearance, orientation, or generated asset topology before blaming IPC capability.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "critic"
+      ],
+      "physics_modes": [
+        "rigid_ipc",
+        "fem_ipc"
+      ],
+      "task_tags": [
+        "ipc",
+        "coupling",
+        "contact",
+        "geometry",
+        "clearance",
+        "interlock",
+        "mesh",
+        "xml",
+        "asset",
+        "initial_placement"
+      ],
+      "failure_tags": [
+        "world_is_not_valid",
+        "simplicialsurfaceintersectioncheck",
+        "simplicialsurfacedistancecheck",
+        "barrier",
+        "thickness",
+        "initial_interpenetration",
+        "rigid_abd_state_retrieval"
+      ],
+      "guidance": [
+        "Treat World-is-not-valid and SimplicialSurfaceIntersectionCheck/DistanceCheck diagnostics as primary evidence of invalid initial IPC geometry.",
+        "Repair the source that controls initial placement, scale, spacing, orientation, duplicate IPC geometry, mesh clearance, or asset topology.",
+        "Preserve the intended IPC contact/coupling model unless a clean no-penetration repro still proves capability is missing.",
+        "Do not mask the issue by disabling IPC, disabling coupling, changing to hidden constraints, or bypassing contact."
+      ],
+      "dispatch_hints": [
+        "Send to scene/body for placement, spacing, orientation, and coupling mode repairs.",
+        "Send to planner when generated mesh/XML assets appear topologically unsuitable and should be regenerated.",
+        "Send to critic when classifying IPC execution logs and avoiding secondary-accessor misdiagnosis."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/ipc.py",
+        "symbols": [
+          "IPC_FAILURE_DIAGNOSTIC_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/ipc/ipc_initial_geometry_failure_diagnosis_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "ipc_runtime_config_mapping_guideline",
+      "kind": "guideline",
+      "title": "IPC scene options should map deformable_cfg values exactly and leave adaptive d_hat to the entrypoint",
+      "summary": "Generated IPC scenes should construct IPCCouplerOptions from deformable_cfg with the correct prefix stripping, rigid-contact flags, and adaptive contact distance handling.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "critic"
+      ],
+      "physics_modes": [
+        "rigid_ipc",
+        "fem_ipc"
+      ],
+      "task_tags": [
+        "ipc",
+        "deformable_cfg",
+        "ipccoupleroptions",
+        "contact_d_hat",
+        "adaptive",
+        "rigid_contact",
+        "rigid_soft",
+        "coupling"
+      ],
+      "failure_tags": [
+        "wrong_ipc_option_name",
+        "adaptive_d_hat_passed_to_genesis",
+        "rigid_contact_flag_wrong",
+        "missing_ipc_options",
+        "hardcoded_ipc_default"
+      ],
+      "guidance": [
+        "If deformable_cfg.ipc_enabled is true for a rigid/articulated scene, route contact through IPC by constructing gs.Scene with gs.options.IPCCouplerOptions.",
+        "Map IPC values from deformable_cfg by stripping the ipc_ config prefix before passing Genesis option names, such as ipc_contact_d_hat to contact_d_hat and ipc_constraint_strength_translation to constraint_strength_translation.",
+        "Map supported IPC option families including ipc_newton_*, ipc_n_linesearch_iterations, ipc_linesearch_report_energy, ipc_linear_system_*, ipc_contact_*, ipc_collision_detection_method, ipc_cfl_enable, ipc_sanity_check_enable, ipc_constraint_strength_translation, ipc_constraint_strength_rotation, ipc_enable_rigid_ground_contact, ipc_enable_rigid_rigid_contact, ipc_two_way_coupling, ipc_enable_rigid_dofs_sync, and ipc_free_base_driven_by_ipc.",
+        "Do not pass ipc_contact_d_hat_adaptive to Genesis; it is a code-agent runtime switch and the generated entrypoint resolves it into ipc_contact_d_hat before create_scene.",
+        "When ipc_contact_d_hat_adaptive is true, the entrypoint computes clamp(min(0.2 * median_mesh_edge_or_bbox_feature), 1e-5 * max_bbox_diag, 2e-3 * max_bbox_diag) over generated meshes, user/repo meshes, primitive-derived meshes, collision-enabled XML primitive geoms, direct primitive morphs, bbox-only primitive/XML/URDF manifest entries, and planner_output asset_requests as fallback.",
+        "For rigid IPC scenes, set enable_rigid_rigid_contact from deformable_cfg.ipc_enable_rigid_rigid_contact. Keep it true when rigid bodies should collide with each other through IPC; keep it false when IPC should only handle rigid-soft contact or selected articulated contacts and Genesis's rigid solver should avoid delegated pairs.",
+        "Rigid participants in IPC scenes should use gs.materials.Rigid with appropriate IPC coupling fields such as coup_type and coup_friction; the generic deformable_cfg friction may be used as a rigid coupling fallback when relevant."
+      ],
+      "dispatch_hints": [
+        "Send to scene/body when constructing gs.Scene or materials for IPC-enabled cases.",
+        "Send to critic when diagnosing missing IPC options, wrong rigid-contact flags, or hardcoded IPC defaults."
+      ],
+      "provenance": {
+        "prompt_files": [
+          "code_agent/prompts/worker.py",
+          "code_agent/prompts/planner.py"
+        ],
+        "symbols": [
+          "RIGID_API_GUIDE",
+          "FEM_IPC_API_GUIDE",
+          "planner_fem_ipc_capability_section"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/ipc/ipc_runtime_config_mapping_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "rigid_ipc_coupling_guideline",
+      "kind": "guideline",
+      "title": "Choose rigid IPC coupling mode from the physical role",
+      "summary": "Rigid IPC scenes should choose ipc_only, two_way_soft_constraint, or external_articulation based on whether IPC, Genesis controls, or articulated DOFs own the motion.",
+      "scopes": [
+        "planner",
+        "body",
+        "action",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "rigid_ipc",
+        "fem_ipc"
+      ],
+      "task_tags": [
+        "ipc",
+        "rigid",
+        "coupling",
+        "contact",
+        "articulated",
+        "robot",
+        "gripper",
+        "mechanism",
+        "passive",
+        "chain",
+        "anchor",
+        "payload",
+        "ipc_only",
+        "two_way_soft_constraint",
+        "external_articulation"
+      ],
+      "failure_tags": [
+        "wrong_coup_type",
+        "mixed_ipc_only_two_way",
+        "passive_pose_write",
+        "delegated_contact_missing",
+        "sudden_ejection",
+        "inconsistent_state"
+      ],
+      "guidance": [
+        "Use ipc_only for passive free rigid props whose motion should mainly come from IPC gravity/contact.",
+        "Use two_way_soft_constraint for Genesis-driven bodies or selected robot links that need IPC contact while keeping Genesis controls.",
+        "For two_way_soft_constraint, constraint_strength_translation and constraint_strength_rotation tune how tightly IPC tracks Genesis: higher is stiffer and less laggy, lower is softer and usually more forgiving.",
+        "Use external_articulation for fixed-base MJCF/URDF mechanisms whose joints should participate in IPC contact.",
+        "When ipc_enable_rigid_rigid_contact / enable_rigid_rigid_contact is true for a heavy rigid-contact scene, treat the scene as pure IPC rigid-rigid contact: use ipc_only for passive rigid bodies and external_articulation for actively driven articulated bodies that contact IPC-owned rigid bodies.",
+        "In heavy rigid-rigid IPC contact scenes, do not create rigid bodies with two_way_soft_constraint unless there is a specific non-heavy-contact reason to do so.",
+        "Use coup_links only for two_way_soft_constraint, and use it to couple just the contacting links such as gripper fingers rather than putting an entire robot into IPC.",
+        "Choose explicit coupling modes when contact behavior depends on the choice; do not rely on auto-selection for important objects."
+      ],
+      "restrictions": [
+        "Do not pose-write, velocity-write, force-drive, hidden-weld, or directly attach passive ipc_only payloads after initialization.",
+        "Do not rely on Genesis rigid contact as a fallback for ipc_only objects.",
+        "Avoid mixing two_way_soft_constraint and ipc_only in heavy interlocking contact because soft transform constraints and Genesis/IPC synchronization can create inconsistent states, sudden ejection, or crashes.",
+        "Do not use ipc_only for articulated objects; use external_articulation or selected two_way_soft_constraint links depending on the physical role."
+      ],
+      "dispatch_hints": [
+        "Send to body when assigning material coupling modes.",
+        "Send to action when an actuator-driven mechanism contacts IPC-owned objects.",
+        "Send to critic when contact ownership or state synchronization looks inconsistent."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/ipc.py",
+        "symbols": [
+          "RIGID_IPC_COUPLING_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/ipc/rigid_ipc_coupling_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "opt_metric_and_objective_design_guideline",
+      "kind": "guideline",
+      "title": "Opt metrics and objectives must be observable, shaped, and task-faithful",
+      "summary": "Optimization should expose measurable simulation residuals and explicit success criteria instead of optimizing target copies, binary-only pass flags, or custom target transforms.",
+      "scopes": [
+        "planner",
+        "opt",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "opt",
+        "optimization",
+        "metrics",
+        "objective",
+        "success_criteria",
+        "distance",
+        "velocity",
+        "timing",
+        "contact",
+        "pose",
+        "joint",
+        "stability"
+      ],
+      "failure_tags": [
+        "missing_metrics",
+        "target_copy_metric",
+        "binary_only_objective",
+        "custom_transform",
+        "score_improvement_only",
+        "missing_success_criteria"
+      ],
+      "guidance": [
+        "If Opt adds metrics, make them observable quantities from simulation state, not values copied from the target.",
+        "Define shaped objective terms whenever possible: distance-to-target, velocity error, event timing, contact count, closest approach, pose/joint error, stability margin, or task-object retention.",
+        "Keep binary pass/fail as success_criteria, not as the only optimization signal.",
+        "Always define explicit success_criteria. Score improvement alone is not task success.",
+        "Do not use transform=\"custom\" in target_spec.json. If a custom score is needed, compute that scalar inside generated case metrics and reference it with transform=\"identity\"."
+      ],
+      "dispatch_hints": [
+        "Send to Opt when target_spec.json or metrics need to be created or repaired.",
+        "Send to Critic when checking whether an Opt result is real task success rather than numeric score movement."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/opt.py",
+        "symbols": [
+          "build_opt_prompt"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/opt/opt_metric_and_objective_design_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "opt_routing_guideline",
+      "kind": "guideline",
+      "title": "Route to Opt only for runnable cases with bounded continuous residuals",
+      "summary": "Planner should use Opt for close, physically plausible failures that can be improved by compact continuous parameters, and route structural failures back to source repair or asset regeneration.",
+      "scopes": [
+        "planner",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "opt",
+        "optimization",
+        "continuous",
+        "residual",
+        "timing",
+        "pose",
+        "distance",
+        "friction",
+        "damping",
+        "gain",
+        "material",
+        "layout",
+        "solver"
+      ],
+      "failure_tags": [
+        "structural_failure",
+        "missing_entity",
+        "invalid_asset",
+        "broken_import",
+        "absent_metrics",
+        "invisible_behavior",
+        "impossible_geometry",
+        "caged_object",
+        "stuck_mechanism"
+      ],
+      "guidance": [
+        "Good Opt candidates are runnable cases with plausible entities, readable evidence, and continuous measurable misses.",
+        "Continuous residuals may involve timing, target distance, pose, speed, angle, friction, damping, gain, initial layout, material/contact, XML scalar, or solver/contact tolerance.",
+        "Bad Opt candidates are structural failures: missing entities, invalid assets, broken imports, impossible geometry, stuck mechanisms, absent metrics, invisible behavior, or task semantics that need rewriting.",
+        "After useful Opt results, rerun execution so final artifacts reflect the selected params."
+      ],
+      "dispatch_hints": [
+        "Send to planner when deciding run_opt versus request_repair/regeneration.",
+        "Send to opt with the effective-parameter restriction when optimization is selected.",
+        "Send to critic when deciding whether a failure is structural or parameter-limited."
+      ],
+      "provenance": {
+        "prompt_files": [
+          "code_agent/prompts/planner.py",
+          "code_agent/prompts/opt.py"
+        ],
+        "symbols": [
+          "PLANNER_ACTION_POLICY_GUIDE",
+          "build_opt_prompt"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/opt/opt_routing_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "opt_search_space_design_guideline",
+      "kind": "guideline",
+      "title": "Opt search spaces should be compact, meaningful, and runner-native",
+      "summary": "Opt should tune a small set of physically meaningful scalar variables, use log scaling for positive variables spanning orders of magnitude, and rely on the generic runner strategy knobs.",
+      "scopes": [
+        "planner",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "opt",
+        "optimization",
+        "search_space",
+        "bounds",
+        "sigma",
+        "log_scale",
+        "strategy",
+        "phases",
+        "restarts",
+        "early_stop"
+      ],
+      "failure_tags": [
+        "too_many_variables",
+        "irrelevant_parameter",
+        "linear_scale_bad",
+        "case_specific_search",
+        "low_fidelity_shortcut"
+      ],
+      "guidance": [
+        "Keep the search space small. Prefer 2-8 variables unless evidence justifies more.",
+        "Prefer scale=\"log\" for positive variables spanning orders of magnitude, such as stiffness, damping, density, contact stiffness, tolerances, and controller gains.",
+        "Use the runner's generic strategy knobs when useful rather than hand-coding task-specific search logic.",
+        "strategy.phases can optimize one variable group at a time, strategy.restarts can run multiple seeds/sigma scales, and strategy.early_stop can stop after success or several non-improving generations.",
+        "Do not use low-fidelity timing/render shortcuts unless Planner explicitly asks for them."
+      ],
+      "dispatch_hints": [
+        "Send to Opt before creating opt_space.json or tuning CMA-ES strategy.",
+        "Send to Planner when deciding whether a failure is close enough for bounded continuous search."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/opt.py",
+        "symbols": [
+          "build_opt_prompt"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/opt/opt_search_space_design_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "critic_asset_evaluation_guideline",
+      "kind": "guideline",
+      "title": "Evaluate generated assets before blaming only action timing",
+      "summary": "When a task depends on generated mesh or XML morphology, inspect shape, topology, joints, actuator affordances, scale, and orientation before assigning a local body/action repair.",
+      "scopes": [
+        "planner",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "asset",
+        "mesh",
+        "xml",
+        "mjcf",
+        "urdf",
+        "gripper",
+        "hand",
+        "robot",
+        "mechanism",
+        "morphology",
+        "actuator",
+        "texture"
+      ],
+      "failure_tags": [
+        "unsuitable_asset",
+        "wrong_topology",
+        "missing_joint",
+        "missing_actuator",
+        "wrong_joint_axis",
+        "wrong_scale",
+        "cannot_grasp",
+        "lateral_escape",
+        "invalid_link_hierarchy"
+      ],
+      "guidance": [
+        "Treat generated assets as first-class evidence, not as trusted black boxes. Inspect asset manifests, generated XML/MJCF source, worker reports, preview images, and in-scene contact sheets when the task depends on generated assets.",
+        "Judge whether the asset's shape, topology, joint axes, actuator contract, scale, and visible geometry can plausibly perform the requested task before blaming only action timing.",
+        "For grasping/manipulation, check whether fingers and thumb can form a real opposing cage, whether the payload fits inside that grasp volume, and whether closing the actuators would trap rather than sweep the payload away.",
+        "Set recommended_owner to planner when asset morphology, topology, joints, actuators, scale, orientation, or visible geometry cannot plausibly perform the task.",
+        "If the generated asset is plausible but scene placement, initial clearance, material/coupling, or code-side metadata is wrong, route to body/scene.",
+        "If the asset and placement are plausible but timing, controller, gates, or release sequence are wrong, route to action."
+      ],
+      "dispatch_hints": [
+        "Send to critic whenever mesh/XML assets are central to the requested behavior.",
+        "Send to planner when deciding whether to inspect assets or regenerate asset prompts."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/critic.py",
+        "symbols": [
+          "CRITIC_ASSET_EVALUATION_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/repair_routing/critic_asset_evaluation_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "source_aware_repair_guideline",
+      "kind": "guideline",
+      "title": "Route repairs to the source owner with concrete evidence",
+      "summary": "Repair advice should name the owner module or Planner asset action, the wrong behavior, the evidence, the likely source cause, and what a convincing fix must change.",
+      "scopes": [
+        "planner",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "repair",
+        "diagnosis",
+        "critic",
+        "owner",
+        "planner",
+        "mesh",
+        "xml",
+        "asset",
+        "source",
+        "evidence"
+      ],
+      "failure_tags": [
+        "vague_repair",
+        "wrong_owner",
+        "structural_failure",
+        "asset_intrinsic_defect",
+        "missing_actuator_affordance",
+        "invalid_mesh",
+        "unsuitable_xml"
+      ],
+      "guidance": [
+        "Compare the original prompt, generated source, execution reports, metrics, event logs, visual output, and module ownership.",
+        "Name the owner module, concrete wrong behavior, evidence proving it, likely source-level cause, and expected fix.",
+        "Avoid vague advice like \"improve the trajectory\" when concrete evidence exists, and do not compress important source-level feedback just to keep the answer short.",
+        "Route mesh-intrinsic defects to Planner asset regeneration rather than asking body/scene/action/rendering to patch geometry.",
+        "Mesh-intrinsic defects include failed manifold checks, Genesis FEM import validation failure, missing/corrupt texture, wrong generated topology, and visual/runtime mesh pairing defects.",
+        "Route XML/MJCF mechanism defects to Planner XML regeneration rather than repeatedly repairing action timing.",
+        "XML/MJCF mechanism defects include missing opposing thumb/fingers, missing useful actuator affordances, wrong joint axes, invalid link hierarchy, and body geometry that cannot perform the requested contact task."
+      ],
+      "dispatch_hints": [
+        "Send to critic for failure classification.",
+        "Send to planner when deciding request_repair versus start_mesh_assets/start_xml_assets.",
+        "Send to opt when Opt returns needs_rewrite and must give owner-specific guidance."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/common.py",
+        "symbols": [
+          "SOURCE_AWARE_REPAIR_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/guideline_cards/repair_routing/source_aware_repair_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "builtin_asset_policy_restriction",
+      "kind": "restriction",
+      "title": "Generated cases must not depend on packaged Genesis assets",
+      "summary": "Task geometry, robots, textures, and props should come from primitives, case-workspace generated assets, or user-provided layout assets, not from genesis/assets.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "rendering",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "asset",
+        "mesh",
+        "texture",
+        "robot",
+        "xml",
+        "urdf",
+        "mjcf",
+        "genesis/assets",
+        "builtin"
+      ],
+      "failure_tags": [
+        "builtin_asset",
+        "get_assets_dir",
+        "genesis_assets_path",
+        "xml_builtin_mesh",
+        "external_asset_reference"
+      ],
+      "restrictions": [
+        "Do not inspect, copy, import, or reference prepackaged assets under genesis/assets.",
+        "Do not use gs.utils.get_assets_dir or Genesis built-in relative asset paths for generated task geometry.",
+        "XML/MJCF mesh references are allowed only when mesh files were generated into the same case workspace and validated by the XML asset pipeline."
+      ],
+      "checks": [
+        "Run static validation for planner outputs and generated source when asset paths appear.",
+        "Treat forbidden built-in asset references as source-level failures, not harmless shortcuts."
+      ],
+      "dispatch_hints": [
+        "Send to planner when asset requests or XML prompts are being written.",
+        "Send to body/rendering when generated code instantiates meshes, robots, textures, or props."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/common.py",
+        "symbols": [
+          "BUILTIN_ASSET_POLICY_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/restriction_cards/assets/builtin_asset_policy_restriction.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "render_visual_evidence_restriction",
+      "kind": "restriction",
+      "title": "Visual evidence must be readable enough to judge the requested behavior",
+      "summary": "Generated videos and contact sheets should clearly show task-relevant objects, contacts, and motion; unclear rendering should be repaired rather than accepted.",
+      "scopes": [
+        "planner",
+        "rendering",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "render",
+        "video",
+        "visual",
+        "camera",
+        "lighting",
+        "contact_sheet",
+        "frame",
+        "evidence",
+        "texture",
+        "manifest",
+        "material_binding"
+      ],
+      "failure_tags": [
+        "cropped",
+        "occluded",
+        "tiny_objects",
+        "blank_frame",
+        "poorly_lit",
+        "static_camera",
+        "unreadable_video",
+        "missing_video"
+      ],
+      "restrictions": [
+        "Do not treat unclear rendering as acceptable when the simulation behavior cannot be judged.",
+        "Do not let opt report success or partial success from numeric score alone when visual evidence is missing, unreadable, or contradicts the goal.",
+        "Camera position, lookat, field of view, clipping, lighting, background, capture cadence, and resolution should make the task behavior inspectable.",
+        "When sampled frame paths, contact sheets, texture summaries, or texture-presence warnings are available, use them as review evidence alongside numeric metrics instead of relying only on event logs."
+      ],
+      "checks": [
+        "Inspect sampled frames or video before accepting success.",
+        "Record final camera and rendering choices in render_stats.json when the generated case supports it.",
+        "If meshes or textures are involved, check whether orientation, scale, material binding, and rendered texture appearance are consistent with the source and manifest."
+      ],
+      "dispatch_hints": [
+        "Send to rendering when evidence is hard to inspect because of view, lighting, cropping, or capture choices.",
+        "Send to critic and opt when deciding whether numeric success is trustworthy."
+      ],
+      "provenance": {
+        "prompt_files": [
+          "code_agent/prompts/common.py",
+          "code_agent/prompts/critic.py"
+        ],
+        "symbols": [
+          "RENDER_CLARITY_GUIDE",
+          "GENERATED_RESULT_QUALITY_GUIDE",
+          "CRITIC_VISUAL_EVIDENCE_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/restriction_cards/evidence/render_visual_evidence_restriction.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "opt_effective_parameter_restriction",
+      "kind": "restriction",
+      "title": "Optimized variables must affect runtime behavior and be measured",
+      "summary": "Opt should expose only compact, physically meaningful continuous variables whose sampled values survive generated-code clamps and are reported as effective runtime values.",
+      "scopes": [
+        "planner",
+        "opt",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "opt",
+        "optimization",
+        "parameter",
+        "continuous",
+        "search",
+        "metric",
+        "controller",
+        "gain",
+        "friction",
+        "material",
+        "layout",
+        "timing"
+      ],
+      "failure_tags": [
+        "ignored_variable",
+        "clamped_to_constant",
+        "overwritten",
+        "missing_effective_metric",
+        "objective_only",
+        "irrelevant_parameter"
+      ],
+      "restrictions": [
+        "Do not expose rendering, camera, lighting, visual-only, irrelevant, or immediately overwritten constants as opt variables.",
+        "Keep default params and bounds inside the post-clamp effective range used by generated code.",
+        "If generated action/body code has version gates, sign-sensitive schedule guards, controller floors, clamps, or XML/joint range limits, encode those invariants in default_opt_params.json and opt_space.json.",
+        "Include required version fields in default params, omit variables that will be ignored, and keep defaults/bounds inside the effective range after generated-code clamps.",
+        "Before reporting success, compare requested opt params against metrics-reported effective controls, material values, or layout values.",
+        "If active variables are ignored, clamped to constants, or missing from metrics, repair hooks/contracts and rerun before calling the result useful."
+      ],
+      "checks": [
+        "Run at least one baseline and one perturbed rollout when optimization is appropriate.",
+        "Verify metrics include effective values, not only requested values or final score."
+      ],
+      "dispatch_hints": [
+        "Send to opt whenever Planner asks for continuous tuning or when critic evidence suggests a bounded scalar search.",
+        "Send to critic when reviewing whether an optimization result is real progress rather than a no-op search."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/opt.py",
+        "symbols": [
+          "build_opt_prompt"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/restriction_cards/opt/opt_effective_parameter_restriction.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "opt_task_semantics_restriction",
+      "kind": "restriction",
+      "title": "Opt must preserve the task semantics and target",
+      "summary": "Optimization may tune physical parameters and controls, but it must not make the task easier by changing required entities, target semantics, or the requested success condition.",
+      "scopes": [
+        "planner",
+        "opt",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "opt",
+        "task_semantics",
+        "target",
+        "success_criteria",
+        "layout",
+        "initial_pose",
+        "goal"
+      ],
+      "failure_tags": [
+        "goal_moved",
+        "target_relaxed",
+        "task_changed",
+        "missing_required_entity",
+        "semantics_rewritten"
+      ],
+      "restrictions": [
+        "Do not change the task semantics, required entities, or success target to make the case easier.",
+        "Do not move the goal to the object or relax the requested target.",
+        "Initial-setting and layout variables may only tune the setup within the prompt's intended scene family.",
+        "Optimization must tune honest physical parameters or controls that the generated simulation uses, not hidden constraints, fake attachments, direct post-initialization object state writes, or task-object teleportation."
+      ],
+      "dispatch_hints": [
+        "Send to Opt whenever initial layout, goal placement, or success criteria are considered as variables.",
+        "Send to Critic when reviewing whether an optimized success still matches the original text prompt."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/opt.py",
+        "symbols": [
+          "build_opt_prompt"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/restriction_cards/opt/opt_task_semantics_restriction.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "opt_xml_scalar_patch_restriction",
+      "kind": "restriction",
+      "title": "Opt may only patch safe XML scalar attributes",
+      "summary": "When Opt touches XML/MJCF assets, it must preserve topology and only change physically meaningful numeric attributes on existing named elements.",
+      "scopes": [
+        "planner",
+        "opt",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "opt",
+        "xml",
+        "mjcf",
+        "actuator",
+        "joint",
+        "geom",
+        "scalar_patch",
+        "kp",
+        "forcerange",
+        "damping",
+        "friction"
+      ],
+      "failure_tags": [
+        "xml_topology_changed",
+        "renamed_element",
+        "joint_axis_changed",
+        "missing_xml_validation",
+        "unsafe_xml_patch"
+      ],
+      "restrictions": [
+        "Prefer runtime hooks for XML actuator tuning when Genesis APIs can express them, such as set_dofs_kp, set_dofs_kv, set_dofs_force_range, or equivalent control APIs.",
+        "Use direct XML edits only for scalar attributes that cannot be set reliably at runtime.",
+        "If editing or generating per-run copies of assets/xml/**/*.xml, keep the source asset topology unchanged.",
+        "Only numeric attributes on existing named elements may change: actuator kp, forcerange, ctrlrange; joint damping, armature, range; and physically meaningful geom/contact scalars such as friction, solref, solimp, density, and mass.",
+        "Do not add, remove, or rename bodies, joints, geoms, actuators, meshes, defaults, or change joint axes.",
+        "Validate the XML diff yourself and include evidence beginning with xml_scalar_patch_validated= when reporting a useful XML-touching result."
+      ],
+      "dispatch_hints": [
+        "Send to Opt whenever XML scalar attributes are exposed as optimization variables.",
+        "Send to Critic when checking whether an Opt result changed XML morphology rather than scalar parameters."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/opt.py",
+        "symbols": [
+          "build_opt_prompt"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/restriction_cards/opt/opt_xml_scalar_patch_restriction.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "collision_contact_restriction",
+      "kind": "restriction",
+      "title": "Task-critical participants need real collision and positive clearance",
+      "summary": "Objects that must touch, support, block, roll, slide, stack, catch, or contain each other need collision geometry, enabled contact, and non-penetrating initial layout.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "action",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "collision",
+        "contact",
+        "support",
+        "container",
+        "obstacle",
+        "ground",
+        "table",
+        "roll",
+        "slide",
+        "stack",
+        "catch",
+        "block"
+      ],
+      "failure_tags": [
+        "visual_only",
+        "disabled_collision",
+        "ghost_contact",
+        "interpenetration",
+        "support_loss",
+        "collision_mask"
+      ],
+      "restrictions": [
+        "Do not rely on visual-only geometry for task-critical physical participants.",
+        "Do not disable collision masks between objects that are expected to touch or constrain each other.",
+        "Do not rely on objects passing through each other, one-sided visual shells, hidden supports, or disabled collision masks to make the result look plausible.",
+        "Avoid initial interpenetration; use positive clearances and metrics/logs that can reveal penetration or support loss.",
+        "Robot internal self-collision may be limited when necessary to avoid actuator self-locking, but this must not disable collision between robot/tool contact surfaces and the task objects they manipulate."
+      ],
+      "checks": [
+        "Verify task-critical objects have collision geometry rather than only surfaces, textures, sites, or visual shells.",
+        "Check the event log or metrics for contact counts, penetration indicators, or support loss when relevant."
+      ],
+      "dispatch_hints": [
+        "Send to scene/body for collision geometry, masks, and initial clearance.",
+        "Send to critic when a video looks plausible but contact evidence is missing or ghosted."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/common.py",
+        "symbols": [
+          "COLLISION_CONTACT_CONTRACT"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/restriction_cards/physics_validity/collision_contact_restriction.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "deformable_fem_ipc_scope_restriction",
+      "kind": "restriction",
+      "title": "Soft-body tasks require real FEM+IPC when deformable generation is enabled",
+      "summary": "When a prompt requires soft-body behavior, generated source should use real FEM entities/materials and IPC evidence, not rigid substitutes or unsupported MPM/PBD/SPH shortcuts.",
+      "scopes": [
+        "planner",
+        "body",
+        "action",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "fem_ipc"
+      ],
+      "task_tags": [
+        "soft",
+        "deformable",
+        "fem",
+        "ipc",
+        "elastic",
+        "jelly",
+        "compression",
+        "wobble",
+        "bending",
+        "collapse",
+        "deformation"
+      ],
+      "failure_tags": [
+        "rigid_substitute",
+        "fake_deformation",
+        "mpm",
+        "pbd",
+        "sph",
+        "missing_fem_entity",
+        "missing_deformation_metrics",
+        "mid_sim_fem_state_write"
+      ],
+      "restrictions": [
+        "When deformable_config.enabled is false, generated source must not use FEM materials, FEM entities, or deformation-only APIs.",
+        "If the prompt fundamentally requires soft-body or deformation behavior while deformable is disabled, Planner should finish inconclusive rather than write a rigid-body substitute.",
+        "When deformable_config.ipc_enabled is false, generated source must not instantiate gs.options.IPCCouplerOptions.",
+        "When deformable_config.enabled is false and ipc_enabled is true, IPC is allowed only for rigid/articulated contact; fail fake deformable behavior.",
+        "Do not use MPM, PBD, SPH, cloth-only shortcuts, or rigid-only substitutes for soft-body prompts in this pipeline.",
+        "Do not fake deformation through repeated FEM position or velocity writes after stepping starts.",
+        "Require FEM material/entity construction, explicit E/nu/rho/friction_mu choices, config-driven FEM/IPC/tet parameters, and deformation evidence.",
+        "Fail hardcoded FEM/IPC defaults, missing E/nu/rho, missing friction_mu, attempts to read deformable_cfg[\"fem_friction_mu\"], and mid-simulation FEM position/velocity writes that fake deformation."
+      ],
+      "checks": [
+        "Check generated source for FEM materials/entities and IPC coupler options when deformable generation is enabled.",
+        "Check metrics and video for visible deformation such as wobble, compression, bending, collapse, or spread."
+      ],
+      "dispatch_hints": [
+        "Send to body/action when a soft-body task is being implemented.",
+        "Send to critic when rejecting rigid-only or visually faked soft-body results.",
+        "Send to opt when material or contact parameters are tunable but the source already contains real FEM hooks."
+      ],
+      "provenance": {
+        "prompt_files": [
+          "code_agent/prompts/critic.py",
+          "code_agent/prompts/worker.py",
+          "code_agent/prompts/planner.py"
+        ],
+        "symbols": [
+          "DEFORMABLE_CRITIC_GUIDE",
+          "FEM_IPC_API_GUIDE",
+          "planner_fem_ipc_capability_section"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/restriction_cards/physics_validity/deformable_fem_ipc_scope_restriction.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "fem_ipc_initial_geometry_restriction",
+      "kind": "restriction",
+      "title": "FEM+IPC scenes need one support surface and conservative positive clearances",
+      "summary": "FEM+IPC initialization should avoid duplicate IPC support planes, coincident contact surfaces, and rotated primitive placements that rely on under-estimated extents.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "critic"
+      ],
+      "physics_modes": [
+        "fem_ipc"
+      ],
+      "task_tags": [
+        "fem",
+        "ipc",
+        "initial_geometry",
+        "clearance",
+        "ground",
+        "support",
+        "rotated_box",
+        "tet_resolution"
+      ],
+      "failure_tags": [
+        "duplicate_ipc_plane",
+        "coincident_plane",
+        "initial_interpenetration",
+        "rotated_extent_underestimated",
+        "world_is_not_valid"
+      ],
+      "restrictions": [
+        "Use exactly one IPC ground/support surface for the same contact region.",
+        "If scene.py creates a floor, store it as scene.genesis_static_floor; body.py should reference that entity in actors instead of adding another coincident plane.",
+        "Duplicate overlapping IPC planes are invalid initial geometry.",
+        "Place FEM primitives with strictly positive initial clearance.",
+        "For rotated boxes, compute a conservative half extent such as 0.5 * side * sqrt(3) and stack centers with a positive gap; do not rely on unrotated side/2 when the body has nonzero Euler rotation.",
+        "For primitive soft bodies, use tet_resolution from deformable_cfg."
+      ],
+      "dispatch_hints": [
+        "Send to scene/body when FEM+IPC bodies or support surfaces are created.",
+        "Send to critic when diagnosing initial penetration, World-is-not-valid, or duplicate support geometry."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/worker.py",
+        "symbols": [
+          "FEM_IPC_API_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/restriction_cards/physics_validity/fem_ipc_initial_geometry_restriction.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "physical_causality_restriction",
+      "kind": "restriction",
+      "title": "Task object motion must come from modeled physics or explicit controls",
+      "summary": "After initialization, passive task objects should move because of dynamics, contact, joints, actuators, or requested physical effects, not because generated code writes them toward the goal.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "action",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "passive",
+        "object",
+        "contact",
+        "manipulation",
+        "robot",
+        "mechanism",
+        "gravity",
+        "friction",
+        "joint",
+        "actuator",
+        "force"
+      ],
+      "failure_tags": [
+        "direct_pose_write",
+        "direct_qpos_write",
+        "direct_qvel_write",
+        "teleport",
+        "hidden_constraint",
+        "proxy_force",
+        "object_following",
+        "goal_pose"
+      ],
+      "restrictions": [
+        "Do not move passive task objects after initialization with pose, qpos, qvel, velocity, or root-state writes.",
+        "Do not add hidden constraints, target-following proxy forces, or outcome-directed external forces to make an object succeed.",
+        "Direct state writes such as setting root pose, qpos, entity pose, DOF position, or velocity are acceptable for initialization only; after stepping begins, movement should be driven by actuator commands, DOF controllers, motors, external forces/torques, or pre-step initial velocities.",
+        "External forces are allowed only when they are part of the requested scene physics or a clearly modeled mechanism such as wind, thrust, magnetism, springs, launch impulse, or actuator force.",
+        "Allowed external forces must be applied to the physically appropriate body, recorded in metrics, and must not directly encode the desired task outcome.",
+        "If attachment-like behavior is needed, model it through geometry, joints, contacts, actuator force, or an explicitly requested physical mechanism.",
+        "If the current assets cannot express the physical mechanism, route repair to the owning source instead of hiding the gap.",
+        "For XML/MJCF articulated assets, repairs should preserve the designed actuator/DOF control path or request a body/asset contract fix that exposes a controllable joint; do not recommend mid-simulation pose teleportation as a repair."
+      ],
+      "checks": [
+        "Search generated action/body code for post-build direct state writes to passive task objects.",
+        "Compare numeric success with visual/source evidence; reject success if object-following assistance is the main cause.",
+        "Identify which entities are controlled, which entities are passive task objects, and which APIs modify them during simulation."
+      ],
+      "dispatch_hints": [
+        "Send to action when controls or schedules may directly write task objects.",
+        "Send to critic and opt whenever a numeric objective could be satisfied by a non-physical shortcut."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/common.py",
+        "symbols": [
+          "PHYSICAL_CAUSALITY_CONTRACT",
+          "PHYSICAL_CAUSALITY_CRITIC_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/restriction_cards/physics_validity/physical_causality_restriction.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "scale_policy_restriction",
+      "kind": "restriction",
+      "title": "Use real dimensions or uniform scale instead of hidden non-uniform stretching",
+      "summary": "Generated assets and primitives should normally express shape through dimensions, geometry, XML geom sizes, or regenerated assets, not unequal per-axis scale values.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "rendering",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "scale",
+        "mesh",
+        "primitive",
+        "xml",
+        "asset",
+        "bbox",
+        "dimension",
+        "long",
+        "flat",
+        "thin",
+        "thick"
+      ],
+      "failure_tags": [
+        "non_uniform_scale",
+        "anisotropic_scale",
+        "stretched_mesh",
+        "wrong_bbox",
+        "scale_tuple"
+      ],
+      "restrictions": [
+        "Do not use unequal per-axis scale values unless the task explicitly requests an exceptional anisotropic scaling operation.",
+        "Use primitive dimensions, generated-asset geometry, XML geom sizes, or a regenerated asset to express elongated or flattened shapes.",
+        "Use uniform scalar scale for unit conversion, global sizing, and layout fitting."
+      ],
+      "checks": [
+        "Search planner outputs and generated source for scale=(sx, sy, sz) with unequal positive components.",
+        "If non-uniform scale is truly needed, require the plan or worker report to document the reason."
+      ],
+      "dispatch_hints": [
+        "Send to planner for asset_requests and metadata updates.",
+        "Send to body/rendering when workers instantiate meshes or XML assets."
+      ],
+      "provenance": {
+        "prompt_file": "code_agent/prompts/common.py",
+        "symbols": [
+          "SCALE_POLICY_GUIDE"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/restriction_cards/physics_validity/scale_policy_restriction.yaml"
+    }
+  ]
+}

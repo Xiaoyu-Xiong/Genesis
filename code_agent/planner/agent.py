@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from code_agent.context.simdebug import format_simdebug_cards_for_prompt, select_simdebug_cards
 from code_agent.configs import CONFIGS
-from code_agent.io_utils import load_json_object
+from code_agent.io_utils import dump_json, load_json_object
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
 from code_agent.prompts.planner import (
     PLANNER_ACTION_POLICY_GUIDE,
@@ -25,7 +26,7 @@ class EpisodePlanner:
         result = run_codex_exec(
             CodexExecRequest(
                 role=f"planner_turn_{turn:03d}",
-                prompt=self._planner_prompt(),
+                prompt=self._planner_prompt(turn=turn),
                 cwd=DEFAULT_REPO_ROOT,
                 sandbox=CONFIGS.codex.planner_sandbox,
                 model=CONFIGS.codex.planner_model,
@@ -97,7 +98,7 @@ class EpisodePlanner:
             }
         return payload
 
-    def _planner_prompt(self) -> str:
+    def _planner_prompt(self, *, turn: int | None = None) -> str:
         sim_dt = CONFIGS.runtime.sim_dt
         sim_substeps = CONFIGS.runtime.sim_substeps
         render_every_n_steps = CONFIGS.runtime.render_every_n_steps
@@ -106,9 +107,11 @@ class EpisodePlanner:
         deformable_enabled = self.session.config.deformable_enabled
         ipc_enabled = self.session.config.ipc_enabled
         deformable_config_text = json.dumps(self.session.deformable_config, indent=2)
-        state_text = json.dumps(self._prompt_state(), indent=2)
+        prompt_state = self._prompt_state()
+        state_text = json.dumps(prompt_state, indent=2)
         genesis_context = self.session.genesis_context_prompt()
         layout_context = self.session.layout_context_prompt()
+        simdebug_context = self._simdebug_context_prompt(prompt_state, turn=turn)
         capability_section = planner_fem_ipc_capability_section(
             deformable_enabled=deformable_enabled,
             ipc_enabled=ipc_enabled,
@@ -139,12 +142,46 @@ class EpisodePlanner:
                     else ""
                 ),
                 f"Genesis documentation and local-code context:\n{genesis_context}",
+                simdebug_context,
                 capability_section,
                 actions_section,
                 PLANNER_ACTION_POLICY_GUIDE,
                 f"Current episode state:\n{state_text}",
             ]
         ).strip()
+
+    def _simdebug_context_prompt(self, prompt_state: dict[str, Any], *, turn: int | None = None) -> str:
+        selection = select_simdebug_cards(
+            {
+                "task": self.session.config.task,
+                "case_id": self.session.config.case_id,
+                "turn": turn,
+                "deformable_enabled": self.session.config.deformable_enabled,
+                "ipc_enabled": self.session.config.ipc_enabled,
+                "deformable_config": self.session.deformable_config,
+                "planner_state": prompt_state,
+            },
+            target_role="planner",
+        )
+        audit = {
+            "schema_version": 1,
+            "turn": turn,
+            "case_id": self.session.config.case_id,
+            "selection": selection,
+        }
+        self.session.state["simdebug"] = {
+            "latest_turn": turn,
+            "latest_target_role": selection.get("target_role"),
+            "latest_selected_card_ids": [
+                item.get("id")
+                for item in selection.get("selected_cards", [])
+                if isinstance(item, dict) and item.get("id")
+            ],
+            "latest_dispatch_path": str(self.session.reports_dir / "simdebug_card_dispatch.json"),
+        }
+        dump_json(self.session.json_safe(audit), self.session.reports_dir / "simdebug_card_dispatch.json")
+        self.session.append_jsonl(self.session.reports_dir / "simdebug_card_dispatch.jsonl", audit)
+        return format_simdebug_cards_for_prompt(selection)
 
     def _prompt_state(self) -> dict[str, Any]:
         state = dict(self.session.state)
