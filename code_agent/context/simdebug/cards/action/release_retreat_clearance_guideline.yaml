@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "id": "release_retreat_clearance_guideline",
+  "title": "Release before retreat and prove the object no longer follows the robot",
+  "summary": "Placement and handoff controllers should separate release, support-transfer, vertical clearance, lateral retreat, and post-release observation so the robot does not drag or secretly support the passive task object.",
+  "scopes": ["planner", "action", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "release",
+    "retreat",
+    "clearance",
+    "gripper",
+    "placement",
+    "handoff",
+    "stack",
+    "balance",
+    "support_transfer",
+    "post_release"
+  ],
+  "failure_tags": [
+    "premature_retreat",
+    "object_followed_gripper",
+    "robot_supporting_at_end",
+    "release_time_missing",
+    "clearance_not_measured",
+    "post_release_instability",
+    "dragged_payload",
+    "hidden_support"
+  ],
+  "guidance": [
+    "Use explicit phases for carry or placement tasks: approach, seat or align, open or release, hold still while support transfers, lift vertically to clearance, retreat laterally, then observe the passive object without contact.",
+    "After opening a gripper or removing a support blade, keep the robot nearly still long enough to verify that the object remains on the intended passive support rather than following the end effector.",
+    "Prefer vertical clearance before lateral retreat for delicate stacks, cards, arches, trays, cups, and final blocks; lateral motion while still close is a common source of dragging.",
+    "Record event-log timestamps and metrics for release_time, support_transfer_time, first_stable_clearance_step, robot_clear_time, minimum gripper-object distance after release, and object displacement after release.",
+    "If the remaining failure is close and physically plausible, expose release dwell, lift distance, lift speed, lateral retreat speed, and gripper opening target as Opt parameters."
+  ],
+  "restrictions": [
+    "Do not count a task as successful while the robot, blade, gripper, or hidden constraint is still supporting the object that should be passive.",
+    "Do not begin lateral retreat before release and vertical clearance evidence exists for tasks where small contact forces can topple, drag, or displace the object.",
+    "Do not directly move the passive task object to hide a late or failed release."
+  ],
+  "checks": [
+    "Check whether release_time, support_clear_time, robot_clear_time, and first_stable_clearance_step are non-null and ordered correctly.",
+    "Check visual evidence that the robot is separated from the object during the final observation window.",
+    "Check whether object_followed_gripper, robot_supporting_at_end, top_card_displacement_after_release, final_block_displacement, or similar metrics reveal dragging.",
+    "Check that post-release success is judged after the robot has retreated, not during the placement contact itself."
+  ],
+  "dispatch_hints": [
+    "Send to action for grasp, placement, block/card/arch/stack balance, cup placement, handoff, and delicate release tasks.",
+    "Send to opt when the scene is structurally correct but release dwell, clearance, or retreat timing needs tuning.",
+    "Send to critic when deciding whether a rendered placement is really passive after release."
+  ],
+  "provenance": {
+    "source": "workspace_failure_survey",
+    "examples": [
+      "card_house_last_panel_balance_rigid",
+      "cantilever_block_stack_balance_rigid",
+      "block_arch_keystone_balance_rigid"
+    ],
+    "motivation": "Several precise-control runs failed because the robot retreated before stable release, dragging the final object or leaving it robot-supported."
+  }
+}

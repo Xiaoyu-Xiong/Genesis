@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "xml_asset_request_contract_guideline",
+  "title": "XML/MJCF asset requests should describe mechanism affordances and preserve actuator contracts",
+  "summary": "Planner should request XML/MJCF assets for articulated mechanisms with explicit joints, actuators, base behavior, dimensions, and downstream body/action contracts.",
+  "scopes": ["planner", "body", "action", "critic"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "xml",
+    "mjcf",
+    "urdf",
+    "articulated",
+    "robot",
+    "gripper",
+    "gate",
+    "latch",
+    "actuator",
+    "joint",
+    "asset_request"
+  ],
+  "failure_tags": [
+    "missing_actuator_contract",
+    "missing_joint_names",
+    "wrong_asset_type",
+    "decorative_xml_misuse",
+    "root_pose_motion",
+    "underspecified_mechanism",
+    "dummy_mount_interference",
+    "hidden_mount_obstacle"
+  ],
+  "guidance": [
+    "For articulated robots, grippers, gates, latches, actuated mechanisms, or any task object best represented as one self-contained MJCF body tree with joints and actuators, add an XML/MJCF asset request with asset_type generated_xml or mjcf.",
+    "Describe the required joints, actuator semantics, base behavior, approximate dimensions, and control affordances in purpose/simulation_role.",
+    "XML/MJCF assets may use primitive geoms or generated case-workspace mesh files, but must never reference Genesis built-in meshes, external mesh downloads, hfields, or texture files.",
+    "Do not use XML/MJCF only for textured decorative mesh objects.",
+    "When the plan uses XML/MJCF actuators, make body/action contracts explicit: body must expose stable actuator names, joint names, DOF groups, or control handles in actors, and action must drive those handles with Genesis actuator/DOF/force control APIs after initialization.",
+    "For fixed-base IPC/external_articulation mechanisms, explicitly distinguish active task-contact geoms from bookkeeping mount/base geoms in the XML asset request.",
+    "If a dummy mount/base geom is needed so IPC treats the articulation as well-formed, request it as tiny, named, reported, and far outside the active interaction volume with positive initial clearance from all task objects. It should use the smallest practical nonzero size that satisfies importer/IPC bookkeeping, and it should not sit in a roller gap, gripper cage, containment opening, slot, chute, support path, object trajectory, or exit path.",
+    "For roller, spool, paddle, press, or gripper mechanisms, do not allow a single mount at one end of the active contact span. Put mounts outside the swept/contact region, make them symmetric if they are physical, or make them remote bookkeeping-only geoms that cannot affect task contact.",
+    "For deformable squeeze or transport mechanisms, assume the soft body can bulge sideways and along the roller/tool axis; mount/base geoms must be outside that expanded bbox and must have positive initial clearance.",
+    "Do not ask action to create motion for an XML articulated asset by overwriting root pose, qpos, or velocities during simulation.",
+    "If the actuator contract is missing, generated code should fail clearly so critic can assign a source-aware body/action repair."
+  ],
+  "checks": [
+    "Inspect generated XML for mount/base geoms near active contact paths; route to XML asset regeneration if they can collide with, guide, block, wedge, or deflect task objects.",
+    "Check that active tool surfaces keep collision enabled while dummy mount/base geoms are far from task objects and cannot become hidden obstacles.",
+    "Check that XML asset reports identify dummy mounts separately from active contact geoms and state their pose, minimal nonzero size, initial-clearance margin, and safety rationale."
+  ],
+  "dispatch_hints": [
+    "Send to planner when creating or rewriting XML/MJCF asset requests.",
+    "Send to body/action when generated XML actuators need stable runtime handles and physical control paths.",
+    "Send to critic when mechanism failure may be caused by underspecified asset affordances."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/planner.py",
+    "symbols": ["planner_available_actions_section"]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "opt_metric_and_objective_design_guideline",
+  "title": "Opt metrics and objectives must be observable, shaped, and task-faithful",
+  "summary": "Optimization should expose measurable simulation residuals and explicit success criteria instead of optimizing target copies, binary-only pass flags, or custom target transforms.",
+  "scopes": ["planner", "opt", "critic"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "opt",
+    "optimization",
+    "metrics",
+    "objective",
+    "success_criteria",
+    "distance",
+    "velocity",
+    "timing",
+    "contact",
+    "pose",
+    "joint",
+    "stability"
+  ],
+  "failure_tags": [
+    "missing_metrics",
+    "target_copy_metric",
+    "binary_only_objective",
+    "custom_transform",
+    "score_improvement_only",
+    "missing_success_criteria"
+  ],
+  "guidance": [
+    "If Opt adds metrics, make them observable quantities from simulation state, not values copied from the target.",
+    "Define shaped objective terms whenever possible: distance-to-target, velocity error, event timing, contact count, closest approach, pose/joint error, stability margin, or task-object retention.",
+    "Keep binary pass/fail as success_criteria, not as the only optimization signal.",
+    "Always define explicit success_criteria. Score improvement alone is not task success.",
+    "Do not use transform=\"custom\" in target_spec.json. If a custom score is needed, compute that scalar inside generated case metrics and reference it with transform=\"identity\"."
+  ],
+  "dispatch_hints": [
+    "Send to Opt when target_spec.json or metrics need to be created or repaired.",
+    "Send to Critic when checking whether an Opt result is real task success rather than numeric score movement."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/opt.py",
+    "symbols": ["build_opt_prompt"]
+  }
+}

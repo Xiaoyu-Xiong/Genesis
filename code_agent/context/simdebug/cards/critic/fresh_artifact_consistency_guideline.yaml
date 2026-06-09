@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "id": "fresh_artifact_consistency_guideline",
+  "title": "Critic evidence must come from the latest completed execution",
+  "summary": "Planner and Critic should reject stale metrics, videos, render stats, and summaries left from earlier runs when the latest execution failed, timed out, or produced only partial artifacts.",
+  "scopes": ["planner", "critic", "rendering", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "artifact",
+    "critic",
+    "execution_report",
+    "metrics",
+    "render_stats",
+    "video",
+    "summary",
+    "rerun",
+    "timeout"
+  ],
+  "failure_tags": [
+    "stale_artifacts",
+    "latest_execution_failed",
+    "timeout_with_old_video",
+    "missing_current_render",
+    "partial_frames",
+    "summary_mismatch",
+    "render_stats_mismatch",
+    "inconsistent_evidence"
+  ],
+  "guidance": [
+    "Treat execution_report.json as the source of truth for the latest run status, start time, exit code, timeout flag, and workspace directory.",
+    "Use metrics.json, event_log.json, run_result.json, summary.json, render_stats.json, frames, and render.mp4 only if they were produced by the latest completed execution.",
+    "Before rerunning a failed or repaired case, clean or clearly version output artifacts so Critic cannot confuse stale successful artifacts with current failed execution.",
+    "When the latest execution times out or exits nonzero, require a clean successful rerun before accepting task success even if old video or metrics files still exist.",
+    "If artifacts are partial, report the missing current evidence and route repair to execution/integration/rendering/action/body according to the current failure rather than judging stale behavior."
+  ],
+  "restrictions": [
+    "Do not pass an episode using metrics, render_stats, frames, or video whose timestamps or run identifiers predate the latest execution_report started_at time.",
+    "Do not use stale completed video to mask a later timeout, nonzero exit, or source repair that never finished.",
+    "Do not let a success flag in an old summary override a current execution failure."
+  ],
+  "checks": [
+    "Check execution_report.status, exit_code, timed_out, started_at_unix, and duration_sec before inspecting semantic success.",
+    "Check artifact timestamps, run identifiers, frame counts, render_stats frame totals, and video presence against the latest execution.",
+    "Check whether current frames cover the requested duration and whether render.mp4 exists for the latest run.",
+    "Check whether summary/run_result success agrees with the latest metrics and execution status."
+  ],
+  "dispatch_hints": [
+    "Send to critic whenever execution failed or timed out but metrics/video artifacts are still present.",
+    "Send to planner when a repair should rerun from a clean artifact directory or invalidate stale evidence.",
+    "Send to rendering when video/render_stats/frame evidence is incomplete or inconsistent after execution."
+  ],
+  "provenance": {
+    "source": "workspace_failure_survey",
+    "examples": [
+      "anchor_chain_windup",
+      "soft_gasket_seal_line_rebound_deformable",
+      "soft_midspan_strip_height_line_deformable"
+    ],
+    "motivation": "Several cases retained old metrics or videos after later failed executions, making Critic evidence inconsistent with the latest run."
+  }
+}

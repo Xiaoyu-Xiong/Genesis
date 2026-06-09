@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "rigid_ipc_coupling_guideline",
+  "title": "Choose rigid IPC coupling mode from the physical role",
+  "summary": "Rigid IPC scenes should choose ipc_only, two_way_soft_constraint, or external_articulation based on whether IPC, Genesis controls, or articulated DOFs own the motion.",
+  "scopes": ["planner", "body", "action", "critic", "opt"],
+  "physics_modes": ["rigid_ipc", "fem_ipc"],
+  "task_tags": [
+    "ipc",
+    "rigid",
+    "coupling",
+    "contact",
+    "articulated",
+    "robot",
+    "gripper",
+    "mechanism",
+    "passive",
+    "chain",
+    "anchor",
+    "payload",
+    "ipc_only",
+    "two_way_soft_constraint",
+    "external_articulation"
+  ],
+  "failure_tags": [
+    "wrong_coup_type",
+    "mixed_ipc_only_two_way",
+    "passive_pose_write",
+    "delegated_contact_missing",
+    "sudden_ejection",
+    "inconsistent_state"
+  ],
+  "guidance": [
+    "Use ipc_only for passive free rigid props whose motion should mainly come from IPC gravity/contact.",
+    "Use two_way_soft_constraint for Genesis-driven bodies or selected robot links that need IPC contact while keeping Genesis controls.",
+    "For two_way_soft_constraint, constraint_strength_translation and constraint_strength_rotation tune how tightly IPC tracks Genesis: higher is stiffer and less laggy, lower is softer and usually more forgiving.",
+    "Use external_articulation for fixed-base MJCF/URDF mechanisms whose joints should participate in IPC contact.",
+    "When ipc_enable_rigid_rigid_contact / enable_rigid_rigid_contact is true for a heavy rigid-contact scene, treat the scene as pure IPC rigid-rigid contact: use ipc_only for passive rigid bodies and external_articulation for actively driven articulated bodies that contact IPC-owned rigid bodies.",
+    "In heavy rigid-rigid IPC contact scenes, do not create rigid bodies with two_way_soft_constraint unless there is a specific non-heavy-contact reason to do so.",
+    "Use coup_links only for two_way_soft_constraint, and use it to couple just the contacting links such as gripper fingers rather than putting an entire robot into IPC.",
+    "Choose explicit coupling modes when contact behavior depends on the choice; do not rely on auto-selection for important objects."
+  ],
+  "restrictions": [
+    "Do not pose-write, velocity-write, force-drive, hidden-weld, or directly attach passive ipc_only payloads after initialization.",
+    "Do not rely on Genesis rigid contact as a fallback for ipc_only objects.",
+    "Avoid mixing two_way_soft_constraint and ipc_only in heavy interlocking contact because soft transform constraints and Genesis/IPC synchronization can create inconsistent states, sudden ejection, or crashes.",
+    "Do not use ipc_only for articulated objects; use external_articulation or selected two_way_soft_constraint links depending on the physical role."
+  ],
+  "dispatch_hints": [
+    "Send to body when assigning material coupling modes.",
+    "Send to action when an actuator-driven mechanism contacts IPC-owned objects.",
+    "Send to critic when contact ownership or state synchronization looks inconsistent."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/ipc.py",
+    "symbols": ["RIGID_IPC_COUPLING_GUIDE"]
+  }
+}

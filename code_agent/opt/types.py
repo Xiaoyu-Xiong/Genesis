@@ -41,6 +41,7 @@ class OptAgentRequest:
     render_fps: int | None = None
     target_video_frames: int | None = None
     success_criteria: tuple[str, ...] = ()
+    simdebug_card_context: str = ""
 
 
 @dataclass(slots=True)

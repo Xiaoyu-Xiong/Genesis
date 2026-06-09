@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "controller_schedule_guideline",
+  "title": "Action schedules should stage approach, contact, hold, release, and settle phases",
+  "summary": "Generated action code should use physically plausible staged controls with bounded gains and forces instead of abrupt jumps, teleports, or one-step outcome forcing.",
+  "scopes": ["planner", "action", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "controller",
+    "schedule",
+    "actuator",
+    "grasp",
+    "push",
+    "press",
+    "release",
+    "timing",
+    "force",
+    "gain"
+  ],
+  "failure_tags": [
+    "abrupt_motion",
+    "object_ejection",
+    "missed_timing",
+    "overstrong_controller",
+    "teleport_control",
+    "no_settle_phase"
+  ],
+  "guidance": [
+    "For manipulation tasks, prefer explicit phases such as approach, pre-contact alignment, contact/closure, hold/transport, release, and settle.",
+    "Use smooth ramps or bounded target updates for position, velocity, or force controls instead of instant large target jumps.",
+    "Record phase transitions, commanded targets, and key actuator values in event logs or metrics.",
+    "When contact is delicate, tune controller gains and force limits conservatively before using Opt.",
+    "If the mechanism is XML/MJCF articulated, preserve the actuator/DOF control path exposed by body.py."
+  ],
+  "restrictions": [
+    "Do not move passive task objects directly to compensate for poor controller timing.",
+    "Do not use hidden attachments, suction, or artificial object-following forces unless explicitly requested by the task.",
+    "Do not hide an unstable schedule by ending the video before the result can fail."
+  ],
+  "checks": [
+    "Check that task-object motion follows from actuator, contact, or force interaction rather than direct object state writes.",
+    "Check that final metrics include enough timing evidence to repair early or late contact, release, or settling failures."
+  ],
+  "dispatch_hints": [
+    "Send to action for grasping, pushing, pressing, releasing, catching, balancing, or robot-control tasks.",
+    "Send to opt when remaining failure looks like timing, gain, target, or force-limit tuning.",
+    "Send to critic when evaluating whether the control method is physically plausible."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Add reusable staged-control experience for action worker and Opt/Critic review."
+  }
+}

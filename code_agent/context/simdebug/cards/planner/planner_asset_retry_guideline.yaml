@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "planner_asset_retry_guideline",
+  "title": "Planner asset retries should rewrite the owning asset request, not patch around bad assets",
+  "summary": "Planner should distinguish intrinsic generated-asset defects from metadata-only issues and route retries through the correct mesh/XML asset action with a complete revised planner_output.",
+  "scopes": ["planner", "critic", "body", "action", "rendering"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "asset_retry",
+    "generated_mesh",
+    "generated_xml",
+    "meshy",
+    "xml",
+    "mjcf",
+    "asset_manifest",
+    "metadata",
+    "planner_output"
+  ],
+  "failure_tags": [
+    "mesh_prompt_too_long",
+    "failed_manifold_validation",
+    "failed_fem_import",
+    "missing_texture",
+    "wrong_generated_topology",
+    "wrong_bbox_metadata",
+    "underspecified_xml",
+    "asset_intrinsic_defect"
+  ],
+  "guidance": [
+    "Meshy mesh generation accepts at most 800 characters in the final mesh-agent prompt; keep each generated_mesh request concise enough for the assembled prompt.",
+    "When mesh feedback requires a different prompt, rewrite the affected asset request into a concise integrated description instead of appending repair text.",
+    "Put the revised complete planner_output directly on the start_mesh_assets action that retries generation; action rationale, notes, and repair_brief are not sent to the mesh agent.",
+    "Mesh asset generation owns mesh validity. If manifold validation, texture transfer, Genesis FEM import validation, or generated topology fails, regenerate through the mesh asset action.",
+    "Do not ask body/scene/action/rendering workers to rewrite, procedurally repair, reshape, retopologize, or approximate mesh-intrinsic defects.",
+    "If a ready generated mesh has acceptable geometry but wrong runtime scale/bbox metadata, use update_mesh_asset_metadata with a complete revised planner_output rather than retrying mesh generation.",
+    "For XML/MJCF asset feedback, rewrite the affected XML asset request in a revised complete planner_output and put it directly on start_xml_assets; do not rely on rationale, notes, or repair_brief to reach the XML asset worker."
+  ],
+  "dispatch_hints": [
+    "Send to planner when generated mesh/XML asset reports or inspections show defects.",
+    "Send to critic when deciding whether a failure belongs to Planner-owned asset regeneration or local body/action repair."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/planner.py",
+    "symbols": ["planner_available_actions_section", "PLANNER_ACTION_POLICY_GUIDE"]
+  }
+}

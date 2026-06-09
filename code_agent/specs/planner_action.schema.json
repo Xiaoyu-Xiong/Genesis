@@ -19,7 +19,8 @@
     "pytest_args",
     "verdict",
     "summary",
-    "notes"
+    "notes",
+    "simdebug_cards"
   ],
   "properties": {
     "action": {
@@ -200,7 +201,36 @@
     "pytest_args": { "type": ["array", "null"], "items": { "type": "string" } },
     "verdict": { "type": ["string", "null"], "enum": ["pass", "fail", "inconclusive", null] },
     "summary": { "type": ["string", "null"] },
-    "notes": { "type": ["array", "null"], "items": { "type": "string" } }
+    "notes": { "type": ["array", "null"], "items": { "type": "string" } },
+    "simdebug_cards": {
+      "type": ["object", "null"],
+      "description": "Optional Planner-selected SimDebug card ids to dispatch with this action. Use role buckets for downstream agents; omit by using null when default role/physics candidates are sufficient.",
+      "required": [
+        "all",
+        "workers",
+        "all_workers",
+        "planner",
+        "scene",
+        "body",
+        "action",
+        "rendering",
+        "critic",
+        "opt"
+      ],
+      "properties": {
+        "all": { "type": ["array", "null"], "items": { "type": "string" } },
+        "workers": { "type": ["array", "null"], "items": { "type": "string" } },
+        "all_workers": { "type": ["array", "null"], "items": { "type": "string" } },
+        "planner": { "type": ["array", "null"], "items": { "type": "string" } },
+        "scene": { "type": ["array", "null"], "items": { "type": "string" } },
+        "body": { "type": ["array", "null"], "items": { "type": "string" } },
+        "action": { "type": ["array", "null"], "items": { "type": "string" } },
+        "rendering": { "type": ["array", "null"], "items": { "type": "string" } },
+        "critic": { "type": ["array", "null"], "items": { "type": "string" } },
+        "opt": { "type": ["array", "null"], "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false
 }

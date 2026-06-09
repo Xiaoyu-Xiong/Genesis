@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "planner_card_dispatch_guideline",
+  "title": "Planner should dispatch focused SimDebug cards to each downstream role",
+  "summary": "Planner should use the simdebug_cards action field to send every card that is relevant to the current evidence and declared role scope, while avoiding unrelated default card noise.",
+  "scopes": ["planner"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "dispatch",
+    "planner",
+    "simdebug_cards",
+    "role",
+    "repair",
+    "critic",
+    "opt"
+  ],
+  "failure_tags": [
+    "overbroad_card_context",
+    "missing_relevant_card",
+    "wrong_role_card",
+    "stale_guidance"
+  ],
+  "guidance": [
+    "Use simdebug_cards when the current action has clear task- or evidence-specific needs; leave it null only when all role/physics-compatible candidates are useful.",
+    "Before placing a card id under simdebug_cards.<role>, check the candidate card's declared scopes and only assign it to that role when scopes includes that role or all.",
+    "If a card is conceptually useful but its declared scopes do not include the target role, route the evidence through a scoped owner such as planner or critic, or update the card library before relying on it.",
+    "For generated mesh use, dispatch generated_mesh_manifest_usage_guideline, planner_asset_retry_guideline, scale_policy_restriction, and render_visual_evidence_restriction as relevant.",
+    "For XML/MJCF mechanisms, dispatch xml_asset_request_contract_guideline, external_articulation_mjcf_guideline, collision_contact_restriction, physical_causality_restriction, and controller_schedule_guideline, especially when the asset may contain dummy mount/base geoms, collision masks, grippers, rollers, hinges, or other contact tools.",
+    "For FEM+IPC soft bodies, dispatch deformable_fem_ipc_scope_restriction, ipc_fem_material_selection_guideline, fem_ipc_initial_geometry_restriction, fem_state_metrics_guideline, and soft_body_robust_layout_guideline.",
+    "For Opt, dispatch opt_routing_guideline, opt_effective_parameter_restriction, opt_metric_and_objective_design_guideline, opt_search_space_design_guideline, and any physics-specific metric/material cards.",
+    "Update dispatched cards after new evidence appears; repair, critic, and opt calls should not blindly reuse cards chosen before execution."
+  ],
+  "checks": [
+    "Before spawn_workers, check whether each role receives cards matching its actual ownership and each selected card's declared scope.",
+    "Before request_repair, check whether the selected cards reflect the latest failure evidence.",
+    "Before request_repair, check that every simdebug_cards.<role> entry is scoped to that role; Python will filter incompatible cards, but Planner should avoid sending them.",
+    "Before run_opt, check that the selected cards distinguish parameter-limited failures from structural failures."
+  ],
+  "dispatch_hints": [
+    "This card should usually be sent only to Planner."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Teach Planner how to use the new simdebug_cards action field instead of relying only on fallback dispatch."
+  }
+}

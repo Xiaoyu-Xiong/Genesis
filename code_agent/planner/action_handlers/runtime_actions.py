@@ -120,7 +120,7 @@ class RuntimeActionHandler:
         self.session.state["control"]["needs_critic"] = True
         return {"ok": execution.ok, "status": "executed", "execution": self.session.state["execution"]}
 
-    def run_critic(self) -> dict[str, Any]:
+    def run_critic(self, action: dict[str, Any]) -> dict[str, Any]:
         execution = self.session.state.get("execution")
         if not isinstance(execution, dict):
             return {"ok": False, "status": "precondition_failed", "message": "execution report is missing."}
@@ -130,6 +130,13 @@ class RuntimeActionHandler:
             execution_ok=bool(execution.get("ok")),
             require_render=self.session.config.render,
             use_codex_critic=True,
+            simdebug_card_context=self.session.simdebug_card_context_for_role(
+                "critic",
+                turn=self.session.state.get("turn_index"),
+                dispatch_reason="run_critic",
+                requested_card_ids=self.session.simdebug_card_ids_from_action(action, "critic"),
+                extra_state={"execution": execution},
+            ),
         )
         self.session.state["critic"] = critic
         self.session.state["control"]["needs_critic"] = False
@@ -160,6 +167,13 @@ class RuntimeActionHandler:
 
         timing = self.session.current_timing()
         render_flag = action.get("render")
+        simdebug_card_context = self.session.simdebug_card_context_for_role(
+            "opt",
+            turn=self.session.state.get("turn_index"),
+            dispatch_reason="run_opt",
+            requested_card_ids=self.session.simdebug_card_ids_from_action(action, "opt"),
+            extra_state={"planner_action": action, "critic": self.session.state.get("critic")},
+        )
         request = OptAgentRequest(
             case_dir=self.session.case_dir,
             original_prompt=self.session.config.task,
@@ -197,10 +211,12 @@ class RuntimeActionHandler:
             render_fps=timing.render_fps,
             target_video_frames=timing.target_video_frames,
             success_criteria=tuple(self._planner_success_criteria()),
+            simdebug_card_context=simdebug_card_context,
         )
         result = run_opt_agent(request)
         result_payload = asdict(result)
         request_payload = asdict(request)
+        request_payload["simdebug_card_context"] = "<omitted; see reports/simdebug_card_dispatch_opt.json>"
         attempts = int(opt_state.get("attempts") or 0) + 1
         opt_state.update(
             {

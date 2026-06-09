@@ -16,6 +16,7 @@ def evaluate_generated_run(
     execution_ok: bool,
     require_render: bool = True,
     use_codex_critic: bool = True,
+    simdebug_card_context: str = "",
 ) -> dict[str, Any]:
     """Evaluate one generated simulation run and write the merged critic report."""
 
@@ -34,7 +35,14 @@ def evaluate_generated_run(
     visual_report = evaluate_visual_artifacts(run_dir=run_dir, output_path=reports_dir / "visual_evaluation.json")
     artifact_report["visual_report"] = visual_report
     codex_report = (
-        run_codex_critic(run_dir=run_dir, task=task, artifact_report=artifact_report) if use_codex_critic else None
+        run_codex_critic(
+            run_dir=run_dir,
+            task=task,
+            artifact_report=artifact_report,
+            simdebug_card_context=simdebug_card_context,
+        )
+        if use_codex_critic
+        else None
     )
     codex_passed = codex_report is None or codex_report.get("verdict") == "pass"
     critic_infra_status = _critic_infra_status(codex_report)

@@ -479,6 +479,115 @@ class PlannerSession:
         ]
         return "\n\n".join(parts)
 
+    def simdebug_card_context_for_role(
+        self,
+        target_role: str,
+        *,
+        turn: int | None = None,
+        dispatch_reason: str = "",
+        requested_card_ids: tuple[str, ...] | list[str] | None = None,
+        extra_state: dict[str, Any] | None = None,
+    ) -> str:
+        if not self.simdebug_cards_enabled():
+            return ""
+        from code_agent.context.simdebug import format_simdebug_cards_for_prompt, select_simdebug_cards
+
+        role = str(target_role or "planner")
+        case_state: dict[str, Any] = {
+            "task": self.config.task,
+            "case_id": self.config.case_id,
+            "turn": self.state.get("turn_index") if turn is None else turn,
+            "target_role": role,
+            "dispatch_reason": dispatch_reason,
+            "deformable_enabled": self.config.deformable_enabled,
+            "ipc_enabled": self.config.ipc_enabled,
+            "deformable_config": self.deformable_config,
+            "planner_state": self.state,
+        }
+        if extra_state:
+            case_state["dispatch_state"] = extra_state
+        selection = select_simdebug_cards(case_state, target_role=role, requested_card_ids=requested_card_ids)
+        dispatch = {
+            "schema_version": 1,
+            "turn": case_state["turn"],
+            "case_id": self.config.case_id,
+            "target_role": role,
+            "dispatch_reason": dispatch_reason,
+            "requested_card_ids": list(requested_card_ids or ()),
+            "selection": selection,
+        }
+        simdebug_state = self.state.setdefault("simdebug", {})
+        if not isinstance(simdebug_state, dict):
+            simdebug_state = {}
+            self.state["simdebug"] = simdebug_state
+        selected_ids = [
+            item.get("id")
+            for item in selection.get("selected_cards", [])
+            if isinstance(item, dict) and item.get("id")
+        ]
+        latest_by_role = simdebug_state.setdefault("latest_by_role", {})
+        if isinstance(latest_by_role, dict):
+            latest_by_role[role] = {
+                "turn": case_state["turn"],
+                "dispatch_reason": dispatch_reason,
+                "selected_card_ids": selected_ids,
+                "dispatch_path": str(self.reports_dir / f"simdebug_card_dispatch_{role}.json"),
+            }
+        simdebug_state["latest_turn"] = case_state["turn"]
+        simdebug_state["latest_target_role"] = role
+        simdebug_state["latest_selected_card_ids"] = selected_ids
+        simdebug_state["latest_dispatch_path"] = str(self.reports_dir / f"simdebug_card_dispatch_{role}.json")
+        dump_json(self.json_safe(dispatch), self.reports_dir / f"simdebug_card_dispatch_{role}.json")
+        if role == "planner":
+            dump_json(self.json_safe(dispatch), self.reports_dir / "simdebug_card_dispatch.json")
+        self.append_jsonl(self.reports_dir / "simdebug_card_dispatch.jsonl", dispatch)
+        return format_simdebug_cards_for_prompt(selection)
+
+    def simdebug_card_ids_from_action(self, action: dict[str, Any], target_role: str) -> tuple[str, ...] | None:
+        if not self.simdebug_cards_enabled():
+            return None
+        raw = action.get("simdebug_cards")
+        if not isinstance(raw, dict):
+            return None
+
+        role = str(target_role or "").strip().lower().replace("-", "_").replace(" ", "_")
+        worker_roles = {"scene", "body", "action", "rendering"}
+        ordered_ids: list[str] = []
+        saw_explicit_bucket = False
+
+        def add_bucket(key: str) -> None:
+            nonlocal saw_explicit_bucket
+            if key not in raw:
+                return
+            saw_explicit_bucket = True
+            value = raw.get(key)
+            if value is None:
+                return
+            if isinstance(value, str):
+                values = [value]
+            elif isinstance(value, list):
+                values = value
+            else:
+                return
+            for item in values:
+                if not isinstance(item, str):
+                    continue
+                card_id = item.strip()
+                if card_id and card_id not in ordered_ids:
+                    ordered_ids.append(card_id)
+
+        add_bucket("all")
+        if role in worker_roles:
+            add_bucket("workers")
+            add_bucket("all_workers")
+        add_bucket(role)
+        return tuple(ordered_ids) if saw_explicit_bucket else None
+
+    def simdebug_cards_enabled(self) -> bool:
+        from code_agent.prompts import prompt_mode
+
+        return prompt_mode() != "legacy"
+
     def persist_state(self) -> None:
         dump_json(self.json_safe(self.state), self.state_path)
 

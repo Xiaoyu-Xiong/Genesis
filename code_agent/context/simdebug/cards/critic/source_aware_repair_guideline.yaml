@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "source_aware_repair_guideline",
+  "title": "Route repairs to the source owner with concrete evidence",
+  "summary": "Repair advice should name the owner module or Planner asset action, the wrong behavior, the evidence, the likely source cause, and what a convincing fix must change.",
+  "scopes": ["planner", "body", "action", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "repair",
+    "diagnosis",
+    "critic",
+    "owner",
+    "planner",
+    "mesh",
+    "xml",
+    "asset",
+    "source",
+    "evidence"
+  ],
+  "failure_tags": [
+    "vague_repair",
+    "wrong_owner",
+    "structural_failure",
+    "asset_intrinsic_defect",
+    "missing_actuator_affordance",
+    "invalid_mesh",
+    "unsuitable_xml"
+  ],
+  "guidance": [
+    "Compare the original prompt, generated source, execution reports, metrics, event logs, visual output, and module ownership.",
+    "Name the owner module, concrete wrong behavior, evidence proving it, likely source-level cause, and expected fix.",
+    "Avoid vague advice like \"improve the trajectory\" when concrete evidence exists, and do not compress important source-level feedback just to keep the answer short.",
+    "Route mesh-intrinsic defects to Planner asset regeneration rather than asking body/scene/action/rendering to patch geometry.",
+    "Mesh-intrinsic defects include failed manifold checks, Genesis FEM import validation failure, missing/corrupt texture, wrong generated topology, and visual/runtime mesh pairing defects.",
+    "Route XML/MJCF mechanism defects to Planner XML regeneration rather than repeatedly repairing action timing.",
+    "XML/MJCF mechanism defects include missing opposing thumb/fingers, missing useful actuator affordances, wrong joint axes, invalid link hierarchy, and body geometry that cannot perform the requested contact task."
+  ],
+  "dispatch_hints": [
+    "Send to critic for failure classification.",
+    "Send to planner when deciding request_repair versus start_mesh_assets/start_xml_assets.",
+    "Send to body or action repair workers when the latest evidence points to source-level body construction, asset use, mechanism structure, controller timing, or contact semantics.",
+    "Send to opt when Opt returns needs_rewrite and must give owner-specific guidance."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/common.py",
+    "symbols": ["SOURCE_AWARE_REPAIR_GUIDE"]
+  }
+}

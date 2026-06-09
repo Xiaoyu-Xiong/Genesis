@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from code_agent.context.simdebug import build_simdebug_catalog, select_simdebug_cards
+from code_agent.opt.types import OptAgentRequest
 from code_agent.planner.session import PlannerSession, PlannerSessionConfig
+from code_agent.prompts.opt import build_opt_prompt
+from code_agent.writer.dispatcher import WORKERS, _worker_prompt
 
 
 def _selected_ids(selection: dict[str, object]) -> set[str]:
@@ -20,15 +25,26 @@ def test_simdebug_catalog_loads_prompt_derived_cards():
     catalog = build_simdebug_catalog()
 
     assert catalog["library_dir"] == "code_agent/context/simdebug"
-    assert catalog["card_count"] >= 25
+    assert catalog["card_count"] >= 31
     ids = {card["id"] for card in catalog["cards"]}
     assert "ipc_fem_material_selection_guideline" in ids
     assert "physical_causality_restriction" in ids
     assert "opt_metric_and_objective_design_guideline" in ids
     assert "planner_asset_retry_guideline" in ids
     assert "fem_ipc_initial_geometry_restriction" in ids
+    assert "planner_card_dispatch_guideline" in ids
+    assert "rigid_contact_metrics_guideline" in ids
+    assert "controller_schedule_guideline" in ids
+    assert "soft_body_robust_layout_guideline" in ids
+    assert "asset_inspection_decision_guideline" in ids
+    assert "ipc_world_invalid_failure_signature_guideline" in ids
     assert all("provenance" in card for card in catalog["cards"])
-    assert all("/cards/" not in card["source_path"] for card in catalog["cards"])
+    assert all("kind" not in card for card in catalog["cards"])
+    source_paths = [str(card["source_path"]) for card in catalog["cards"]]
+    assert all(path.startswith("code_agent/context/simdebug/cards/") for path in source_paths)
+    assert all("/guideline_cards/" not in path and "/restriction_cards/" not in path for path in source_paths)
+    agent_dirs = {Path(path).parts[4] for path in source_paths}
+    assert agent_dirs == {"planner", "scene", "body", "action", "rendering", "critic", "opt"}
 
 
 def test_simdebug_selector_picks_fem_material_cards_for_soft_ipc_task():
@@ -44,8 +60,11 @@ def test_simdebug_selector_picks_fem_material_cards_for_soft_ipc_task():
     ids = _selected_ids(selection)
     assert "ipc_fem_material_selection_guideline" in ids
     assert "deformable_fem_ipc_scope_restriction" in ids
+    assert "soft_body_robust_layout_guideline" in ids
+    assert "planner_card_dispatch_guideline" in ids
     assert "score" not in selection["selected_cards"][0]
     assert "matched_terms" not in selection["selected_cards"][0]
+    assert "kind" not in selection["selected_cards"][0]
     assert selection["physics_modes"] == ["fem_ipc"]
 
 
@@ -66,6 +85,7 @@ def test_simdebug_selector_exposes_role_and_physics_candidates_for_planner_judgm
 
     ids = _selected_ids(selection)
     assert "ipc_initial_geometry_failure_diagnosis_guideline" in ids
+    assert "ipc_world_invalid_failure_signature_guideline" in ids
     assert "collision_contact_restriction" in ids
     assert selection["selection_policy"] == "all_role_and_physics_compatible_candidates_for_planner_relevance_judgment"
 
@@ -82,6 +102,64 @@ def test_simdebug_selector_does_not_send_fem_only_card_to_rigid_task():
 
     assert "ipc_fem_material_selection_guideline" not in _selected_ids(selection)
     assert selection["physics_modes"] == ["rigid"]
+
+
+def test_simdebug_selector_accepts_legacy_kind_field_without_leaking_it():
+    catalog = {
+        "schema_version": 1,
+        "cards": [
+            {
+                "schema_version": 1,
+                "id": "legacy_collision_card",
+                "kind": "restriction",
+                "title": "Legacy collision card",
+                "summary": "Old catalogs may still carry kind during migration.",
+                "scopes": ["planner", "body"],
+                "physics_modes": ["any"],
+                "restrictions": ["Keep physical collision evidence readable."],
+                "source_path": "code_agent/context/simdebug/restriction_cards/physics_validity/legacy.yaml",
+            }
+        ],
+    }
+
+    selection = select_simdebug_cards(
+        {"task": "rigid contact", "ipc_enabled": False, "deformable_enabled": False},
+        target_role="body",
+        catalog=catalog,
+    )
+
+    assert _selected_ids(selection) == {"legacy_collision_card"}
+    selected = selection["selected_cards"][0]
+    assert "kind" not in selected
+    assert "kind" not in selected["card"]
+
+
+def test_source_aware_repair_card_can_be_dispatched_to_repair_workers():
+    case_state = {
+        "task": "rigid mechanism fails because the body structure and action timing need source-aware repair",
+        "ipc_enabled": False,
+        "deformable_enabled": False,
+    }
+
+    body_selection = select_simdebug_cards(
+        case_state,
+        target_role="body",
+        requested_card_ids=("source_aware_repair_guideline",),
+    )
+    action_selection = select_simdebug_cards(
+        case_state,
+        target_role="action",
+        requested_card_ids=("source_aware_repair_guideline",),
+    )
+    rendering_selection = select_simdebug_cards(
+        case_state,
+        target_role="rendering",
+        requested_card_ids=("source_aware_repair_guideline",),
+    )
+
+    assert "source_aware_repair_guideline" in _selected_ids(body_selection)
+    assert "source_aware_repair_guideline" in _selected_ids(action_selection)
+    assert "source_aware_repair_guideline" not in _selected_ids(rendering_selection)
 
 
 def test_planner_prompt_includes_simdebug_dispatch_and_writes_audit(tmp_path):
@@ -110,6 +188,167 @@ def test_planner_prompt_includes_simdebug_dispatch_and_writes_audit(tmp_path):
     audit = json.loads(audit_path.read_text(encoding="utf-8"))
     ids = _selected_ids(audit["selection"])
     assert "Planner-dispatched human debugging experience cards" in prompt
+    assert "[card] ipc_fem_material_selection_guideline" in prompt
+    assert "[guideline]" not in prompt
+    assert "[restriction]" not in prompt
     assert "ipc_fem_material_selection_guideline" in prompt
     assert "ipc_fem_material_selection_guideline" in ids
     assert session.state["simdebug"]["latest_selected_card_ids"]
+
+
+def test_legacy_prompts_are_preserved_and_active_prompts_are_slimmed():
+    repo_root = Path(__file__).resolve().parents[1]
+    legacy_ipc = repo_root / "code_agent" / "prompts_legacy" / "ipc.py"
+    active_ipc = repo_root / "code_agent" / "prompts" / "ipc.py"
+    from code_agent.prompts_legacy.ipc import FEM_MATERIAL_SELECTION_GUIDE as legacy_fem_material_guide
+
+    assert "1e4` to `5e4" in legacy_ipc.read_text(encoding="utf-8")
+    assert "1e4` to `5e4" not in active_ipc.read_text(encoding="utf-8")
+    assert "Planner-dispatched SimDebug cards" in active_ipc.read_text(encoding="utf-8")
+    assert "1e4` to `5e4" in legacy_fem_material_guide
+
+
+def test_prompt_mode_env_switches_to_legacy_prompts():
+    repo_root = Path(__file__).resolve().parents[1]
+    code = (
+        "from code_agent.prompts.worker import WORKER_COMMON_RULES; "
+        "from code_agent.prompts.planner import PLANNER_GENERAL_RULES; "
+        "print('cards' if 'Planner-dispatched SimDebug cards' in WORKER_COMMON_RULES else 'legacy'); "
+        "print('legacy_scale' if 'Scale policy:' in PLANNER_GENERAL_RULES else 'no_legacy_scale')"
+    )
+
+    active = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    legacy = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**dict(os.environ), "CODE_AGENT_PROMPT_MODE": "legacy"},
+    )
+
+    assert active.stdout.splitlines() == ["cards", "no_legacy_scale"]
+    assert legacy.stdout.splitlines() == ["legacy", "legacy_scale"]
+
+
+def test_legacy_prompt_mode_disables_simdebug_dispatch():
+    repo_root = Path(__file__).resolve().parents[1]
+    code = """
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from code_agent.planner.session import PlannerSession, PlannerSessionConfig
+with TemporaryDirectory() as tmp:
+    s = PlannerSession(PlannerSessionConfig(case_id='case', task='rigid ball rolls', case_dir=Path(tmp) / 'case', backend='gpu', timeout_sec=1.0, render=False, repair_rounds=0))
+    s.reports_dir.mkdir(parents=True, exist_ok=True)
+    s.logs_dir.mkdir(parents=True, exist_ok=True)
+    s.contracts_dir.mkdir(parents=True, exist_ok=True)
+    print(s.simdebug_cards_enabled())
+    print(bool(s.simdebug_card_context_for_role('planner')))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**dict(os.environ), "CODE_AGENT_PROMPT_MODE": "legacy"},
+    )
+
+    assert result.stdout.splitlines() == ["False", "False"]
+
+
+def test_session_dispatches_role_specific_simdebug_cards(tmp_path):
+    session = _simdebug_test_session(tmp_path, deformable_enabled=True, ipc_enabled=True)
+
+    body_context = session.simdebug_card_context_for_role("body", turn=1, dispatch_reason="test_body")
+    opt_context = session.simdebug_card_context_for_role("opt", turn=1, dispatch_reason="test_opt")
+
+    assert "ipc_fem_material_selection_guideline" in body_context
+    assert "opt_effective_parameter_restriction" in opt_context
+    assert (session.reports_dir / "simdebug_card_dispatch_body.json").exists()
+    assert (session.reports_dir / "simdebug_card_dispatch_opt.json").exists()
+    assert session.state["simdebug"]["latest_by_role"]["body"]["selected_card_ids"]
+
+
+def test_session_honors_planner_requested_simdebug_card_ids(tmp_path):
+    session = _simdebug_test_session(tmp_path, deformable_enabled=True, ipc_enabled=True)
+    action = {
+        "simdebug_cards": {
+            "body": ["ipc_fem_material_selection_guideline"],
+            "opt": ["opt_effective_parameter_restriction"],
+        }
+    }
+
+    body_ids = session.simdebug_card_ids_from_action(action, "body")
+    body_context = session.simdebug_card_context_for_role(
+        "body",
+        turn=2,
+        dispatch_reason="test_requested_body",
+        requested_card_ids=body_ids,
+    )
+    audit = json.loads((session.reports_dir / "simdebug_card_dispatch_body.json").read_text(encoding="utf-8"))
+
+    assert body_ids == ("ipc_fem_material_selection_guideline",)
+    assert "ipc_fem_material_selection_guideline" in body_context
+    assert "physical_causality_restriction" not in body_context
+    assert audit["requested_card_ids"] == ["ipc_fem_material_selection_guideline"]
+    assert audit["selection"]["selection_policy"] == (
+        "planner_requested_ids_filtered_by_declared_role_scope_and_active_physics_mode"
+    )
+
+
+def test_worker_and_opt_prompts_receive_planner_dispatched_cards(tmp_path):
+    session = _simdebug_test_session(tmp_path, deformable_enabled=True, ipc_enabled=True)
+    body_context = session.simdebug_card_context_for_role("body", turn=0, dispatch_reason="test_worker_prompt")
+    worker_prompt = _worker_prompt(
+        case_dir=session.case_dir,
+        task=session.config.task,
+        planner_output={"module_contracts": []},
+        asset_manifest={"assets": []},
+        deformable_config=session.deformable_config,
+        genesis_context="Genesis context pointer",
+        spec=WORKERS["body"],
+        repair_context=None,
+        simdebug_card_context=body_context,
+    )
+    assert "Planner-dispatched SimDebug cards for this worker" in worker_prompt
+    assert "ipc_fem_material_selection_guideline" in worker_prompt
+
+    opt_context = session.simdebug_card_context_for_role("opt", turn=0, dispatch_reason="test_opt_prompt")
+    opt_prompt = build_opt_prompt(OptAgentRequest(case_dir=session.case_dir, simdebug_card_context=opt_context))
+    assert "Planner-dispatched SimDebug cards for Opt" in opt_prompt
+    assert "opt_effective_parameter_restriction" in opt_prompt
+    assert '"simdebug_card_context"' not in opt_prompt.split("Planner-dispatched SimDebug cards for Opt:", 1)[0]
+
+
+def _simdebug_test_session(
+    tmp_path,
+    *,
+    deformable_enabled: bool,
+    ipc_enabled: bool,
+) -> PlannerSession:
+    case_dir = tmp_path / "case"
+    session = PlannerSession(
+        PlannerSessionConfig(
+            case_id="soft_case",
+            task="soft FEM IPC column bridge leveling with material friction",
+            case_dir=case_dir,
+            backend="gpu",
+            timeout_sec=1.0,
+            render=False,
+            repair_rounds=0,
+            deformable_enabled=deformable_enabled,
+            ipc_enabled=ipc_enabled,
+        )
+    )
+    session.contracts_dir.mkdir(parents=True)
+    session.reports_dir.mkdir(parents=True)
+    session.logs_dir.mkdir(parents=True)
+    session.write_deformable_config_contract()
+    return session

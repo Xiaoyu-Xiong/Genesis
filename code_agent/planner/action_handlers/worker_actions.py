@@ -40,12 +40,23 @@ class WorkerActionHandler:
         roles = self.roles_from_action(action)
         if not roles:
             return {"ok": False, "status": "invalid_action", "message": "spawn_workers requires at least one role."}
+        simdebug_card_context_by_role = {
+            role: self.session.simdebug_card_context_for_role(
+                role,
+                turn=self.session.state.get("turn_index"),
+                dispatch_reason="spawn_workers",
+                requested_card_ids=self.session.simdebug_card_ids_from_action(action, role),
+                extra_state={"planner_action": action, "roles": list(roles)},
+            )
+            for role in roles
+        }
         results = dispatch_worker_roles(
             case_dir=self.session.case_dir,
             task=self.session.config.task,
             planner_output=planner_output,
             roles=roles,
             repair_context=action.get("repair_brief") if isinstance(action.get("repair_brief"), str) else None,
+            simdebug_card_context_by_role=simdebug_card_context_by_role,
         )
         self.session.record_worker_results(results)
         write_worker_dispatch_report(self.session.case_dir, results)
@@ -76,11 +87,19 @@ class WorkerActionHandler:
         repair_brief = action.get("repair_brief")
         if not isinstance(repair_brief, str) or not repair_brief.strip():
             repair_brief = self.session.failure_context()
+        simdebug_card_context = self.session.simdebug_card_context_for_role(
+            owner,
+            turn=self.session.state.get("turn_index"),
+            dispatch_reason="request_repair",
+            requested_card_ids=self.session.simdebug_card_ids_from_action(action, owner),
+            extra_state={"planner_action": action, "repair_brief": repair_brief},
+        )
         repaired = repair_worker(
             case_dir=self.session.case_dir,
             task=self.session.config.task,
             owner=owner,
             failure_context=repair_brief,
+            simdebug_card_context=simdebug_card_context,
         )
         budgets["repair_attempts"] = int(budgets["repair_attempts"]) + 1
         if repaired is None:

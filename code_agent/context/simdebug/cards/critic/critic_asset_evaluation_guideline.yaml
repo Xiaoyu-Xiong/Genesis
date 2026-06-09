@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "id": "critic_asset_evaluation_guideline",
+  "title": "Evaluate generated assets before blaming only action timing",
+  "summary": "When a task depends on generated mesh or XML morphology, inspect shape, topology, joints, actuator affordances, scale, and orientation before assigning a local body/action repair.",
+  "scopes": ["planner", "critic"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "asset",
+    "mesh",
+    "xml",
+    "mjcf",
+    "urdf",
+    "gripper",
+    "hand",
+    "robot",
+    "mechanism",
+    "morphology",
+    "actuator",
+    "texture"
+  ],
+  "failure_tags": [
+    "unsuitable_asset",
+    "wrong_topology",
+    "missing_joint",
+    "missing_actuator",
+    "wrong_joint_axis",
+    "wrong_scale",
+    "cannot_grasp",
+    "lateral_escape",
+    "invalid_link_hierarchy"
+  ],
+  "guidance": [
+    "Treat generated assets as first-class evidence, not as trusted black boxes. Inspect asset manifests, generated XML/MJCF source, worker reports, preview images, and in-scene contact sheets when the task depends on generated assets.",
+    "Judge whether the asset's shape, topology, joint axes, actuator contract, scale, and visible geometry can plausibly perform the requested task before blaming only action timing.",
+    "For grasping/manipulation, check whether fingers and thumb can form a real opposing cage, whether the payload fits inside that grasp volume, and whether closing the actuators would trap rather than sweep the payload away.",
+    "Set recommended_owner to planner when asset morphology, topology, joints, actuators, scale, orientation, or visible geometry cannot plausibly perform the task.",
+    "If the generated asset is plausible but scene placement, initial clearance, material/coupling, or code-side metadata is wrong, route to body/scene.",
+    "If the asset and placement are plausible but timing, controller, gates, or release sequence are wrong, route to action."
+  ],
+  "dispatch_hints": [
+    "Send to critic whenever mesh/XML assets are central to the requested behavior.",
+    "Send to planner when deciding whether to inspect assets or regenerate asset prompts."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/critic.py",
+    "symbols": ["CRITIC_ASSET_EVALUATION_GUIDE"]
+  }
+}

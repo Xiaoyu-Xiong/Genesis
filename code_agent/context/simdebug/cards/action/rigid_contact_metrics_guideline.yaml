@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "id": "rigid_contact_metrics_guideline",
+  "title": "Rigid and contact tasks need observable contact, pose, and support metrics",
+  "summary": "Rigid, articulated, and rigid-IPC tasks should record task-relevant physical metrics so Critic and Opt can distinguish real contact success from visual coincidence.",
+  "scopes": ["planner", "body", "action", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "rigid",
+    "contact",
+    "metrics",
+    "pose",
+    "support",
+    "containment",
+    "grasp",
+    "stack",
+    "slide",
+    "roll"
+  ],
+  "failure_tags": [
+    "missing_metrics",
+    "visual_only_success",
+    "ghost_contact",
+    "support_loss",
+    "no_contact_evidence",
+    "unobservable_residual"
+  ],
+  "guidance": [
+    "For rigid/contact tasks, metrics should include task object pose, target distance, height, velocity, contact counts, and relevant relative distances.",
+    "For support, stacking, catching, containment, or grasp tasks, record whether the object is supported, contained, or grasped using geometry- or contact-based evidence rather than only final position.",
+    "For articulated mechanisms, record useful joint/DOF state, actuator command summaries, and object-relative end-effector/tool distances.",
+    "For rolling, sliding, or pushing tasks, record displacement, direction error, speed, and whether motion happened through contact with the intended driver.",
+    "Metrics should expose shaped residuals that Opt can use when the case is close but not passing."
+  ],
+  "restrictions": [
+    "Do not treat final visual overlap or final target proximity as sufficient evidence when contact, support, or containment is the requested behavior.",
+    "Do not create metrics by copying target values or expected success labels into runtime output."
+  ],
+  "checks": [
+    "Check that metrics.json contains both final outcome metrics and at least one intermediate/event metric for the main interaction.",
+    "Check that Critic can infer why the object moved, not only where it ended."
+  ],
+  "dispatch_hints": [
+    "Send to body/action when implementing metrics or event logs for rigid/contact tasks.",
+    "Send to critic when a result appears visually plausible but physical contact evidence is weak.",
+    "Send to opt when continuous residuals require measurable objective terms."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Add runtime evidence guidance for rigid/contact tasks beyond migrated prompt text."
+  }
+}

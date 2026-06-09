@@ -91,6 +91,23 @@ def test_builtin_asset_guard_flags_genesis_assets_references():
     assert any("get_assets_dir" in item for item in violations)
     assert any("gs.__file__" in item for item in violations)
 
+    policy_only = builtin_asset_violations(
+        {
+            "forbidden_edits": [
+                "Do not inspect, copy, import, or reference prepackaged assets under genesis/assets.",
+                "Never use gs.utils.get_assets_dir() for generated task geometry.",
+            ],
+            "failure_criteria": [
+                "The robot is implemented using packaged Genesis assets, external downloads, or genesis/assets paths."
+            ],
+            "success_criteria": [
+                "Generated code does not inspect, import, copy, or reference assets under genesis/assets."
+            ],
+        },
+        label="planner_output",
+    )
+    assert policy_only == []
+
 
 def test_run_opt_agent_uses_parseable_payload_even_if_codex_times_out(tmp_path, monkeypatch):
     case_dir = tmp_path / "case"
@@ -1000,6 +1017,7 @@ def _planner_action(
         "verdict": None,
         "summary": None,
         "notes": [],
+        "simdebug_cards": None,
     }
 
 

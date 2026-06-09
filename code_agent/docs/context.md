@@ -33,33 +33,40 @@ The simdebug context layer lives beside the Genesis context pack:
 ```text
 code_agent/context/simdebug/
   catalog.json
-  guideline_cards/
-    assets/
-    ipc/
+  cards/
+    planner/
+    scene/
+    body/
+    action/
+    rendering/
+    critic/
     opt/
-    repair_routing/
-  restriction_cards/
-    assets/
-    evidence/
-    opt/
-    physics_validity/
 ```
 
 Do not add a separate `README.md` under `context/simdebug/`. This file is the documentation entry point for context
 assets.
 
-Simdebug cards store prompt-derived and human-authored simulation debugging experience as structured YAML cards.
+Simdebug cards store prompt-derived and human-authored simulation debugging experience as structured YAML cards. The
+card library uses one unified card type: each card may contain `guidance`, `restrictions`, `checks`, and
+`dispatch_hints` as needed instead of being classified as a guideline card or restriction card.
+
 Planner owns card selection and dispatch: it reads the catalog, selects all cards it judges relevant from the global
 case state, and passes summarized card bundles to writers, Critic, and Opt. Downstream agents should not read the card
 library directly.
 
-Cards are split into:
+Cards under `cards/` are organized by the primary agent owner rather than by topic or guidance/restriction kind:
 
-- `guideline`: diagnostic and repair guidance, such as FEM material selection, IPC failure diagnosis, Opt variable
-  choice, metric design, and repair routing.
-- `restriction`: acceptance guards, such as physical-causality checks, collision/contact requirements, visual-evidence
-  requirements, and invalid Opt shortcut checks.
+- `planner`: planning, dispatch, asset-request, and high-level routing cards.
+- `scene`: layout, scale, initial geometry, and scene-configuration cards.
+- `body`: entity construction, assets, material, collision, XML/MJCF, and coupling cards.
+- `action`: controller, runtime evidence, metric, and physical-causality cards.
+- `rendering`: camera, lighting, background, and visual-evidence cards.
+- `critic`: failure-classification, asset-evaluation, and source-aware repair cards.
+- `opt`: Opt routing, parameter-space, objective, semantic, and XML patch cards.
 
-The first card set should migrate every `code_agent/prompts/` clause that is better represented as a guideline or
-restriction card. Prompts should keep general role, protocol, schema, and edit-boundary instructions; situational
-debugging knowledge should move into cards so it can be selected, audited, ablated, and revised independently.
+The directory name is the card's primary owner for maintainability. The `scopes` field inside each card remains the
+source of truth for every role that Planner may dispatch the card to.
+
+The first card set should migrate every `code_agent/prompts/` clause that is better represented as structured debugging
+experience. Prompts should keep general role, protocol, schema, and edit-boundary instructions; situational debugging
+knowledge should move into cards so it can be selected, audited, ablated, and revised independently.

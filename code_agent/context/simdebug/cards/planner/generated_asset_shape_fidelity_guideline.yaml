@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "id": "generated_asset_shape_fidelity_guideline",
+  "title": "Generated assets must match the requested shape before source-level tuning",
+  "summary": "Planner should verify generated mesh/XML assets for semantic shape, scale, aspect ratio, thickness, texture placement, and complexity before asking body or action workers to tune around them.",
+  "scopes": ["planner", "body", "rendering", "critic"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "generated_asset",
+    "mesh",
+    "xml",
+    "mjcf",
+    "shape",
+    "bbox",
+    "aspect_ratio",
+    "silhouette",
+    "texture",
+    "fem_import"
+  ],
+  "failure_tags": [
+    "generated_mesh_wrong_proportions",
+    "generated_mesh_overcomplex",
+    "wrong_semantic_shape",
+    "too_thin_asset",
+    "thin_spiky_protrusions",
+    "bbox_mismatch",
+    "texture_underrepresented",
+    "unusable_morphology"
+  ],
+  "guidance": [
+    "Use procedural primitives or simple CAD-like geometry for plain boxes, cuboids, cylinders, rods, plates, pads, blocks, cups, gauges, and other simple shapes instead of generating decorative meshes.",
+    "For generated mesh assets, inspect preview images, manifest bbox, aspect ratios, orientation, thickness, semantic silhouette, texture visibility, and mesh complexity before body/action tuning.",
+    "For FEM assets, reject assets that pass manifold or FEM import checks but are too thin, too small, overcomplex, spiky, high-element-count, or semantically unlike the requested object.",
+    "For XML/MJCF mechanisms, inspect whether the generated morphology exposes the required joints, actuators, collision affordances, grasp surfaces, and contact geometry.",
+    "If the asset's intrinsic shape is wrong, revise the Planner asset request and regenerate; if only scale metadata is wrong and the shape is otherwise correct, use metadata update rather than source-level workarounds."
+  ],
+  "restrictions": [
+    "Do not ask body.py to procedurally reshape, non-uniformly scale, or hide an intrinsically wrong generated mesh.",
+    "Do not accept an asset just because manifold validation, FEM import, or XML parsing passed; semantic shape and task affordance must also match.",
+    "Do not use thin spikes, hair-like details, decorative protrusions, or high-complexity surfaces for tasks that need robust FEM contact or simple rigid collision."
+  ],
+  "checks": [
+    "Check requested dimensions against asset_manifest bbox and final runtime scale.",
+    "Check preview/contact-sheet appearance for recognizable semantic shape and requested color or texture markers.",
+    "Check mesh vertex/face/tet counts and whether complexity is appropriate for the task and runtime budget.",
+    "Check whether the failure should route to Planner asset regeneration, metadata update, or local body/action repair."
+  ],
+  "dispatch_hints": [
+    "Send to Planner before start_mesh_assets or start_xml_assets when a task depends on generated morphology.",
+    "Send to Critic when an execution runs but the object shape, thickness, texture, or mechanism affordance does not match the prompt.",
+    "Send to Body/Rendering when using a ready asset so they verify bbox, scale, visual mesh, and runtime mesh before integration."
+  ],
+  "provenance": {
+    "source": "workspace_failure_survey",
+    "examples": [
+      "soft_twist_block_pointer_alignment_deformable",
+      "soft_gasket_seal_line_rebound_deformable",
+      "soft_dragon_obstacle_course",
+      "red_volumetric_ship_toy"
+    ],
+    "motivation": "Workspace failures showed generated assets that were valid files but wrong in proportion, thickness, semantic identity, texture visibility, or complexity."
+  }
+}

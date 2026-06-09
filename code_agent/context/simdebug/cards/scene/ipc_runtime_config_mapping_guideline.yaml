@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "id": "ipc_runtime_config_mapping_guideline",
+  "title": "IPC scene options should map deformable_cfg values exactly and leave adaptive d_hat to the entrypoint",
+  "summary": "Generated IPC scenes should construct IPCCouplerOptions from deformable_cfg with the correct prefix stripping, rigid-contact flags, and adaptive contact distance handling.",
+  "scopes": ["planner", "scene", "body", "critic"],
+  "physics_modes": ["rigid_ipc", "fem_ipc"],
+  "task_tags": [
+    "ipc",
+    "deformable_cfg",
+    "ipccoupleroptions",
+    "contact_d_hat",
+    "adaptive",
+    "rigid_contact",
+    "rigid_soft",
+    "coupling"
+  ],
+  "failure_tags": [
+    "wrong_ipc_option_name",
+    "adaptive_d_hat_passed_to_genesis",
+    "rigid_contact_flag_wrong",
+    "missing_ipc_options",
+    "hardcoded_ipc_default"
+  ],
+  "guidance": [
+    "If deformable_cfg.ipc_enabled is true for a rigid/articulated scene, route contact through IPC by constructing gs.Scene with gs.options.IPCCouplerOptions.",
+    "Map IPC values from deformable_cfg by stripping the ipc_ config prefix before passing Genesis option names, such as ipc_contact_d_hat to contact_d_hat and ipc_constraint_strength_translation to constraint_strength_translation.",
+    "Map supported IPC option families including ipc_newton_*, ipc_n_linesearch_iterations, ipc_linesearch_report_energy, ipc_linear_system_*, ipc_contact_*, ipc_collision_detection_method, ipc_cfl_enable, ipc_sanity_check_enable, ipc_constraint_strength_translation, ipc_constraint_strength_rotation, ipc_enable_rigid_ground_contact, ipc_enable_rigid_rigid_contact, ipc_two_way_coupling, ipc_enable_rigid_dofs_sync, and ipc_free_base_driven_by_ipc.",
+    "Do not pass ipc_contact_d_hat_adaptive to Genesis; it is a code-agent runtime switch and the generated entrypoint resolves it into ipc_contact_d_hat before create_scene.",
+    "When ipc_contact_d_hat_adaptive is true, the entrypoint computes clamp(min(0.2 * median_mesh_edge_or_bbox_feature), 1e-5 * max_bbox_diag, 2e-3 * max_bbox_diag) over generated meshes, user/repo meshes, primitive-derived meshes, collision-enabled XML primitive geoms, direct primitive morphs, bbox-only primitive/XML/URDF manifest entries, and planner_output asset_requests as fallback.",
+    "For rigid IPC scenes, set enable_rigid_rigid_contact from deformable_cfg.ipc_enable_rigid_rigid_contact. Keep it true when rigid bodies should collide with each other through IPC; keep it false when IPC should only handle rigid-soft contact or selected articulated contacts and Genesis's rigid solver should avoid delegated pairs.",
+    "Rigid participants in IPC scenes should use gs.materials.Rigid with appropriate IPC coupling fields such as coup_type and coup_friction; the generic deformable_cfg friction may be used as a rigid coupling fallback when relevant."
+  ],
+  "dispatch_hints": [
+    "Send to scene/body when constructing gs.Scene or materials for IPC-enabled cases.",
+    "Send to critic when diagnosing missing IPC options, wrong rigid-contact flags, or hardcoded IPC defaults."
+  ],
+  "provenance": {
+    "prompt_files": ["code_agent/prompts/worker.py", "code_agent/prompts/planner.py"],
+    "symbols": ["RIGID_API_GUIDE", "FEM_IPC_API_GUIDE", "planner_fem_ipc_capability_section"]
+  }
+}

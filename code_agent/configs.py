@@ -34,8 +34,8 @@ class HarnessConfigs:
     max_parallel_cases: int | None = None
     max_parallel_workers: int | None = None
     max_repair_rounds: int = 12
-    execution_timeout_sec: float = 3000.0
-    command_timeout_sec: float = 300.0
+    execution_timeout_sec: float = 10000.0
+    command_timeout_sec: float = 1000.0
     default_backend: str = "gpu"
 
 
@@ -43,7 +43,7 @@ class HarnessConfigs:
 class OptConfigs:
     """Static defaults for Opt agent requests and low-level numerical optimization."""
 
-    enabled: bool = True
+    enabled: bool = False
     agent_backend: Literal["cpu", "gpu"] = "gpu"
     agent_timeout_sec: float = 2000.0
     agent_render_baseline: bool = True

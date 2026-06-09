@@ -41,7 +41,7 @@ class EpisodeActionExecutor:
             if name == "run_execution":
                 return self.runtime.run_execution(action)
             if name == "run_critic":
-                return self.runtime.run_critic()
+                return self.runtime.run_critic(action)
             if name == "run_opt":
                 return self.runtime.run_opt(action)
             if name == "request_repair":

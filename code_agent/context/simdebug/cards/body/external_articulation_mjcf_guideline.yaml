@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "id": "external_articulation_mjcf_guideline",
+  "title": "External-articulation XML needs fixed-base joints and real collision geoms",
+  "summary": "MJCF/URDF assets coupled through external_articulation should expose fixed-base articulated DOFs, collision geometry on participating links, and actuator-driven motion rather than root teleports.",
+  "scopes": ["planner", "body", "action", "critic"],
+  "physics_modes": ["rigid_ipc", "fem_ipc"],
+  "task_tags": [
+    "mjcf",
+    "urdf",
+    "xml",
+    "external_articulation",
+    "articulated",
+    "fixed_base",
+    "joint",
+    "hinge",
+    "actuator",
+    "gripper",
+    "robot",
+    "spool",
+    "paddle",
+    "press"
+  ],
+  "failure_tags": [
+    "empty_parent_body",
+    "missing_collision_geom",
+    "wrong_joint_axis",
+    "root_teleport",
+    "unsupported_state_write",
+    "overstrong_pd",
+    "invalid_link_hierarchy",
+    "dummy_mount_interference",
+    "hidden_mount_obstacle",
+    "unilateral_mount_collision"
+  ],
+  "guidance": [
+    "Use fixed-base articulations with revolute or prismatic child bodies for driven mechanisms.",
+    "Give every IPC-participating link real nonzero collision geometry, including tiny dummy collision geometry on logical mount parents when needed.",
+    "A dummy parent geom may be a primitive MJCF geom such as type=\"box\", but it must be nonzero-volume collision geometry rather than a site, inertial marker, visual-only marker, zero-area plane, line, or empty body.",
+    "Use dummy mount geometry only as IPC/articulation bookkeeping, not as a physical obstacle, guide, stop, wedge, support, ramp, or collision feature in the requested task.",
+    "When the XML or IPC path needs a nonzero dummy collision geom on a fixed-base parent, make that geom as small as practical while still satisfying the importer/IPC bookkeeping requirement, and place it far outside the main simulation/contact region with positive initial clearance from every task object. The dummy mount should be so small and remote that it cannot affect the scene even if ordinary collision handling includes it.",
+    "Never put a dummy mount inside a task passage, roller gap, gripper cage, containment opening, slot, chute, support path, object trajectory, or exit path. It must not become a hidden stop, wedge, ramp, wall, or unilateral side obstacle.",
+    "For paired mechanisms such as rollers, spools, presses, or paddles, avoid a single mount at one end of the active span. For deformable squeeze/transport tasks, assume the soft body may bulge sideways or along the roller axis; dummy mounts must be far beyond the maximum possible soft-body bbox and outside the swept/contact volume.",
+    "Keep active child/driven contact surfaces collision-enabled with ordinary contact settings, but keep bookkeeping mount/base geoms far away from all task objects and interaction paths.",
+    "Name and report dummy mount/base geoms explicitly, including role, position, size, why the size is minimal, and why they are far enough away to not affect task motion.",
+    "Child/driven geoms such as spools, hinges, paddles, presses, and gripper fingers must have real collision geometry; do not provide only visual geometry for IPC contact participants.",
+    "Set joint axes and pivots from the physical mechanism, not from arbitrary bbox positions.",
+    "Keep XML mesh coordinates aligned with the layout/source mesh coordinates. If a fixed euler correction is required on a geom, validate the resulting initial configuration with an IPC sanity or distance check before stepping.",
+    "Drive motion through actuator/DOF controllers such as control_dofs_position_velocity.",
+    "Cap PD gains and force ranges in heavy IPC contact scenes to avoid per-step jumps that look like penetration.",
+    "For diagnostics, do not trust get_dofs_velocity alone on external articulations whose qpos is recovered from IPC; estimate true angular velocity from step-to-step hinge angle differences when needed."
+  ],
+  "restrictions": [
+    "Do not drive external articulations by post-build root/qpos teleports or repeated set_dofs_velocity writes.",
+    "Do not provide only visual geometry for contact participants.",
+    "Do not let dummy mount geometry intersect or perturb the real contact region even if the dummy is invisible, transparent, tiny, or only intended for IPC bookkeeping.",
+    "Do not use ordinary task-contact settings such as contype=\"1\" conaffinity=\"1\" for dummy mount/base geoms that are close enough to touch task objects.",
+    "Do not use a unilateral base_collision_mount in the roller gap or at a reachable roller end for FEM/IPC squeeze tasks; route that to XML asset repair/regeneration rather than trying to tune action speed or material stiffness."
+  ],
+  "checks": [
+    "Search generated XML for mount/base/dummy/fixed geoms and inspect their position, size, contype, and conaffinity relative to the active contact path.",
+    "Flag XML as an asset defect if a dummy mount/base geom can collide with the object being manipulated, squeezed, transported, contained, or supported.",
+    "Check positive initial clearance from dummy mount/base geoms to all deformables and task-contact bodies, and confirm the mount is far outside the main simulation/contact region.",
+    "For roller or squeeze mechanisms, check that no mount/base collision geom lies near the roller gap, roller end where the soft body can expand, or below-gap exit path.",
+    "If a soft body suddenly shoots sideways near an end mount or central mount, inspect the XML before blaming the controller; hidden mount contact is a likely asset defect."
+  ],
+  "dispatch_hints": [
+    "Send to planner when rewriting XML asset requests.",
+    "Send to body/action when wiring actuator names, DOF handles, and controller paths.",
+    "Send to critic when generated XML morphology cannot plausibly perform the requested contact task."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/ipc.py",
+    "symbols": ["EXTERNAL_ARTICULATION_MJCF_GUIDE"]
+  }
+}

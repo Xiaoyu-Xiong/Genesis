@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "id": "soft_body_robust_layout_guideline",
+  "title": "Soft-body scenes should use robust chunky geometry, positive clearances, and observable deformation",
+  "summary": "FEM+IPC soft-body layouts should avoid thin fragile geometry and precise interlocks unless required, using conservative spacing, broad supports, and visible deformation metrics.",
+  "scopes": ["planner", "scene", "body", "action", "critic", "opt"],
+  "physics_modes": ["fem_ipc"],
+  "task_tags": [
+    "soft",
+    "deformable",
+    "layout",
+    "fem",
+    "ipc",
+    "column",
+    "block",
+    "bridge",
+    "support",
+    "compression",
+    "clearance"
+  ],
+  "failure_tags": [
+    "thin_geometry",
+    "fragile_layout",
+    "initial_interpenetration",
+    "no_visible_deformation",
+    "unstable_soft_body",
+    "overprecise_contact"
+  ],
+  "guidance": [
+    "Prefer chunky volumetric soft bodies with dimensions large enough for stable tet discretization and visible deformation.",
+    "Use broad support surfaces and positive gaps rather than precise initial interlock or nearly coincident contact.",
+    "For stacked, bridge, column, or leveling tasks, make initial placements tolerant: centers, heights, and support widths should leave clear physical margins.",
+    "Choose material stiffness and friction so deformation is visible but not numerically explosive.",
+    "Record deformation proxies such as height change, bbox spread, COM, contact/support events, and final stability.",
+    "For moving rigid tools pressing soft bodies, use staged approach and bounded force/gain rather than sudden penetration."
+  ],
+  "restrictions": [
+    "Do not use cloth/rope/thin-shell style geometry for volumetric FEM tasks unless the task explicitly demands it and the pipeline supports it.",
+    "Do not rely on exact mesh interlock, tiny clearances, or coincident surfaces for success.",
+    "Do not fake soft-body behavior with rigid substitutes or post-step state writes."
+  ],
+  "checks": [
+    "Check that tet_resolution, object size, and material stiffness are mutually plausible.",
+    "Check that initial soft bodies have positive clearance from supports, tools, and each other.",
+    "Check that rendered evidence and metrics show deformation rather than only rigid translation."
+  ],
+  "dispatch_hints": [
+    "Send to Planner for deformable scene planning.",
+    "Send to scene/body for FEM geometry, material, and initial layout.",
+    "Send to action when a moving tool compresses or manipulates soft bodies.",
+    "Send to critic and opt when evaluating deformation quality or tuning material/contact/layout variables."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Add robust layout heuristics for current deformable column/block/bridge-style suites."
+  }
+}

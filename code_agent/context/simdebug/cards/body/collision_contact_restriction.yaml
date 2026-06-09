@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "id": "collision_contact_restriction",
+  "title": "Independent task objects should keep collision enabled by default",
+  "summary": "Independent physical objects should default to mutually enabled collision/contact; avoid pair, mask, or contact-filter overrides except for narrowly scoped self-collision inside the same articulated body.",
+  "scopes": ["planner", "scene", "body", "action", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "collision",
+    "contact",
+    "collision_pair",
+    "collision_mask",
+    "contype",
+    "conaffinity",
+    "support",
+    "container",
+    "obstacle",
+    "ground",
+    "table",
+    "roll",
+    "slide",
+    "stack",
+    "catch",
+    "block"
+  ],
+  "failure_tags": [
+    "visual_only",
+    "disabled_collision",
+    "ghost_contact",
+    "interpenetration",
+    "support_loss",
+    "collision_mask",
+    "collision_pair_override",
+    "contact_exclusion",
+    "overfiltered_collision",
+    "dummy_mount_interference",
+    "hidden_mount_obstacle"
+  ],
+  "restrictions": [
+    "Do not rely on visual-only geometry for task-critical physical participants.",
+    "Default to enabling collision/contact for every pair of independent physical task objects, including passive objects, supports, obstacles, containers, targets, robot/tool contact surfaces, ground/table surfaces, and generated asset collision geoms.",
+    "Do not override collision pairs, collision groups, masks, contype/conaffinity, exclude lists, or per-body filters to disable contact between independent objects unless the exception is explicit, localized, and physically justified.",
+    "The routine exception is internal self-collision filtering within the same articulated body, when needed to avoid adjacent-link contact, actuator self-locking, or dummy mount collisions. This exception must not disable collision between robot/tool contact surfaces and task objects.",
+    "A second narrow exception is non-task dummy mount/base geometry created only for fixed-base IPC/external_articulation bookkeeping. Such mount geometry must be far outside the main simulation/contact region, while active links, tools, rollers, fingers, paddles, supports, and containers must remain collidable.",
+    "Dummy mount/base geometry must not be placed where it can physically affect the requested interaction: not in a roller gap, gripper cage, containment opening, slot, chute, support path, object trajectory, or exit path.",
+    "For deformable squeeze/transport cases, treat reachable end mounts, central mounts, and one-sided base blocks as task-interfering hidden obstacles unless they are outside the maximum expected soft-body sweep and initially separated by positive clearance.",
+    "Do not set task objects, supports, targets, gripper fingers, trays, paddles, cups, platforms, or other task-contact geoms to contype/conaffinity settings that make them ghost through ordinary objects.",
+    "Do not rely on objects passing through each other, one-sided visual shells, hidden supports, or disabled collision masks to make the result look plausible.",
+    "Avoid initial interpenetration; use positive clearances and metrics/logs that can reveal penetration or support loss.",
+    "If a collision override is genuinely necessary, document the exact excluded pair, the reason, and why it does not remove any task-relevant contact path."
+  ],
+  "checks": [
+    "Verify task-critical objects have collision geometry rather than only surfaces, textures, sites, or visual shells.",
+    "Inspect source code and generated XML/MJCF for collision masks, contype/conaffinity settings, contact exclusions, collision groups, and pair-filter overrides that disable inter-object contact.",
+    "Confirm that any disabled pair is internal to one articulated body or otherwise explicitly documented as non-task-relevant.",
+    "When inspecting XML/MJCF, separately classify bookkeeping mount/base geoms versus active task-contact geoms. Mount geoms near the interaction path with ordinary contact settings are hidden obstacles, not useful physical participants.",
+    "Check initial clearances to dummy mount/base geoms explicitly; do not accept a plan where dummy mounts are close enough to overlap, guide, block, wedge, or deflect deformables or manipulated objects.",
+    "For paired rollers, presses, or grippers, check whether a soft body or passive object can laterally bulge into a mount even if initial clearance is positive.",
+    "Check the event log or metrics for contact counts, penetration indicators, or support loss when relevant."
+  ],
+  "dispatch_hints": [
+    "Send to scene/body for collision geometry, masks, and initial clearance.",
+    "Send to critic when a video looks plausible but contact evidence is missing or ghosted."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/common.py",
+    "symbols": ["COLLISION_CONTACT_CONTRACT"]
+  }
+}

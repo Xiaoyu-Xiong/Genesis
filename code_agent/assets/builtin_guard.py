@@ -51,13 +51,74 @@ def builtin_asset_denied_roots() -> tuple[Path, ...]:
 
 
 def builtin_asset_violations(payload: Any, *, label: str) -> list[str]:
-    text = payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    violations: list[str] = []
+    if isinstance(payload, str):
+        return _builtin_asset_text_violations(payload, label=label)
+    for path, text in _iter_checkable_text(payload):
+        path_label = label
+        if path:
+            path_label = f"{label}.{'.'.join(path)}"
+        violations.extend(_builtin_asset_text_violations(text, label=path_label))
+    return violations
+
+
+def _builtin_asset_text_violations(text: str, *, label: str) -> list[str]:
     violations: list[str] = []
     for pattern, description in _BUILTIN_ASSET_PATTERNS:
         for match in pattern.finditer(text):
             snippet = _snippet(text, match.start(), match.end())
+            if _is_policy_negation(snippet):
+                continue
             violations.append(f"{label}: {description}: {snippet}")
     return violations
+
+
+def _iter_checkable_text(payload: Any, *, path: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], str]]:
+    if isinstance(payload, str):
+        if _is_policy_path(path):
+            return []
+        return [(path, payload)]
+    if isinstance(payload, dict):
+        items: list[tuple[tuple[str, ...], str]] = []
+        for key, value in payload.items():
+            items.extend(_iter_checkable_text(value, path=(*path, str(key))))
+        return items
+    if isinstance(payload, (list, tuple)):
+        items = []
+        for index, value in enumerate(payload):
+            items.extend(_iter_checkable_text(value, path=(*path, str(index))))
+        return items
+    return []
+
+
+def _is_policy_path(path: tuple[str, ...]) -> bool:
+    policy_keys = {
+        "assumptions",
+        "failure_criteria",
+        "final_report_schema",
+        "forbidden_edits",
+        "notes",
+        "risk_register",
+        "success_criteria",
+        "validation_expectation",
+    }
+    normalized = {part.lower() for part in path}
+    return bool(normalized & policy_keys)
+
+
+def _is_policy_negation(snippet: str) -> bool:
+    normalized = snippet.lower()
+    negation_markers = (
+        "do not",
+        "don't",
+        "must not",
+        "never",
+        "forbidden",
+        "without",
+        "no built-in",
+        "avoid",
+    )
+    return any(marker in normalized for marker in negation_markers)
 
 
 def source_file_builtin_asset_violations(path: Path, *, case_dir: Path | None = None) -> list[str]:

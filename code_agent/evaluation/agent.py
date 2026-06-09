@@ -7,7 +7,7 @@ from typing import Any
 
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import load_json_object
-from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
+from code_agent.prompts import prompt_mode
 from code_agent.prompts.common import BUILTIN_ASSET_POLICY_GUIDE, SOURCE_AWARE_REPAIR_GUIDE
 from code_agent.prompts.critic import (
     CRITIC_ASSET_EVALUATION_GUIDE,
@@ -16,6 +16,7 @@ from code_agent.prompts.critic import (
     CRITIC_GENERAL_RULES,
     CRITIC_VISUAL_EVIDENCE_GUIDE,
 )
+from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
 
 PROMPT_TEXT_LIMITS = {
     "execution_report": 120_000,
@@ -26,7 +27,13 @@ PROMPT_TEXT_LIMITS = {
 }
 
 
-def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any]) -> dict[str, Any]:
+def run_codex_critic(
+    *,
+    run_dir: Path,
+    task: str,
+    artifact_report: dict[str, Any],
+    simdebug_card_context: str = "",
+) -> dict[str, Any]:
     reports_dir = run_dir / "reports"
     logs_dir = run_dir / "logs"
     evidence_index = _write_critic_evidence_index(run_dir=run_dir, artifact_report=artifact_report)
@@ -45,6 +52,7 @@ def run_codex_critic(*, run_dir: Path, task: str, artifact_report: dict[str, Any
             evidence_index=evidence_index,
             attempt_index=attempt_index,
             previous_failure=previous_failure,
+            simdebug_card_context=simdebug_card_context,
         )
         jsonl_path = logs_dir / ("codex_critic.jsonl" if attempt_index == 0 else f"codex_critic_retry_{attempt_index:02d}.jsonl")
         result = run_codex_exec(
@@ -113,6 +121,7 @@ def _critic_prompt(
     evidence_index: dict[str, Any],
     attempt_index: int,
     previous_failure: dict[str, Any] | None,
+    simdebug_card_context: str = "",
 ) -> str:
     metrics = _compact_file(run_dir / "artifacts" / "metrics.json")
     render_stats = _compact_file(run_dir / "artifacts" / "render_stats.json")
@@ -139,6 +148,14 @@ def _critic_prompt(
         retry_note = "\nPrevious critic attempt failed; retry with this compact evidence packet:\n" + json.dumps(
             previous_failure, indent=2
         )
+    simdebug_section = (
+        f"""
+        Planner-dispatched SimDebug cards for Critic:
+        {simdebug_card_context or "No SimDebug cards were dispatched for this critic call."}
+        """
+        if prompt_mode() != "legacy"
+        else ""
+    )
     return textwrap.dedent(
         f"""
         {CRITIC_GENERAL_RULES}
@@ -148,6 +165,8 @@ def _critic_prompt(
 
         Original task prompt:
         {task}
+
+        {simdebug_section}
 
         Case workspace:
         {run_dir}

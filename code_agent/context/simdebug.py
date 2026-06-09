@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Any
 
 from code_agent.utils.codex import DEFAULT_REPO_ROOT
@@ -9,8 +10,7 @@ from code_agent.utils.codex import DEFAULT_REPO_ROOT
 
 SIMDEBUG_SCHEMA_VERSION = 1
 SIMDEBUG_CONTEXT_DIR = Path("code_agent/context/simdebug")
-SIMDEBUG_CARD_REQUIRED_FIELDS = ("id", "kind", "title", "summary", "scopes", "physics_modes")
-SIMDEBUG_SUPPORTED_KINDS = {"guideline", "restriction"}
+SIMDEBUG_CARD_REQUIRED_FIELDS = ("id", "title", "summary", "scopes", "physics_modes")
 SIMDEBUG_ALL_PHYSICS = "any"
 
 
@@ -31,9 +31,10 @@ def load_simdebug_cards(library_dir: Path | None = None) -> list[dict[str, Any]]
     root = library_dir or repo_simdebug_library_dir()
     if not root.is_dir():
         return []
-    search_roots = [path for path in (root / "guideline_cards", root / "restriction_cards") if path.is_dir()]
-    if not search_roots:
-        search_roots = [root]
+    cards_root = root / "cards"
+    if not cards_root.is_dir():
+        return []
+    search_roots = [cards_root]
     paths = sorted(
         path
         for search_root in search_roots
@@ -103,19 +104,30 @@ def select_simdebug_cards(
     case_state: dict[str, Any] | None,
     *,
     target_role: str = "planner",
+    requested_card_ids: Iterable[str] | None = None,
     catalog: dict[str, Any] | None = None,
     library_dir: Path | None = None,
 ) -> dict[str, Any]:
     state = case_state or {}
     role = _normalize_token(target_role or "planner")
     physics_modes = infer_simdebug_physics_modes(state)
+    requested_ids = (
+        tuple(_normalize_token(item) for item in requested_card_ids if str(item).strip())
+        if requested_card_ids is not None
+        else None
+    )
+    requested_id_set = set(requested_ids) if requested_ids is not None else None
 
     source_catalog = catalog or build_simdebug_catalog(library_dir)
     selected: list[dict[str, Any]] = []
+    known_ids: set[str] = set()
     for raw_card in source_catalog.get("cards", []):
         if not isinstance(raw_card, dict):
             continue
         card = _normalize_card(raw_card, Path(str(raw_card.get("source_path", "<catalog>"))))
+        known_ids.add(card["id"])
+        if requested_id_set is not None and card["id"] not in requested_id_set:
+            continue
         if not _role_matches(card, role):
             continue
         if not _physics_matches(card, physics_modes):
@@ -123,7 +135,6 @@ def select_simdebug_cards(
         selected.append(
             {
                 "id": card["id"],
-                "kind": card["kind"],
                 "title": card["title"],
                 "summary": card["summary"],
                 "reason": _selection_reason(card, role, physics_modes),
@@ -131,12 +142,32 @@ def select_simdebug_cards(
             }
         )
 
-    selected.sort(key=lambda item: (str(item["kind"]), str(item["id"])))
+    selected.sort(key=lambda item: str(item["id"]))
+    selection_policy = (
+        "planner_requested_ids_filtered_by_declared_role_scope_and_active_physics_mode"
+        if requested_ids is not None
+        else "all_role_and_physics_compatible_candidates_for_planner_relevance_judgment"
+    )
+    unmatched_requested_ids = (
+        [
+            card_id
+            for card_id in requested_ids or ()
+            if card_id not in {str(item["id"]) for item in selected}
+        ]
+        if requested_ids is not None
+        else []
+    )
+    unknown_requested_ids = (
+        [card_id for card_id in requested_ids or () if card_id not in known_ids] if requested_ids is not None else []
+    )
     return {
         "schema_version": SIMDEBUG_SCHEMA_VERSION,
         "target_role": role,
         "physics_modes": list(physics_modes),
-        "selection_policy": "all_role_and_physics_compatible_candidates_for_planner_relevance_judgment",
+        "selection_policy": selection_policy,
+        "requested_card_ids": list(requested_ids or ()),
+        "unmatched_requested_card_ids": unmatched_requested_ids,
+        "unknown_requested_card_ids": unknown_requested_ids,
         "selected_count": len(selected),
         "selected_cards": selected,
     }
@@ -187,13 +218,10 @@ def _load_yaml_or_json(text: str) -> Any:
 
 def _normalize_card(raw: dict[str, Any], source_path: Path) -> dict[str, Any]:
     card = dict(raw)
+    card.pop("kind", None)
     for field in SIMDEBUG_CARD_REQUIRED_FIELDS:
         if field not in card:
             raise ValueError(f"SimDebug card missing required field `{field}`: {source_path}")
-    kind = _normalize_token(card["kind"])
-    if kind not in SIMDEBUG_SUPPORTED_KINDS:
-        raise ValueError(f"Unsupported SimDebug card kind `{card['kind']}`: {source_path}")
-    card["kind"] = kind
     card["id"] = _normalize_token(card["id"])
     card["title"] = str(card["title"]).strip()
     card["summary"] = str(card["summary"]).strip()
@@ -209,7 +237,6 @@ def _catalog_card_entry(card: dict[str, Any]) -> dict[str, Any]:
     keys = (
         "schema_version",
         "id",
-        "kind",
         "title",
         "summary",
         "scopes",
@@ -253,7 +280,7 @@ def _physics_matches(card: dict[str, Any], physics_modes: tuple[str, ...]) -> bo
 def _format_card_block(card: dict[str, Any], selection_item: dict[str, Any]) -> list[str]:
     lines = [
         "",
-        f"[{card['kind']}] {card['id']}: {card['title']}",
+        f"[card] {card['id']}: {card['title']}",
         f"Summary: {card['summary']}",
         f"Selection reason: {selection_item.get('reason', '<unspecified>')}",
     ]

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "ipc_fem_material_selection_guideline",
+  "title": "FEM material choices should be explicit and task-scaled",
+  "summary": "For FEM+IPC soft-body tasks, pick explicit Elastic material parameters and contact friction from the task and deformable config bounds instead of relying on hidden defaults.",
+  "scopes": ["planner", "body", "critic", "opt"],
+  "physics_modes": ["fem_ipc"],
+  "task_tags": [
+    "fem",
+    "ipc",
+    "soft",
+    "deformable",
+    "elastic",
+    "material",
+    "youngs",
+    "poisson",
+    "density",
+    "friction",
+    "compression",
+    "wobble",
+    "leveling",
+    "bridge",
+    "column"
+  ],
+  "failure_tags": [
+    "missing_explicit_E_nu_rho",
+    "missing_friction_mu",
+    "too_stiff",
+    "too_soft",
+    "unstable_material"
+  ],
+  "guidance": [
+    "Generated FEM elastic materials should pass explicit E, nu, rho, and friction_mu values.",
+    "Choose E, nu, and rho within deformable_cfg bounds; use defaults unless the task calls for a special material.",
+    "Use E around 1e4-5e4 for very soft gel, 5e4-5e5 for soft rubber, and 5e5-5e6 for firmer elastomer-like bodies.",
+    "Use nu around 0.2 for compressible foam-like objects, 0.35 as a balanced default, and 0.45 only when nearly incompressible behavior is needed.",
+    "Use rho around 300 for light foam-like material, 1000 as a water-like gel/rubber default, and 3000 for a heavy dense soft solid.",
+    "Choose friction_mu from the material/contact role; do not read a nonexistent fem_friction_mu from deformable_cfg.",
+    "Use friction_mu around 0.0-0.1 for slippery contact, 0.2-0.5 for typical soft rubber/plastic contact, and 0.6-1.0 for high-friction sticky contact unless the task clearly justifies an out-of-range value.",
+    "The same FEM material should also pass model, hydroelastic_modulus, contact_resistance, and hessian_invariant from deformable_cfg when the generated worker creates FEM Elastic materials."
+  ],
+  "dispatch_hints": [
+    "Send to body when a generated FEM entity or material is being written or repaired.",
+    "Send to critic when checking whether a soft-body result is genuinely FEM rather than rigid-only.",
+    "Send to opt when material stiffness, density, damping, or friction are plausible continuous tuning variables."
+  ],
+  "provenance": {
+    "prompt_files": ["code_agent/prompts/ipc.py", "code_agent/prompts/worker.py", "code_agent/prompts/planner.py", "code_agent/prompts/critic.py"],
+    "symbols": ["FEM_MATERIAL_SELECTION_GUIDE", "FEM_IPC_API_GUIDE", "planner_fem_ipc_capability_section", "DEFORMABLE_CRITIC_GUIDE"]
+  }
+}

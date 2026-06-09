@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "render_visual_evidence_restriction",
+  "title": "Visual evidence must be readable enough to judge the requested behavior",
+  "summary": "Generated videos and contact sheets should clearly show task-relevant objects, contacts, and motion; unclear rendering should be repaired rather than accepted.",
+  "scopes": ["planner", "scene", "rendering", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "render",
+    "video",
+    "visual",
+    "camera",
+    "lighting",
+    "contact_sheet",
+    "frame",
+    "evidence",
+    "texture",
+    "manifest",
+    "material_binding"
+  ],
+  "failure_tags": [
+    "cropped",
+    "occluded",
+    "tiny_objects",
+    "blank_frame",
+    "poorly_lit",
+    "static_camera",
+    "unreadable_video",
+    "missing_video"
+  ],
+  "guidance": [
+    "When the task does not specify a background or environment, prefer a plain pure-white background for ordinary evidence renders so objects, contacts, and motion stay easy to inspect.",
+    "For Genesis Rasterizer camera renders, set the default light background in scene.py when constructing gs.Scene: pass vis_options=gs.options.VisOptions(background_color=(1.0, 1.0, 1.0), ambient_light=(0.55, 0.55, 0.55), lights=(...)) or a similarly bright near-white background.",
+    "Do not rely on scene.add_light to create the white background. scene.add_light only adds explicit lights for supported renderers and does not replace VisOptions.background_color; with the default Rasterizer it may be unsupported.",
+    "If the case needs non-white environmental context, document that choice in the plan and render_stats.json; otherwise scene.py should explicitly set VisOptions.background_color rather than inheriting the Genesis dark default."
+  ],
+  "restrictions": [
+    "Do not treat unclear rendering as acceptable when the simulation behavior cannot be judged.",
+    "Do not let opt report success or partial success from numeric score alone when visual evidence is missing, unreadable, or contradicts the goal.",
+    "Camera position, lookat, field of view, clipping, lighting, background, capture cadence, and resolution should make the task behavior inspectable.",
+    "When sampled frame paths, contact sheets, texture summaries, or texture-presence warnings are available, use them as review evidence alongside numeric metrics instead of relying only on event logs."
+  ],
+  "checks": [
+    "Inspect sampled frames or video before accepting success.",
+    "When no non-white environment is requested, check generated scene.py for gs.options.VisOptions with an explicit bright background_color and ambient_light passed into gs.Scene.",
+    "Record final camera and rendering choices in render_stats.json when the generated case supports it.",
+    "If meshes or textures are involved, check whether orientation, scale, material binding, and rendered texture appearance are consistent with the source and manifest."
+  ],
+  "dispatch_hints": [
+    "Send to scene when the background color or ambient lighting must be set through gs.Scene vis_options.",
+    "Send to rendering when evidence is hard to inspect because of view, lighting, cropping, or capture choices.",
+    "Send to critic and opt when deciding whether numeric success is trustworthy."
+  ],
+  "provenance": {
+    "prompt_files": ["code_agent/prompts/common.py", "code_agent/prompts/critic.py"],
+    "symbols": ["RENDER_CLARITY_GUIDE", "GENERATED_RESULT_QUALITY_GUIDE", "CRITIC_VISUAL_EVIDENCE_GUIDE"]
+  }
+}

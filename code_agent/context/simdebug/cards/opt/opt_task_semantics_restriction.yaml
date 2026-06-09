@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "opt_task_semantics_restriction",
+  "title": "Opt must preserve the task semantics and target",
+  "summary": "Optimization may tune physical parameters and controls, but it must not make the task easier by changing required entities, target semantics, or the requested success condition.",
+  "scopes": ["planner", "opt", "critic"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "opt",
+    "task_semantics",
+    "target",
+    "success_criteria",
+    "layout",
+    "initial_pose",
+    "goal"
+  ],
+  "failure_tags": [
+    "goal_moved",
+    "target_relaxed",
+    "task_changed",
+    "missing_required_entity",
+    "semantics_rewritten"
+  ],
+  "restrictions": [
+    "Do not change the task semantics, required entities, or success target to make the case easier.",
+    "Do not move the goal to the object or relax the requested target.",
+    "Initial-setting and layout variables may only tune the setup within the prompt's intended scene family.",
+    "Optimization must tune honest physical parameters or controls that the generated simulation uses, not hidden constraints, fake attachments, direct post-initialization object state writes, or task-object teleportation."
+  ],
+  "dispatch_hints": [
+    "Send to Opt whenever initial layout, goal placement, or success criteria are considered as variables.",
+    "Send to Critic when reviewing whether an optimized success still matches the original text prompt."
+  ],
+  "provenance": {
+    "prompt_file": "code_agent/prompts/opt.py",
+    "symbols": ["build_opt_prompt"]
+  }
+}

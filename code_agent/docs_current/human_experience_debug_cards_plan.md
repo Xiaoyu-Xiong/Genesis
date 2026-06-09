@@ -6,9 +6,10 @@ domain guides and failure-diagnosis rules. The plan is to keep only general role
 the prompts, extract the more situational guidance into structured debug cards, and let **Planner** decide which cards
 each downstream agent should see.
 
-The core idea is to store human and prompt-derived experience as structured debug cards, split into **guidelines** and
-**restrictions**. Planner is the only agent that directly reads and selects cards. Downstream agents receive a compact
-Planner-dispatched card bundle tailored to their current role, task state, and latest evidence.
+The core idea is to store human and prompt-derived experience as one unified structured debug-card library. A card may
+contain constructive `guidance`, guardrail-style `restrictions`, `checks`, and `dispatch_hints` together. Planner is the
+only agent that directly reads and selects cards. Downstream agents receive a compact Planner-dispatched card bundle
+tailored to their current role, task state, and latest evidence.
 
 ## Motivation
 
@@ -78,8 +79,8 @@ CEGIS and Sketch show that human knowledge can be passed as specifications, hole
 solutions. Constitutional AI shows a related pattern for LLMs: high-level principles can be used as an automatic
 self-critique and revision mechanism.
 
-For `code_agent`, this motivates a restriction library. Restrictions are not optimization hints; they are acceptance
-guards. They should help agents reject invalid solutions before finalizing:
+For `code_agent`, this motivates putting restriction/check sections inside cards. These sections are not optimization
+hints; they are acceptance guards. They should help agents reject invalid solutions before finalizing:
 
 - Do not move passive task objects through direct post-initialization pose/qpos/qvel writes.
 - Do not add hidden springs, constraints, suction, or target-following proxy forces unless the prompt explicitly asks.
@@ -87,43 +88,62 @@ guards. They should help agents reject invalid solutions before finalizing:
 - Do not call a case successful if active Opt variables are clamped away or missing from metrics.
 - Do not accept numeric success without readable visual evidence for contact-rich tasks.
 
-Restrictions should also produce counterexample-style checks: "Would this still pass if the hidden state write is
+Card checks should also produce counterexample-style questions: "Would this still pass if the hidden state write is
 removed?" or "Does a small perturbation of the exposed parameter change the measured behavior?"
 
-## Proposed Card Types
+## Unified Card Content
 
-The library should start with two top-level card classes.
+The library should not split cards into guideline cards and restriction cards. In practice, the same useful experience
+often contains both a positive recommendation and a negative guardrail. For example, a collision card may say to keep
+independent object collision enabled by default, and also say not to disable contact masks for task-critical pairs.
 
-### Guideline Cards
-
-Guidelines are constructive. They guide diagnosis, repair, comparison, and optimization.
-
-Use guideline cards when the agent needs to decide:
+A unified card should be used when the agent needs one or more of these:
 
 - Which owner module likely needs repair.
 - Which quantities to measure.
 - Which parameters are good Opt variables.
 - Which optimizer strategy is appropriate.
 - Which rollout is better under a subtle physical tradeoff.
+- Whether a generated behavior is physically causal.
+- Whether metrics can be trusted.
+- Whether a result should be routed to repair instead of accepted.
+- Whether an Opt run is meaningful.
 
-Example guideline card:
+Example unified card:
 
 ```yaml
 schema_version: 1
-id: fem_dual_plunger_leveling_guideline
-kind: guideline
+id: fem_dual_plunger_leveling
 title: FEM dual-plunger bridge leveling
 scopes: [planner, action, opt, critic]
 physics_modes: [fem_ipc]
 task_tags: [precision_control, deformable, leveling, dual_actuator]
-symptoms:
+failure_tags:
+  - asymmetric_alignment
+  - overcompression
+guidance:
   - left and right tick heights do not align at the same time
   - one column remains high while the other over-compresses
   - bridge rocks past level after plunger release
-recommended_diagnosis:
+  - prefer lower simultaneous left/right residual over a single-side minimum
+  - prefer contact-driven alignment with visible column deformation over direct bridge control
+checks:
   - check left/right tick height residuals over time
   - check bridge roll angle at the best alignment time
   - check column compression and rebound after release
+dispatch_hints:
+  - send to action when controller timing or force staging is being repaired
+  - send to opt when exposed scalar variables can tune a runnable but imperfect result
+provenance:
+  source_type: human_authored
+```
+
+Cards can still contain specialized fields when useful, but `guidance`, `restrictions`, `checks`, and
+`dispatch_hints` should be the common vocabulary.
+
+Optional card fields for optimization-heavy cards:
+
+```yaml
 recommended_variables:
   - action.left_plunger_travel_m
   - action.right_plunger_travel_m
@@ -137,45 +157,6 @@ recommended_metrics:
   - bridge_roll_angle_rad
   - left_rebound_fraction
   - right_rebound_fraction
-comparison_rules:
-  - prefer lower simultaneous left/right residual over a single-side minimum
-  - prefer contact-driven alignment with visible column deformation over direct bridge control
-  - prefer elastic rebound after release over over-damped static alignment
-```
-
-### Restriction Cards
-
-Restrictions are guardrails. They prevent shortcut solutions and force evidence-backed acceptance.
-
-Use restriction cards when the agent needs to self-check:
-
-- Whether a generated behavior is physically causal.
-- Whether metrics can be trusted.
-- Whether a result should be routed to repair instead of accepted.
-- Whether an Opt run is meaningful.
-
-Example restriction card:
-
-```yaml
-schema_version: 1
-id: passive_object_no_direct_state_write
-kind: restriction
-title: Passive task objects must move through modeled physics
-scopes: [planner, action, critic, opt]
-physics_modes: [rigid, rigid_ipc, fem_ipc]
-forbidden_patterns:
-  - direct pose/qpos/qvel writes to passive task objects after stepping begins
-  - target-following proxy forces applied to the manipulated object
-  - hidden constraints or attachments that are not requested by the prompt
-self_checks:
-  - inspect action code for post-initialization state setters on passive objects
-  - verify metrics record physical contact or actuator-driven motion
-  - inspect video/contact sheets for plausible contact causality
-failure_routing:
-  - if present in action.py, route to action repair
-  - if required physical affordance is missing, route to body or asset rewrite
-acceptance_rule: >
-  Reject numeric success if passive task-object motion is mainly caused by direct state writes or hidden assistance.
 ```
 
 ## Card Schema
@@ -187,7 +168,6 @@ Recommended fields:
 ```yaml
 schema_version: 1
 id: string
-kind: guideline | restriction
 title: string
 summary: string
 scopes:
@@ -206,11 +186,11 @@ task_tags:
   - string
 failure_tags:
   - string
-symptoms:
+guidance:
   - string
-evidence_patterns:
+restrictions:
   - string
-recommended_diagnosis:
+checks:
   - string
 recommended_variables:
   - string
@@ -220,13 +200,10 @@ comparison_rules:
   - string
 safe_fixes:
   - string
-forbidden_patterns:
-  - string
-self_checks:
-  - string
 failure_routing:
   - string
-acceptance_rule: string
+dispatch_hints:
+  - string
 source_notes:
   - string
 provenance:
@@ -240,8 +217,9 @@ provenance:
   confidence: low | medium | high
 ```
 
-Not every field is required for every card, but the Planner retrieval layer should require `id`, `kind`, `scopes`,
-`physics_modes`, `task_tags`, and a compact `summary`.
+Not every field is required for every card, but the Planner retrieval layer should require `id`, `title`, `summary`,
+`scopes`, and `physics_modes`. The `scopes` field is the source of truth for every role Planner may dispatch the card
+to.
 
 ## Prompt Decomposition And Card Extraction
 
@@ -256,12 +234,12 @@ The migration should classify each prompt clause into one of four buckets:
    - Allowed tools, file ownership, and edit boundaries.
    - Current case state, request payloads, and workspace summaries.
    - Short universal reminders that must always be present.
-2. **Move to guideline cards**
+2. **Move to SimDebug cards as guidance**
    - Diagnostic heuristics.
    - Suggested variables, metrics, and optimization strategies.
    - Asset, IPC, FEM, rendering, and source-aware repair advice that is only relevant for some cases.
    - Comparison rules for choosing between imperfect rollouts.
-3. **Move to restriction cards**
+3. **Move to SimDebug cards as restrictions/checks**
    - Forbidden physical shortcuts.
    - Evidence requirements for accepting success.
    - Rules that reject invalid Opt, contact, asset, or rendering outcomes.
@@ -276,21 +254,21 @@ The migration should classify each prompt clause into one of four buckets:
 The current prompt files contain several high-value migration targets:
 
 - `code_agent/prompts/common.py`
-  - `PHYSICAL_CAUSALITY_CONTRACT` can become hard restriction cards, while prompts keep only a short
+  - `PHYSICAL_CAUSALITY_CONTRACT` can become action/critic cards with hard restriction sections, while prompts keep only a short
     universal causality reminder.
-  - `COLLISION_CONTACT_CONTRACT` can become contact-geometry restriction cards.
-  - `SCALE_POLICY_GUIDE` can become mesh/asset/body guideline and restriction cards.
+  - `COLLISION_CONTACT_CONTRACT` can become body/contact cards.
+  - `SCALE_POLICY_GUIDE` can become scene/body/rendering cards with scale guidance and checks.
   - `RENDER_CLARITY_GUIDE` can become rendering-evidence cards dispatched mostly to rendering and Critic.
   - `SOURCE_AWARE_REPAIR_GUIDE` can become Planner/Critic repair-routing cards.
 - `code_agent/prompts/ipc.py`
-  - `FEM_MATERIAL_SELECTION_GUIDE` should become FEM material guideline cards.
+  - `FEM_MATERIAL_SELECTION_GUIDE` should become FEM material cards.
   - `RIGID_IPC_COUPLING_GUIDE` should become rigid-IPC coupling selection cards.
   - `EXTERNAL_ARTICULATION_MJCF_GUIDE` should become XML/MJCF external-articulation cards.
   - `IPC_FAILURE_DIAGNOSTIC_GUIDE` should become IPC failure-diagnosis and repair-routing cards.
 - `code_agent/prompts/opt.py`
   - Stable Opt role protocol, output schema, and execution commands should stay in the prompt.
   - Variable-selection heuristics, parameter-effectiveness checks, visual-verification requirements, log-scale advice,
-    and "do not optimize rendering" rules should move into Opt guideline/restriction cards.
+    and "do not optimize rendering" rules should move into Opt-owned cards.
 - `code_agent/prompts/planner.py`
   - Planner action schemas and action availability should stay in the prompt.
   - Long policy clauses for asset failure routing, geometry failure diagnosis, Opt candidacy, and repair routing should
@@ -298,7 +276,7 @@ The current prompt files contain several high-value migration targets:
 - `code_agent/prompts/critic.py`
   - Critic response schema and read-only role should stay in the prompt.
   - Asset evaluation, deformable evidence requirements, visual evidence checks, and IPC failure interpretation should
-    become Critic restriction/guideline cards.
+    become Critic/rendering/body cards.
 - `code_agent/prompts/worker.py`
   - Worker file ownership, target-file editing rules, and module export contracts should stay in the prompt.
   - FEM/IPC placement pitfalls, duplicated support geometry, post-step FEM state-write warnings, and owner-specific
@@ -323,7 +301,7 @@ Prompt-to-card migration should be explicit and reviewable:
 
 1. Inventory prompt constants and long policy sections.
 2. Split each section into atomic rules or heuristics.
-3. Classify each atom as `keep_in_prompt`, `guideline_card`, `restriction_card`, or `api_context`.
+3. Classify each atom as `keep_in_prompt`, `simdebug_card`, or `api_context`.
 4. Create YAML cards with `provenance.source_type=prompt_migration`, `source_path`, and `source_symbol`.
 5. Replace the prompt-derived text with a short general instruction that Planner may dispatch relevant cards.
 6. Run prompt-size and behavior diffs on representative suites.
@@ -337,28 +315,31 @@ Start with a file-based library before adding a database.
 ```text
 code_agent/context/simdebug/
   catalog.json
-  guideline_cards/
-    assets/
-      generated_mesh_manifest_usage_guideline.yaml
+  cards/
+    planner/
+      planner_card_dispatch_guideline.yaml
       planner_asset_retry_guideline.yaml
       xml_asset_request_contract_guideline.yaml
-    ipc/
-      ipc_fem_material_selection_guideline.yaml
-      ipc_initial_geometry_failure_diagnosis_guideline.yaml
-    opt/
-      opt_metric_and_objective_design_guideline.yaml
-      opt_routing_guideline.yaml
-    repair_routing/
-      source_aware_repair_guideline.yaml
-  restriction_cards/
-    assets/
-      builtin_asset_policy_restriction.yaml
-    evidence/
+    scene/
+      ipc_runtime_config_mapping_guideline.yaml
+      scale_policy_restriction.yaml
+      soft_body_robust_layout_guideline.yaml
+    body/
+      generated_mesh_manifest_usage_guideline.yaml
+      collision_contact_restriction.yaml
+      rigid_ipc_coupling_guideline.yaml
+    action/
+      controller_schedule_guideline.yaml
+      physical_causality_restriction.yaml
+      rigid_contact_metrics_guideline.yaml
+    rendering/
       render_visual_evidence_restriction.yaml
+    critic/
+      critic_asset_evaluation_guideline.yaml
+      source_aware_repair_guideline.yaml
     opt/
       opt_effective_parameter_restriction.yaml
-    physics_validity/
-      physical_causality_restriction.yaml
+      opt_metric_and_objective_design_guideline.yaml
 ```
 
 Do not add a separate README under `context/simdebug/`. Operational documentation for both Genesis context and
@@ -367,7 +348,6 @@ simdebug cards should live in `code_agent/docs/context.md`.
 `catalog.json` should be generated from the YAML cards and include the fields needed for retrieval:
 
 - `id`
-- `kind`
 - `title`
 - `summary`
 - `scopes`
@@ -375,6 +355,9 @@ simdebug cards should live in `code_agent/docs/context.md`.
 - `task_tags`
 - `failure_tags`
 - source path and source symbol for prompt-derived cards
+
+The subdirectory under `cards/` is the primary agent owner for maintainability. It is not the complete dispatch set;
+the card's `scopes` field remains the complete list of roles Planner may send that card to.
 
 ## Planner-Owned Selection And Dispatch
 
@@ -415,7 +398,7 @@ Planner may dispatch different card bundles at different times:
 - Before `write_plan`, Planner may use structure and success-metric guidelines.
 - Before spawning writers, Planner may give each owner only the relevant implementation cards.
 - After execution failure, Planner may switch to symptom-specific diagnostic cards.
-- Before Critic, Planner may emphasize restriction cards and evidence requirements.
+- Before Critic, Planner may emphasize evidence, causality, and source-routing card sections.
 - Before Opt, Planner may emphasize variable, objective, and parameter-effectiveness cards.
 - After Opt returns, Planner may update the Critic card bundle to include Opt-specific evidence checks.
 
@@ -426,9 +409,9 @@ Convert selected cards into a short
 
 ```text
 Planner-dispatched human debugging experience:
-- [guideline:fem_dual_plunger_leveling_guideline] For dual FEM plunger leveling, measure simultaneous left/right tick
+- [card:fem_dual_plunger_leveling] For dual FEM plunger leveling, measure simultaneous left/right tick
   height residuals, bridge roll, and rebound. Prefer tuning left/right travel and phase delay before material changes.
-- [restriction:passive_object_no_direct_state_write] Reject success if the bridge or passive objects are moved by
+- [card:passive_object_no_direct_state_write] Reject success if the bridge or passive objects are moved by
   direct post-initialization state writes or hidden constraints.
 ```
 
@@ -450,15 +433,14 @@ ones are relevant for each task and downstream role.
 
 The minimal viable integration should include:
 
-- A prompt audit that classifies existing prompt clauses into `keep_in_prompt`, `guideline_card`, `restriction_card`,
-  or `api_context`.
+- A prompt audit that classifies existing prompt clauses into `keep_in_prompt`, `simdebug_card`, or `api_context`.
 - A YAML card directory and schema validator.
 - A generated `catalog.json`.
 - A deterministic Planner-side selector that can return zero or more cards for the current case state.
 - Slimmed prompt builders that keep role protocol and schema instructions while accepting Planner-dispatched cards.
 - Planner action payloads or prompt briefs that can carry compact role-specific card bundles.
 - Prompt builders for writer, Critic, and Opt calls that render only the cards Planner dispatched to that role.
-- A report field recording selected card IDs, card kinds, target roles, and dispatch reasons for each Planner turn and
+- A report field recording selected card IDs, target roles, and dispatch reasons for each Planner turn and
   downstream call.
 - A config flag to disable card dispatch globally or per suite.
 
@@ -475,11 +457,11 @@ Recommended first connection order:
    - Planner can see the catalog, select cards, and record what it would dispatch.
    - Downstream prompts are unchanged in this dry-run mode.
    - This tests selection quality with almost no behavioral risk.
-3. **Planner-dispatched Critic restrictions**
+3. **Planner-dispatched Critic cards**
    - Low risk because Critic is read-only.
-   - Useful once prompt-derived hard restrictions are available.
+   - Useful once prompt-derived evidence, causality, and source-routing checks are available.
    - Helps catch invalid shortcut successes before changing generation behavior.
-4. **Planner-dispatched Opt guidelines and restrictions**
+4. **Planner-dispatched Opt cards**
    - Natural fit because Opt already reasons about variables, objectives, bounds, and evidence.
    - Seed cards can immediately improve variable selection and parameter-effectiveness checks.
 5. **Planner-dispatched writer cards**
@@ -530,13 +512,11 @@ Planner should record each dispatch decision in a case-level audit report:
   "target": "opt",
   "selected_cards": [
     {
-      "id": "fem_dual_plunger_leveling_guideline",
-      "kind": "guideline",
+      "id": "fem_dual_plunger_leveling",
       "reason": "prompt tags: fem_ipc, precision_control, dual_actuator"
     },
     {
-      "id": "opt_param_effectiveness_restriction",
-      "kind": "restriction",
+      "id": "opt_param_effectiveness",
       "reason": "Opt action requested; generated action code contains clamps"
     }
   ]
@@ -557,7 +537,7 @@ Examples:
 
 ### Critic
 
-Critic should not retrieve cards directly. Planner should dispatch restriction cards first, then any guideline cards that
+Critic should not retrieve cards directly. Planner should dispatch cards whose guidance, restriction, and check sections
 clarify task-specific evidence requirements.
 
 Critic use cases:
@@ -582,7 +562,7 @@ Opt use cases:
 
 ## Executable Probes
 
-Some restriction cards should point to executable probes. These probes turn human experience into evidence rather than
+Some cards should point to executable probes. These probes turn human experience into evidence rather than
 only text.
 
 High-value first probes:
@@ -613,9 +593,8 @@ Initial migration workflow:
 
 1. Inventory long prompt constants and policy sections in `code_agent/prompts/`.
 2. Split each section into atomic rules.
-3. Classify each atom as `keep_in_prompt`, `guideline_card`, `restriction_card`, or `api_context`.
-4. Create production YAML cards under the appropriate `guideline_cards/` or `restriction_cards/` category, preserving
-   prompt provenance.
+3. Classify each atom as `keep_in_prompt`, `simdebug_card`, or `api_context`.
+4. Create production YAML cards under the appropriate `cards/<primary_agent>/` category, preserving prompt provenance.
 5. Add cards to `catalog.json` and audit Planner candidate selection before removing the corresponding static prompt
    text.
 6. Replace prompt-derived static text with compact general hooks such as "follow Planner-dispatched human debugging
@@ -649,9 +628,8 @@ Suggested ablations:
 
 1. Baseline current pipeline.
 2. Static prompt additions only.
-3. Planner-selected guideline cards only.
-4. Planner-selected restriction cards only.
-5. Planner-selected guidelines + restrictions + selected probes.
+3. Planner-selected unified cards.
+4. Planner-selected unified cards plus selected probes.
 
 Metrics:
 
@@ -678,15 +656,15 @@ Early target suites:
 ### Milestone 1: Prompt Audit And Classification
 
 - Inventory `code_agent/prompts/common.py`, `ipc.py`, `planner.py`, `worker.py`, `critic.py`, and `opt.py`.
-- Mark each long guide/policy clause as `keep_in_prompt`, `guideline_card`, `restriction_card`, or `api_context`.
+- Mark each long guide/policy clause as `keep_in_prompt`, `simdebug_card`, or `api_context`.
 - Identify prompt clauses that are duplicated across roles and should become shared cards.
 - Produce a migration report before changing prompt behavior.
 
 ### Milestone 2: Card Library Skeleton And Full Prompt Migration
 
-- Add `code_agent/context/simdebug/guideline_cards/` and `code_agent/context/simdebug/restriction_cards/`.
+- Add `code_agent/context/simdebug/cards/` with primary-agent subdirectories.
 - Define YAML schema and catalog builder.
-- Convert every prompt clause classified as `guideline_card` or `restriction_card` into a production card.
+- Convert every prompt clause classified as `simdebug_card` into a production card.
 - Preserve prompt provenance for every prompt-derived card.
 - Add optional human-authored cards for gaps not covered by existing prompts.
 
@@ -701,7 +679,7 @@ Early target suites:
 ### Milestone 4: Prompt Slimming And Live Dispatch
 
 - Replace prompt-derived prompt sections with compact general hooks.
-- Enable Planner-dispatched Critic restrictions first.
+- Enable Planner-dispatched Critic cards first.
 - Enable Planner-dispatched Opt cards next.
 - Enable Planner-dispatched writer cards after Critic/Opt dispatch quality is acceptable.
 - Keep rollback flags for both prompt migration and card dispatch.
@@ -764,7 +742,7 @@ Initial cards should first come from full prompt migration, then from failures a
 All prompt clauses classified as cards should become production cards; the lists below are examples of important prompt-derived
 families rather than a fixed quota:
 
-Prompt-derived guideline cards:
+Prompt-derived cards with guidance-heavy sections:
 
 - FEM material selection from `FEM_MATERIAL_SELECTION_GUIDE`.
 - Rigid IPC coupling-mode selection from `RIGID_IPC_COUPLING_GUIDE`.
@@ -774,7 +752,7 @@ Prompt-derived guideline cards:
 - Opt variable range and log-scale selection from `opt.py`.
 - Shaped metric design and evidence selection from `opt.py` and `critic.py`.
 
-Prompt-derived restriction cards:
+Prompt-derived cards with restriction/check-heavy sections:
 
 - Physical causality restrictions from `PHYSICAL_CAUSALITY_CONTRACT`.
 - Collision/contact restrictions from `COLLISION_CONTACT_CONTRACT`.

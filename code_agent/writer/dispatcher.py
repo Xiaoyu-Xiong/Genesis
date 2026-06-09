@@ -8,10 +8,11 @@ from pathlib import Path
 from code_agent.assets.builtin_guard import BUILTIN_ASSET_POLICY, source_file_builtin_asset_violations
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import load_json_object
+from code_agent.prompts import prompt_mode
+from code_agent.prompts.worker import FEM_IPC_API_GUIDE, RIGID_API_GUIDE, WORKER_COMMON_RULES
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
 
 from . import action, body, rendering, scene
-from code_agent.prompts.worker import FEM_IPC_API_GUIDE, RIGID_API_GUIDE, WORKER_COMMON_RULES
 
 from .common import WorkerDispatchResult, WorkerRole, WorkerSpec
 
@@ -80,6 +81,7 @@ def dispatch_worker_roles(
     planner_output: dict[str, object],
     roles: tuple[WorkerRole, ...] | list[WorkerRole],
     repair_context: str | None = None,
+    simdebug_card_context_by_role: dict[str, str] | None = None,
 ) -> list[WorkerDispatchResult]:
     src_dir = case_dir / "src"
     logs_dir = case_dir / "logs"
@@ -97,6 +99,7 @@ def dispatch_worker_roles(
                 planner_output=planner_output,
                 spec=WORKERS[role],
                 repair_context=repair_context,
+                simdebug_card_context=(simdebug_card_context_by_role or {}).get(role, ""),
             )
             for role in ordered_roles
         ]
@@ -110,13 +113,21 @@ def dispatch_worker_roles(
                 planner_output=planner_output,
                 spec=WORKERS[role],
                 repair_context=repair_context,
+                simdebug_card_context=(simdebug_card_context_by_role or {}).get(role, ""),
             )
             for role in ordered_roles
         ]
         return [future.result() for future in futures]
 
 
-def repair_worker(*, case_dir: Path, task: str, owner: str, failure_context: str) -> WorkerDispatchResult | None:
+def repair_worker(
+    *,
+    case_dir: Path,
+    task: str,
+    owner: str,
+    failure_context: str,
+    simdebug_card_context: str = "",
+) -> WorkerDispatchResult | None:
     role = _normalize_owner(owner)
     if role is None:
         return None
@@ -126,6 +137,7 @@ def repair_worker(*, case_dir: Path, task: str, owner: str, failure_context: str
         planner_output=_load_planner_output(case_dir),
         spec=WORKERS[role],
         repair_context=failure_context,
+        simdebug_card_context=simdebug_card_context,
     )
 
 
@@ -182,6 +194,7 @@ def _run_worker(
     planner_output: dict[str, object],
     spec: WorkerSpec,
     repair_context: str | None,
+    simdebug_card_context: str = "",
 ) -> WorkerDispatchResult:
     target_path = case_dir / spec.target_file
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -196,6 +209,7 @@ def _run_worker(
         genesis_context=_load_genesis_context(case_dir),
         spec=spec,
         repair_context=repair_context,
+        simdebug_card_context=simdebug_card_context,
     )
     invocation_role = spec.role if repair_context is None else f"{spec.role}_repair"
     result = run_codex_exec(
@@ -252,9 +266,27 @@ def _worker_prompt(
     genesis_context: str,
     spec: WorkerSpec,
     repair_context: str | None,
+    simdebug_card_context: str = "",
 ) -> str:
     mode = "repair the existing module source" if repair_context else "author the module source"
     layout_context = _load_layout_context(case_dir)
+    simdebug_section = (
+        f"""
+        Planner-dispatched SimDebug cards for this worker:
+        {simdebug_card_context or "No SimDebug cards were dispatched for this worker role."}
+        """
+        if prompt_mode() != "legacy"
+        else ""
+    )
+    fem_ipc_generation_policy = (
+        """
+        FEM/IPC generation policy:
+        Use the effective config above plus the Planner-dispatched SimDebug cards for FEM/IPC scope, config mapping,
+        material selection, initial geometry, contact/coupling, and evidence requirements.
+        """
+        if prompt_mode() != "legacy"
+        else ""
+    )
     return textwrap.dedent(
         f"""
         {WORKER_COMMON_RULES}
@@ -268,28 +300,15 @@ def _worker_prompt(
         Planner output:
         {json.dumps(planner_output, indent=2)}
 
+        {simdebug_section}
+
         Asset manifest:
         {json.dumps(asset_manifest, indent=2)}
 
         Effective FEM/IPC capability/config:
         {json.dumps(deformable_config, indent=2)}
 
-        FEM/IPC generation policy:
-        - If deformable_config["enabled"] is false, do not create FEM materials, FEM entities, or deformable behavior.
-          If the assigned task fundamentally requires soft-body deformation, fail clearly in your worker report instead
-          of writing a rigid-body substitute.
-        - If deformable_config["enabled"] is true and the planner asks for soft-body behavior, use FEM+IPC only. Do not
-          use MPM, PBD, SPH, or other non-rigid solvers.
-        - If deformable_config["ipc_enabled"] is true, IPC contact/coupling may be used. For rigid-only scenes, keep
-          the bodies rigid/articulated and use IPC only for contact/coupling through `gs.options.IPCCouplerOptions` and
-          `gs.materials.Rigid(...)` coupling fields.
-        - If deformable_config["ipc_enabled"] is false, do not instantiate `gs.options.IPCCouplerOptions`.
-        - Do not pass deformable_config["ipc_contact_d_hat_adaptive"] to `gs.options.IPCCouplerOptions`; it is a
-          code-agent runtime switch. The generated entrypoint resolves it into `ipc_contact_d_hat` before scene setup.
-        - All FEM `E`/`nu`/`rho` material-range defaults, IPC, tet, and precision defaults must come from
-          deformable_config, not hardcoded local constants. FEM elastic bodies must still pass explicit
-          task-appropriate `E`, `nu`, `rho`, and `friction_mu` values. `friction_mu` is chosen by the worker per FEM
-          material; do not read `deformable_config["fem_friction_mu"]`.
+        {fem_ipc_generation_policy}
 
         Genesis documentation and local-code context:
         {genesis_context}

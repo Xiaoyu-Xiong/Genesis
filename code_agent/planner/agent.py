@@ -4,9 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from code_agent.context.simdebug import format_simdebug_cards_for_prompt, select_simdebug_cards
 from code_agent.configs import CONFIGS
-from code_agent.io_utils import dump_json, load_json_object
+from code_agent.io_utils import load_json_object
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
 from code_agent.prompts.planner import (
     PLANNER_ACTION_POLICY_GUIDE,
@@ -142,7 +141,7 @@ class EpisodePlanner:
                     else ""
                 ),
                 f"Genesis documentation and local-code context:\n{genesis_context}",
-                simdebug_context,
+                simdebug_context if simdebug_context else "",
                 capability_section,
                 actions_section,
                 PLANNER_ACTION_POLICY_GUIDE,
@@ -151,37 +150,14 @@ class EpisodePlanner:
         ).strip()
 
     def _simdebug_context_prompt(self, prompt_state: dict[str, Any], *, turn: int | None = None) -> str:
-        selection = select_simdebug_cards(
-            {
-                "task": self.session.config.task,
-                "case_id": self.session.config.case_id,
-                "turn": turn,
-                "deformable_enabled": self.session.config.deformable_enabled,
-                "ipc_enabled": self.session.config.ipc_enabled,
-                "deformable_config": self.session.deformable_config,
-                "planner_state": prompt_state,
-            },
-            target_role="planner",
+        if not self.session.simdebug_cards_enabled():
+            return ""
+        return self.session.simdebug_card_context_for_role(
+            "planner",
+            turn=turn,
+            dispatch_reason="planner_prompt",
+            extra_state={"prompt_state": prompt_state},
         )
-        audit = {
-            "schema_version": 1,
-            "turn": turn,
-            "case_id": self.session.config.case_id,
-            "selection": selection,
-        }
-        self.session.state["simdebug"] = {
-            "latest_turn": turn,
-            "latest_target_role": selection.get("target_role"),
-            "latest_selected_card_ids": [
-                item.get("id")
-                for item in selection.get("selected_cards", [])
-                if isinstance(item, dict) and item.get("id")
-            ],
-            "latest_dispatch_path": str(self.session.reports_dir / "simdebug_card_dispatch.json"),
-        }
-        dump_json(self.session.json_safe(audit), self.session.reports_dir / "simdebug_card_dispatch.json")
-        self.session.append_jsonl(self.session.reports_dir / "simdebug_card_dispatch.jsonl", audit)
-        return format_simdebug_cards_for_prompt(selection)
 
     def _prompt_state(self) -> dict[str, Any]:
         state = dict(self.session.state)

@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "id": "phase_gate_fallback_guideline",
+  "title": "Controller phase gates should fail soft instead of deadlocking the task",
+  "summary": "Action controllers that wait for contact, stability, trapping, alignment, or pressure thresholds should use robust gates with timeouts, fallback transitions, and explicit logs so one missed detector does not erase the required behavior.",
+  "scopes": ["planner", "action", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "phase",
+    "gate",
+    "fallback",
+    "timeout",
+    "contact_detector",
+    "release",
+    "lift",
+    "catch",
+    "trap",
+    "controller"
+  ],
+  "failure_tags": [
+    "phase_deadlock",
+    "release_gate_deadlocked",
+    "required_phase_missing",
+    "null_phase_time",
+    "overstrict_contact_gate",
+    "blocked_sequence",
+    "no_lift_phase",
+    "no_release_phase"
+  ],
+  "guidance": [
+    "For every required behavior phase, define both the preferred evidence gate and a bounded fallback that keeps the physical task progressing if the detector is noisy or slightly missed.",
+    "Gate on robust combinations such as contact dwell, distance trend, actuator target reached within tolerance, low relative velocity, or elapsed time rather than a single brittle equality or one-frame force sample.",
+    "Record each phase transition, gate reason, blocked-count, current gate residual, fallback use, and the final phase reached in event logs or metrics.",
+    "When a gate fails, prefer conservative physical progress such as slower approach, extra dwell, partial release, or reduced-speed retry rather than holding the same command forever.",
+    "Use Opt for continuous thresholds and durations only after source code exposes meaningful phase metrics and the schedule can complete all required phases."
+  ],
+  "restrictions": [
+    "Do not make a required task phase conditional on an impossible or overly strict detector with no timeout.",
+    "Do not report task success when required phase timestamps such as release_time, lift_start_time, catch_time, or retreat_time are null.",
+    "Do not let adaptive recovery loops replace the requested behavior for most of the video without marking the episode as failed or incomplete."
+  ],
+  "checks": [
+    "Check that all prompt-critical phases have non-null timestamps and occur in the intended order.",
+    "Check whether blocked_counts, gate residuals, or fallback flags show that the controller spent the episode waiting for a gate that never opened.",
+    "Check whether visual evidence shows the requested physical sequence rather than a static hold, repeated recovery loop, or skipped phase.",
+    "Check that fallback transitions still preserve physical causality and do not directly move passive task objects."
+  ],
+  "dispatch_hints": [
+    "Send to action for staged controllers with contact, release, trapping, balancing, catching, or alignment gates.",
+    "Send to critic when a completed render is missing required phases despite apparently valid source code.",
+    "Send to opt when gate thresholds and dwell times are exposed as compact continuous parameters."
+  ],
+  "provenance": {
+    "source": "workspace_failure_survey",
+    "examples": [
+      "catapult_ball_cup_rigid",
+      "cantilever_block_stack_balance_rigid",
+      "allegro_hand_soft_ball",
+      "quad_step_stones_rigid"
+    ],
+    "motivation": "Multiple controllers deadlocked because a contact or stability gate never triggered, leaving release, lift, catch, or locomotion phases absent."
+  }
+}

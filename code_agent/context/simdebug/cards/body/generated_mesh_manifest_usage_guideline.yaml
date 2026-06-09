@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "generated_mesh_manifest_usage_guideline",
+  "title": "Generated mesh workers should use the asset manifest, not guessed paths or ad hoc replacements",
+  "summary": "Generated mesh assets must be instantiated from ready asset_manifest entries with their runtime mesh, visual mesh, scale, coordinate metadata, texture metadata, and simulation role preserved.",
+  "scopes": ["planner", "body", "rendering", "critic"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "generated_mesh",
+    "asset_manifest",
+    "runtime_path",
+    "visual_path",
+    "texture_path",
+    "scale",
+    "orientation",
+    "mesh",
+    "asset"
+  ],
+  "failure_tags": [
+    "missing_manifest_entry",
+    "invalid_mesh",
+    "guessed_mesh_path",
+    "wrong_scale",
+    "visual_mesh_instantiated_as_body",
+    "ad_hoc_primitive_replacement"
+  ],
+  "guidance": [
+    "For generated mesh assets, read assets/asset_manifest.json and use entries with source_type == generated_mesh and status == ready.",
+    "Instantiate runtime geometry from entry.runtime_path using the manifest scale, file_meshes_are_zup metadata, visual_path, and intended fixed/dynamic role.",
+    "runtime_path is the strict-manifold simulation/collision mesh.",
+    "visual_path is a seam-aware textured render mesh attached to the same rigid entity, not a separate object to instantiate as an independent simulation body.",
+    "texture_path is evidence metadata for the transferred base-color image and texture preview checks.",
+    "Use the manifest's logical names, scale factors, coordinate metadata, texture paths, and simulation roles instead of guessing mesh paths, sizes, or orientation.",
+    "If a generated mesh manifest entry is missing, failed, invalid, or cannot be imported, fail clearly and report that Planner should regenerate the mesh asset; do not edit mesh files or approximate the object with ad hoc primitives."
+  ],
+  "dispatch_hints": [
+    "Send to body/rendering when generated mesh assets are being instantiated.",
+    "Send to critic when mesh scale, texture, orientation, or manifest consistency is part of the evidence.",
+    "Send to planner when deciding whether to update mesh metadata or regenerate an asset."
+  ],
+  "provenance": {
+    "prompt_files": ["code_agent/prompts/worker.py", "code_agent/prompts/planner.py", "code_agent/prompts/critic.py"],
+    "symbols": ["RIGID_API_GUIDE", "planner_available_actions_section", "CRITIC_VISUAL_EVIDENCE_GUIDE"]
+  }
+}

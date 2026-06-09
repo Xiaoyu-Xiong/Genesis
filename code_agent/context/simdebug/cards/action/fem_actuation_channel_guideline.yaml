@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "id": "fem_actuation_channel_guideline",
+  "title": "Drive FEM bodies through verified physical channels, not assumed vertex force APIs",
+  "summary": "FEM+IPC soft-body actions should prefer actuated rigid contacts, clamps, rollers, plates, and verified public force or boundary-control paths, and should prove that scheduled actuation actually affected the deformable body.",
+  "scopes": ["planner", "body", "action", "critic", "opt"],
+  "physics_modes": ["fem_ipc"],
+  "task_tags": [
+    "fem",
+    "ipc",
+    "soft_body",
+    "actuation",
+    "force",
+    "clamp",
+    "roller",
+    "plate",
+    "boundary_control",
+    "deformation"
+  ],
+  "failure_tags": [
+    "unsupported_fem_force_shape",
+    "force_applications_zero",
+    "set_vertex_constraints_unsupported",
+    "no_deformation_effect",
+    "scheduled_but_not_applied",
+    "direct_vertex_edit",
+    "static_soft_body"
+  ],
+  "guidance": [
+    "Prefer driving soft bodies through real rigid/FEM contact: moving plates, paddles, rods, rollers, clamps, grippers, cups, guide rails, or other actuated rigid colliders.",
+    "If a task needs endpoint or boundary motion, model it as physical clamps or controlled support geometry when the available Genesis/FEM API does not provide a verified public boundary-control path.",
+    "If using a force or constraint API, verify the expected tensor shape and public availability before relying on it, and record both attempted and successfully applied actuation counts.",
+    "Record deformation evidence tied to the actuation channel, such as FEM COM displacement, bbox change, height ratio, spread, surface marker displacement, contact count, and max/min vertex displacement.",
+    "Treat scheduled impulses, disturbances, or constraints as incomplete unless metrics prove that they were applied and changed the soft body state."
+  ],
+  "restrictions": [
+    "Do not use private or guessed UIPC/FEM force slots whose shape or semantics are not verified by a successful run.",
+    "Do not directly edit FEM vertices, poses, or qpos after initialization to create the requested soft-body motion.",
+    "Do not mark a run successful when force_attempts is nonzero but force_applications is zero, or when the deformable COM/deformation metrics remain unchanged."
+  ],
+  "checks": [
+    "Check stderr and execution reports for unsupported FEM position or external-force shapes, failed force callbacks, or unavailable vertex-constraint methods.",
+    "Check event logs for attempted versus applied force, clamp, or contact actuation counts.",
+    "Check metrics and frames for actual deformation caused by the intended physical channel.",
+    "Check that body/action repairs replace unsupported direct FEM actuation with robust contact-driven mechanisms when needed."
+  ],
+  "dispatch_hints": [
+    "Send to action for soft-body disturbance, twist, pull, press, roll, squeeze, or boundary-control tasks.",
+    "Send to body when the scene needs physical clamps, rods, rollers, plates, or supports to make action actuation possible.",
+    "Send to critic when logs claim scheduled FEM actuation but visible or numeric deformation is absent."
+  ],
+  "provenance": {
+    "source": "workspace_failure_survey",
+    "examples": [
+      "soft_dragon_obstacle_course",
+      "twisted_soft_tube",
+      "soft_capsules_rigid_rings_bowl"
+    ],
+    "motivation": "Older FEM runs scheduled disturbances or constraints through unsupported channels, producing zero applied forces, static bodies, or runtime shape errors."
+  }
+}

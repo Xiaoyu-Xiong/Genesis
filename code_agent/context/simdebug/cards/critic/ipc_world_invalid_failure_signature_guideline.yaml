@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "ipc_world_invalid_failure_signature_guideline",
+  "title": "World-is-not-valid IPC logs should trigger geometry-first diagnosis",
+  "summary": "When execution logs show IPC world validity, intersection, distance, barrier, or thickness errors, Planner and Critic should classify the failure as a geometry/asset/clearance problem before treating later errors as primary.",
+  "scopes": ["planner", "scene", "body", "critic"],
+  "physics_modes": ["rigid_ipc", "fem_ipc"],
+  "task_tags": [
+    "ipc",
+    "failure_signature",
+    "world_invalid",
+    "intersection",
+    "distance",
+    "clearance",
+    "asset",
+    "geometry"
+  ],
+  "failure_tags": [
+    "World is not valid",
+    "SimplicialSurfaceIntersectionCheck",
+    "SimplicialSurfaceDistanceCheck",
+    "initial_penetration",
+    "barrier",
+    "thickness"
+  ],
+  "guidance": [
+    "Treat the first IPC world-validity or intersection/distance diagnostic as the primary failure, even if later logs mention rigid ABD accessors or state retrieval.",
+    "Check initial object clearance, duplicate support surfaces, mesh scale, XML collision geometry, rotated primitive extents, and generated asset topology.",
+    "If ready generated assets may be involved, use inspect_assets before repeatedly asking body/action to repair choreography.",
+    "If inspection shows intrinsic topology, filled holes, wrong scale, inverted volume, or unsuitable XML morphology, route to Planner asset regeneration.",
+    "If assets are usable, route to scene/body for placement, orientation, spacing, support surface, or coupling-mode repair."
+  ],
+  "restrictions": [
+    "Do not fix this failure by disabling IPC, disabling contact, hiding collision, switching to rigid-only behavior, or adding hidden supports.",
+    "Do not treat secondary accessor errors as the root cause unless reproduced without any initial-geometry diagnostic."
+  ],
+  "checks": [
+    "Check stderr/stdout ordering to identify the first primary diagnostic.",
+    "Check whether the same contact region has duplicate planes or coincident supports.",
+    "Check whether any generated mesh/XML asset has suspicious bbox, scale, topology, or collision geometry."
+  ],
+  "dispatch_hints": [
+    "Send to critic when classifying execution failures.",
+    "Send to scene/body when repairing initial layout or support geometry.",
+    "Send to planner when asset inspection or regeneration may be needed."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Make common IPC execution-log signatures actionable and source-routed."
+  }
+}
