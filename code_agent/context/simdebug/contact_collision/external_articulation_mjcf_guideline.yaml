@@ -19,7 +19,13 @@
     "robot",
     "spool",
     "paddle",
-    "press"
+    "press",
+    "clamp",
+    "socket",
+    "endpoint",
+    "fixed_child",
+    "fixed_merge",
+    "rotor"
   ],
   "failure_tags": [
     "empty_parent_body",
@@ -31,7 +37,12 @@
     "invalid_link_hierarchy",
     "dummy_mount_interference",
     "hidden_mount_obstacle",
-    "unilateral_mount_collision"
+    "unilateral_mount_collision",
+    "fixed_child_collision_filter",
+    "merged_collision_link_disabled",
+    "ipc_contact_inactive",
+    "visual_motion_without_contact_force",
+    "static_deformable_despite_moving_clamps"
   ],
   "guidance": [
     "Use fixed-base articulations with revolute or prismatic child bodies for driven mechanisms.",
@@ -42,6 +53,8 @@
     "Never put a dummy mount inside a task passage, roller gap, gripper cage, containment opening, slot, chute, support path, object trajectory, or exit path. It must not become a hidden stop, wedge, ramp, wall, or unilateral side obstacle.",
     "For paired mechanisms such as rollers, spools, presses, or paddles, avoid a single mount at one end of the active span. For deformable squeeze/transport tasks, assume the soft body may bulge sideways or along the roller axis; dummy mounts must be far beyond the maximum possible soft-body bbox and outside the swept/contact volume.",
     "Keep active child/driven contact surfaces collision-enabled with ordinary contact settings, but keep bookkeeping mount/base geoms far away from all task objects and interaction paths.",
+    "When coup_collision_links is used as a positive IPC collision filter, account for fixed-joint merge behavior: collision geometry authored on fixed child links may be merged into a parent/target link such as rotor_link. Include the merge target link in coup_collision_links in addition to the semantic child contact links, otherwise the visible clamp/finger/socket may move while its merged IPC collision geometry is filtered out.",
+    "For multi-part clamps or sockets built from fixed child bodies, report both the semantic active link names and any fixed-merge target links that must remain collision-enabled.",
     "Name and report dummy mount/base geoms explicitly, including role, position, size, why the size is minimal, and why they are far enough away to not affect task motion.",
     "Child/driven geoms such as spools, hinges, paddles, presses, and gripper fingers must have real collision geometry; do not provide only visual geometry for IPC contact participants.",
     "Set joint axes and pivots from the physical mechanism, not from arbitrary bbox positions.",
@@ -55,14 +68,17 @@
     "Do not provide only visual geometry for contact participants.",
     "Do not let dummy mount geometry intersect or perturb the real contact region even if the dummy is invisible, transparent, tiny, or only intended for IPC bookkeeping.",
     "Do not use ordinary task-contact settings such as contype=\"1\" conaffinity=\"1\" for dummy mount/base geoms that are close enough to touch task objects.",
-    "Do not use a unilateral base_collision_mount in the roller gap or at a reachable roller end for FEM/IPC squeeze tasks; route that to XML asset repair/regeneration rather than trying to tune action speed or material stiffness."
+    "Do not use a unilateral base_collision_mount in the roller gap or at a reachable roller end for FEM/IPC squeeze tasks; route that to XML asset repair/regeneration rather than trying to tune action speed or material stiffness.",
+    "Do not assume that whitelisting only the visually named child link is enough when fixed child geoms may be merged into a parent link for IPC collision; validate the actual merge target or include it explicitly."
   ],
   "checks": [
     "Search generated XML for mount/base/dummy/fixed geoms and inspect their position, size, contype, and conaffinity relative to the active contact path.",
     "Flag XML as an asset defect if a dummy mount/base geom can collide with the object being manipulated, squeezed, transported, contained, or supported.",
     "Check positive initial clearance from dummy mount/base geoms to all deformables and task-contact bodies, and confirm the mount is far outside the main simulation/contact region.",
     "For roller or squeeze mechanisms, check that no mount/base collision geom lies near the roller gap, roller end where the soft body can expand, or below-gap exit path.",
-    "If a soft body suddenly shoots sideways near an end mount or central mount, inspect the XML before blaming the controller; hidden mount contact is a likely asset defect."
+    "If a soft body suddenly shoots sideways near an end mount or central mount, inspect the XML before blaming the controller; hidden mount contact is a likely asset defect.",
+    "If driven clamps, sockets, fingers, paddles, or rollers visibly move but a FEM body remains static, inspect the IPC collision whitelist and fixed-joint merge target links before tuning gains, friction, or material stiffness.",
+    "For endpoint-driven FEM rods or ropes, require metrics showing nontrivial FEM vertex displacement, endpoint movement, braid/twist change, and rod-rod/contact evidence; do not accept successful actuator DOFs alone."
   ],
   "dispatch_hints": [
     "Send to planner when rewriting XML asset requests.",

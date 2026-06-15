@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -586,7 +587,12 @@ class PlannerSession:
     def simdebug_cards_enabled(self) -> bool:
         from code_agent.prompts import prompt_mode
 
-        return prompt_mode() != "legacy"
+        if prompt_mode() == "legacy":
+            return False
+        flag = os.environ.get("CODE_AGENT_SIMDEBUG_CARDS")
+        if flag is None:
+            return True
+        return flag.strip().lower() not in {"0", "false", "off", "no"}
 
     def persist_state(self) -> None:
         dump_json(self.json_safe(self.state), self.state_path)

@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "ipc_fem_external_force_guideline",
+  "title": "Use verified libuipc external-force attributes for FEM forces",
+  "summary": "For FEM+IPC scenes that truly need direct physical force on a deformable body, register uipc.constitution.FiniteElementExternalForce on FEM IPC geometries before IPC world initialization, then update vertices.external_force and vertices.is_constrained with shape checks, sync, and motion evidence.",
+  "scopes": ["planner", "body", "action", "critic", "opt"],
+  "physics_modes": ["fem_ipc"],
+  "task_tags": [
+    "fem",
+    "ipc",
+    "libuipc",
+    "external_force",
+    "force",
+    "impulse",
+    "disturbance",
+    "soft_body",
+    "deformable",
+    "push",
+    "wind",
+    "actuation"
+  ],
+  "failure_tags": [
+    "unsupported_fem_force_shape",
+    "force_applications_zero",
+    "fem_force_not_registered_before_world_init",
+    "missing_external_force_attr",
+    "missing_is_constrained_attr",
+    "world_sync_missing",
+    "static_soft_body",
+    "hidden_proxy_force"
+  ],
+  "guidance": [
+    "Use direct FEM external force only when force is part of the requested physical scene or a clearly modeled disturbance. Prefer contact-driven rigid tools for clamps, rollers, rods, plates, grippers, and boundary mechanisms.",
+    "Genesis does not expose a high-level FEMEntity.apply_external_force API for IPCCoupler. Do not call rigid_solver.apply_links_external_force for FEM bodies.",
+    "Register uipc.constitution.FiniteElementExternalForce after IPCCoupler has created FEM geometries in coupler._ipc_scene and before coupler._ipc_world.init(...). A generated simulation can do this by patching IPCCoupler._add_fem_entities_to_ipc before scene.build().",
+    "Find target FEM geometries with uipc.backend.SceneVisitor(coupler._ipc_scene), uipc.geometry.SimplicialComplexSlot, and genesis.engine.couplers.ipc_coupler.utils.read_ipc_geometry_metadata; apply this card only to metadata entries with solver_type == 'fem' unless cloth force support is separately verified.",
+    "Create and insert a FiniteElementExternalForce instance in coupler._ipc_constitution_tabular, then call external_force.apply_to(fem_geom, np.zeros(3, dtype=np.float64)). Verify that fem_geom.vertices().find('external_force') and fem_geom.vertices().find('is_constrained') both exist.",
+    "Normalize the external_force attribute to a per-vertex (N, 3) writable view. In the local smoke test, pyuipc exposed vertices.external_force as shape (N, 3, 1), so generated code should handle shape variants such as (N, 3, 1), (N, 3), (3, N), or a flat 3N layout instead of assuming one fixed shape.",
+    "When applying a total force to a selected vertex patch, divide by the selected vertex count, write that per-vertex vector into external_force for selected vertices, set the corresponding is_constrained mask entries to 1, and zero force/mask entries for all unforced vertices.",
+    "After writing force attributes, call coupler._ipc_world.sync() before scene.step(), or register a coupler._ipc_animator callback that updates force attributes before IPC advance.",
+    "Clear or update force and mask attributes after each step unless the intended physics is a persistent force field.",
+    "Record force evidence including attempted force count, successful application count, selected vertex count, external_force shape, mask nonzero count, total force or impulse, per-vertex force, and FEM COM/bbox/vertex displacement."
+  ],
+  "restrictions": [
+    "Do not rely on scene.add_force_field for FEM+IPC external force unless that path has been separately verified in the current simulator.",
+    "Do not use FEMEntity.set_vertex_constraints under IPCCoupler as the external-force path; the current Genesis wrapper blocks that method for IPCCoupler.",
+    "Do not write private or guessed UIPC force slots. Require a successful attribute check for vertices.external_force and vertices.is_constrained before claiming force support.",
+    "Do not use hidden goal-following forces, target-tracking proxy forces, or forces that directly encode the desired outcome rather than a physical mechanism.",
+    "Do not mark FEM force actuation successful unless force_applications is nonzero, selected vertices are nonzero, and FEM state evidence shows corresponding COM, bbox, or vertex displacement."
+  ],
+  "checks": [
+    "Confirm FiniteElementExternalForce was registered before IPC world initialization.",
+    "Confirm the target FEM geometry was found through IPC metadata and not by fragile object-order assumptions.",
+    "Confirm external_force and is_constrained attributes exist on vertices.",
+    "Confirm external_force shape was normalized correctly; the verified local shape is (N, 3, 1).",
+    "Confirm coupler._ipc_world.sync() or an IPC animator callback transfers updated attributes before IPC advance.",
+    "Compare a no-force baseline or pre-force frames against forced frames when possible; the smoke test moved the FEM COM by +0.0186076 m in x over 30 steps while the no-force baseline stayed at 0.",
+    "Inspect logs for force_event_count, applied_vertices, mask_nonzero, total_force, per_vertex_force, and FEM COM displacement."
+  ],
+  "dispatch_hints": [
+    "Send to body when the generated scene must install libuipc FEM force attributes during IPC build.",
+    "Send to action when writing force schedules, force masks, impulses, persistent fields, or animator callbacks.",
+    "Send to critic when a run claims FEM external force was applied or when a soft body remains static despite scheduled force.",
+    "Send to opt when force magnitude, selected patch, impulse duration, ramp profile, or clearing schedule are tunable physical parameters.",
+    "Send to planner for FEM+IPC tasks that explicitly mention wind, thrust, impulse, disturbance, direct force, or force-driven soft-body motion."
+  ],
+  "provenance": {
+    "source": "local_smoke_test",
+    "script": "code_agent/workspaces/suites/debug_cards/ipc_fem_external_force_smoke.py",
+    "summary_path": "code_agent/workspaces/suites/debug_cards/ipc_fem_external_force_smoke_20260610_123425/summary.json",
+    "verified_details": [
+      "uipc.constitution.FiniteElementExternalForce is available in the local pyuipc package.",
+      "FiniteElementExternalForce.apply_to creates vertices.external_force and vertices.is_constrained on a volumetric FEM SimplicialComplex.",
+      "The observed vertices.external_force layout in the smoke test is (N, 3, 1).",
+      "Writing +x force to all 1657 FEM vertices for 30 steps and calling coupler._ipc_world.sync() produced +0.0186076 m FEM COM displacement over a no-force baseline of 0.0 m."
+    ]
+  }
+}

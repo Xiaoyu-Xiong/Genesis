@@ -25,7 +25,7 @@ def test_simdebug_catalog_loads_prompt_derived_cards():
     catalog = build_simdebug_catalog()
 
     assert catalog["library_dir"] == "code_agent/context/simdebug"
-    assert catalog["card_count"] >= 31
+    assert catalog["card_count"] >= 36
     ids = {card["id"] for card in catalog["cards"]}
     assert "ipc_fem_material_selection_guideline" in ids
     assert "physical_causality_restriction" in ids
@@ -35,16 +35,27 @@ def test_simdebug_catalog_loads_prompt_derived_cards():
     assert "planner_card_dispatch_guideline" in ids
     assert "rigid_contact_metrics_guideline" in ids
     assert "controller_schedule_guideline" in ids
+    assert "actuation_stress_relief_guideline" in ids
     assert "soft_body_robust_layout_guideline" in ids
     assert "asset_inspection_decision_guideline" in ids
     assert "ipc_world_invalid_failure_signature_guideline" in ids
     assert all("provenance" in card for card in catalog["cards"])
     assert all("kind" not in card for card in catalog["cards"])
     source_paths = [str(card["source_path"]) for card in catalog["cards"]]
-    assert all(path.startswith("code_agent/context/simdebug/cards/") for path in source_paths)
+    assert all(path.startswith("code_agent/context/simdebug/") for path in source_paths)
+    assert all("/cards/" not in path for path in source_paths)
     assert all("/guideline_cards/" not in path and "/restriction_cards/" not in path for path in source_paths)
-    agent_dirs = {Path(path).parts[4] for path in source_paths}
-    assert agent_dirs == {"planner", "scene", "body", "action", "rendering", "critic", "opt"}
+    category_dirs = {Path(path).parts[3] for path in source_paths}
+    assert category_dirs == {
+        "assets_geometry",
+        "contact_collision",
+        "control_dynamics",
+        "deformable_fem",
+        "diagnosis_repair",
+        "evidence_validation",
+        "optimization",
+        "workflow_orchestration",
+    }
 
 
 def test_simdebug_selector_picks_fem_material_cards_for_soft_ipc_task():
@@ -61,6 +72,7 @@ def test_simdebug_selector_picks_fem_material_cards_for_soft_ipc_task():
     assert "ipc_fem_material_selection_guideline" in ids
     assert "deformable_fem_ipc_scope_restriction" in ids
     assert "soft_body_robust_layout_guideline" in ids
+    assert "actuation_stress_relief_guideline" in ids
     assert "planner_card_dispatch_guideline" in ids
     assert "score" not in selection["selected_cards"][0]
     assert "matched_terms" not in selection["selected_cards"][0]
@@ -117,7 +129,7 @@ def test_simdebug_selector_accepts_legacy_kind_field_without_leaking_it():
                 "scopes": ["planner", "body"],
                 "physics_modes": ["any"],
                 "restrictions": ["Keep physical collision evidence readable."],
-                "source_path": "code_agent/context/simdebug/restriction_cards/physics_validity/legacy.yaml",
+                "source_path": "code_agent/context/simdebug/legacy/legacy_collision_card.yaml",
             }
         ],
     }
@@ -261,6 +273,37 @@ with TemporaryDirectory() as tmp:
     )
 
     assert result.stdout.splitlines() == ["False", "False"]
+
+
+def test_simdebug_cards_env_flag_disables_dispatch_without_legacy_prompts():
+    repo_root = Path(__file__).resolve().parents[1]
+    code = """
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from code_agent.planner.session import PlannerSession, PlannerSessionConfig
+from code_agent.prompts import prompt_mode
+from code_agent.prompts.worker import WORKER_COMMON_RULES
+with TemporaryDirectory() as tmp:
+    s = PlannerSession(PlannerSessionConfig(case_id='case', task='soft FEM IPC contact', case_dir=Path(tmp) / 'case', backend='gpu', timeout_sec=1.0, render=False, repair_rounds=0, deformable_enabled=True, ipc_enabled=True))
+    s.reports_dir.mkdir(parents=True, exist_ok=True)
+    s.logs_dir.mkdir(parents=True, exist_ok=True)
+    s.contracts_dir.mkdir(parents=True, exist_ok=True)
+    print(prompt_mode())
+    print('cards_prompt' if 'Planner-dispatched SimDebug cards' in WORKER_COMMON_RULES else 'legacy_prompt')
+    print(s.simdebug_cards_enabled())
+    print(bool(s.simdebug_card_context_for_role('planner')))
+    print((s.reports_dir / 'simdebug_card_dispatch.json').exists())
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**dict(os.environ), "CODE_AGENT_SIMDEBUG_CARDS": "0", "CODE_AGENT_PROMPT_MODE": "cards"},
+    )
+
+    assert result.stdout.splitlines() == ["cards", "cards_prompt", "False", "False", "False"]
 
 
 def test_session_dispatches_role_specific_simdebug_cards(tmp_path):

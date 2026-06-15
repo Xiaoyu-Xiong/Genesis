@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "id": "actuation_stress_relief_guideline",
+  "title": "Reduce active control stress before changing physics",
+  "summary": "When contact-rich simulations become slow, unstable, or eject objects under aggressive actuation, first reduce the commanded controller targets, gains, force limits, and external-force magnitudes before changing material or contact physics.",
+  "scopes": ["planner", "action", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "actuation",
+    "controller",
+    "pd",
+    "force",
+    "torque",
+    "external_force",
+    "target",
+    "gain",
+    "fem",
+    "ipc",
+    "soft",
+    "contact",
+    "clamp",
+    "roller",
+    "press",
+    "twist",
+    "squeeze",
+    "grasp",
+    "push"
+  ],
+  "failure_tags": [
+    "aggressive_actuation",
+    "overstrong_controller",
+    "large_target_jump",
+    "excessive_pd_gain",
+    "excessive_force_limit",
+    "external_force_too_large",
+    "contact_ejection",
+    "endpoint_slip",
+    "slow_contact_solve",
+    "post_contact_instability",
+    "overtwist_instability"
+  ],
+  "guidance": [
+    "If a simulation becomes very slow or unstable after contact, clamping, squeezing, twisting, rolling, pressing, or insertion begins, first inspect the active commands sent by action.py rather than immediately changing material stiffness, friction, IPC contact settings, or geometry.",
+    "Reduce commanded position, angle, velocity, compression, insertion depth, overtravel, lateral offset, vertical offset, roller speed, press depth, push distance, or twist target to the smallest value that still demonstrates the requested behavior.",
+    "Lower PD or actuator aggressiveness before changing the physical world: reduce kp, retune kv for damping rather than impact, and cap force_range or torque limits so the controller cannot inject more stress than the contact mechanism can transmit.",
+    "For direct external-force or impulse actuation, reduce magnitude, spread force over more steps, and log the applied force count and total impulse so Critic can distinguish gentle physical driving from a hidden outcome force.",
+    "Use longer smooth ramps, phase gates, and dwell periods so contacts seat before the next high-stress phase begins. A slower actuation schedule is usually preferable to a stiffer contact or stronger clamp.",
+    "When late-stage failure appears after an initially successful motion, tune the late-stage actuation signal first: shorten or weaken overtwist, compression, lateral bend, squeeze, release, or retreat phases before changing FEM E, material friction, contact resistance, or IPC d_hat.",
+    "For Opt, expose controller targets, kp, kv, force or torque limits, ramp durations, and late-phase amplitudes as tunable variables when failure evidence points to over-actuation."
+  ],
+  "restrictions": [
+    "Do not fix aggressive-controller failures by disabling collision, IPC contact, self-contact, or physical coupling.",
+    "Do not first make the material softer, less frictional, or less contact-resistant when the evidence shows that commanded targets, gains, or external forces are the source of high stress.",
+    "Do not hide a late-stage instability by ending the video before the over-actuated phase fails unless the task explicitly only requires the earlier stable behavior.",
+    "Do not replace unstable physical actuation with direct task-object state writes, hidden attachments, suction, or target-following forces."
+  ],
+  "checks": [
+    "Compare the time of failure with action phase transitions and commanded target magnitudes.",
+    "Check controller logs or source for large target jumps, high kp, high force_range, high torque limits, large external forces, or late-stage overtravel/compression/bending commands.",
+    "If the scene is slow but not crashed, inspect whether the slowdown begins when active commands create dense contact or high preload.",
+    "For endpoint clamps, rollers, presses, and grippers, check whether the task object slips, ejects, or deforms unnaturally only after the command exceeds the contact mechanism's retention capacity.",
+    "After reducing active control stress, verify that the target behavior still appears in visual evidence and metrics instead of only becoming passive or under-actuated."
+  ],
+  "dispatch_hints": [
+    "Send to action when writing or repairing staged controller schedules, PD targets, force limits, or external-force commands.",
+    "Send to critic when a run is visually plausible early but fails after stronger late-stage actuation.",
+    "Send to opt when remaining failures look tunable through controller targets, gains, force limits, torque limits, force magnitudes, or phase durations.",
+    "Send to planner for contact-rich tasks that mention squeezing, twisting, clamping, rolling, pressing, insertion, pushing, or grasping."
+  ],
+  "provenance": {
+    "source": "workspace_failure_survey",
+    "examples": [
+      "soft_twisting_rods_braid_contact_deformable"
+    ],
+    "motivation": "The twisting-rods run succeeded early but failed after high twist/compression/lateral actuation pulled FEM endpoints out of contact clamps; reducing active commands is the preferred first repair over changing material physics."
+  }
+}

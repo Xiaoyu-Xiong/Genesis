@@ -33,14 +33,14 @@ The simdebug context layer lives beside the Genesis context pack:
 ```text
 code_agent/context/simdebug/
   catalog.json
-  cards/
-    planner/
-    scene/
-    body/
-    action/
-    rendering/
-    critic/
-    opt/
+  assets_geometry/
+  contact_collision/
+  control_dynamics/
+  deformable_fem/
+  diagnosis_repair/
+  evidence_validation/
+  optimization/
+  workflow_orchestration/
 ```
 
 Do not add a separate `README.md` under `context/simdebug/`. This file is the documentation entry point for context
@@ -54,18 +54,20 @@ Planner owns card selection and dispatch: it reads the catalog, selects all card
 case state, and passes summarized card bundles to writers, Critic, and Opt. Downstream agents should not read the card
 library directly.
 
-Cards under `cards/` are organized by the primary agent owner rather than by topic or guidance/restriction kind:
+Cards are organized in direct subdirectories under `context/simdebug/` by simulation problem domain rather than by
+agent owner or guidance/restriction kind:
 
-- `planner`: planning, dispatch, asset-request, and high-level routing cards.
-- `scene`: layout, scale, initial geometry, and scene-configuration cards.
-- `body`: entity construction, assets, material, collision, XML/MJCF, and coupling cards.
-- `action`: controller, runtime evidence, metric, and physical-causality cards.
-- `rendering`: camera, lighting, background, and visual-evidence cards.
-- `critic`: failure-classification, asset-evaluation, and source-aware repair cards.
-- `opt`: Opt routing, parameter-space, objective, semantic, and XML patch cards.
+- `assets_geometry`: generated meshes, XML/MJCF assets, shape fidelity, texture requests, asset manifests, and asset inspection.
+- `contact_collision`: collision/contact enablement, IPC coupling, scale, initial clearance, dummy mounts, and runtime contact config.
+- `control_dynamics`: staged controllers, force/gain limits, phase gates, release/retreat behavior, and physical causality.
+- `deformable_fem`: FEM material, soft-body layout, FEM state metrics, deformable scope, and FEM actuation channels.
+- `diagnosis_repair`: IPC failure signatures, invalid-world diagnosis, source-aware repair, and repair routing.
+- `evidence_validation`: visual evidence, render clarity, metrics, and fresh-artifact consistency checks.
+- `optimization`: Opt routing, search space, objectives, effective parameters, task semantics, and XML scalar patches.
+- `workflow_orchestration`: Planner-owned card dispatch and other cross-cutting orchestration rules.
 
-The directory name is the card's primary owner for maintainability. The `scopes` field inside each card remains the
-source of truth for every role that Planner may dispatch the card to.
+The directory name is a maintenance hint for the problem domain. The `scopes` field inside each card remains the source
+of truth for every role that Planner may dispatch the card to.
 
 The first card set should migrate every `code_agent/prompts/` clause that is better represented as structured debugging
 experience. Prompts should keep general role, protocol, schema, and edit-boundary instructions; situational debugging

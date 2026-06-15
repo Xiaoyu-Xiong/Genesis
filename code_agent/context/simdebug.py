@@ -31,10 +31,9 @@ def load_simdebug_cards(library_dir: Path | None = None) -> list[dict[str, Any]]
     root = library_dir or repo_simdebug_library_dir()
     if not root.is_dir():
         return []
-    cards_root = root / "cards"
-    if not cards_root.is_dir():
+    search_roots = _simdebug_card_category_dirs(root)
+    if not search_roots:
         return []
-    search_roots = [cards_root]
     paths = sorted(
         path
         for search_root in search_roots
@@ -43,6 +42,14 @@ def load_simdebug_cards(library_dir: Path | None = None) -> list[dict[str, Any]]
         if path.is_file()
     )
     return [_normalize_card(_load_card_file(path), path) for path in paths]
+
+
+def _simdebug_card_category_dirs(root: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in root.iterdir()
+        if path.is_dir() and not path.name.startswith(".") and path.name != "__pycache__"
+    )
 
 
 def build_simdebug_catalog(library_dir: Path | None = None) -> dict[str, Any]:

@@ -11,7 +11,8 @@ and live downstream dispatch are reserved for later milestones after card select
 - `api_context`: concrete Genesis API usage, function signatures, wrappers, and file-layout instructions. These should
   eventually be handled by the Genesis context pack or compact API reminders, not by debugging cards.
 - `simdebug_card`: reusable simulation-debugging experience. A card may contain `guidance`, `restrictions`, `checks`,
-  and `dispatch_hints` together; cards are organized by primary agent owner rather than by guideline/restriction kind.
+  and `dispatch_hints` together; cards are organized by simulation problem domain rather than by primary agent owner or
+  guideline/restriction kind.
 
 ## Prompt-Derived Cards
 
@@ -20,54 +21,54 @@ The card library is organized by operational use, not by migration status:
 ```text
 code_agent/context/simdebug/
   catalog.json
-  cards/
-    planner/
-    scene/
-    body/
-    action/
-    rendering/
-    critic/
-    opt/
+  assets_geometry/
+  contact_collision/
+  control_dynamics/
+  deformable_fem/
+  diagnosis_repair/
+  evidence_validation/
+  optimization/
+  workflow_orchestration/
 ```
 
-The generated catalog is `code_agent/context/simdebug/catalog.json`. It currently contains 31 prompt-derived and
+The generated catalog is `code_agent/context/simdebug/catalog.json`. It currently contains 36 prompt-derived and
 human-authored cards.
 
-| Prompt source | Primary card owner | Prompt-derived card |
+| Prompt source | Problem-domain category | Prompt-derived card |
 | --- | --- | --- |
-| `common.PHYSICAL_CAUSALITY_CONTRACT` | action | `physical_causality_restriction` |
-| `common.PHYSICAL_CAUSALITY_CRITIC_GUIDE` | action | `physical_causality_restriction` |
-| `common.PHYSICAL_CONTROL_METHOD_GUIDE` | action | `physical_causality_restriction` |
-| `common.COLLISION_CONTACT_CONTRACT` | body | `collision_contact_restriction` |
-| `common.SCALE_POLICY_GUIDE` | scene | `scale_policy_restriction` |
-| `common.BUILTIN_ASSET_POLICY_GUIDE` | body | `builtin_asset_policy_restriction` |
-| `common.RENDER_CLARITY_GUIDE` | rendering | `render_visual_evidence_restriction` |
-| `common.GENERATED_RESULT_QUALITY_GUIDE` | rendering | `render_visual_evidence_restriction` plus role-level prompt protocol |
-| `common.SOURCE_AWARE_REPAIR_GUIDE` | critic | `source_aware_repair_guideline` |
-| `ipc.FEM_MATERIAL_SELECTION_GUIDE` | body | `ipc_fem_material_selection_guideline` |
-| `ipc.RIGID_IPC_COUPLING_GUIDE` | body | `rigid_ipc_coupling_guideline` |
-| `ipc.EXTERNAL_ARTICULATION_MJCF_GUIDE` | body | `external_articulation_mjcf_guideline` |
-| `ipc.IPC_FAILURE_DIAGNOSTIC_GUIDE` | scene/critic | `ipc_initial_geometry_failure_diagnosis_guideline`, `ipc_world_invalid_failure_signature_guideline` |
-| `critic.CRITIC_ASSET_EVALUATION_GUIDE` | critic | `critic_asset_evaluation_guideline` |
-| `critic.DEFORMABLE_CRITIC_GUIDE` | body | `deformable_fem_ipc_scope_restriction` plus `ipc_fem_material_selection_guideline` |
-| `critic.CRITIC_VISUAL_EVIDENCE_GUIDE` | rendering | `render_visual_evidence_restriction` |
-| `worker.RIGID_API_GUIDE` generated mesh manifest clauses | body | `generated_mesh_manifest_usage_guideline` |
-| `worker.RIGID_API_GUIDE` rigid IPC config/control clauses | scene/body/action | `ipc_runtime_config_mapping_guideline`, `rigid_ipc_coupling_guideline`, `physical_causality_restriction` |
-| `worker.FEM_IPC_API_GUIDE` FEM/IPC config mapping clauses | scene | `ipc_runtime_config_mapping_guideline` |
-| `worker.FEM_IPC_API_GUIDE` duplicate plane and FEM initial-clearance clauses | scene | `fem_ipc_initial_geometry_restriction` |
-| `worker.FEM_IPC_API_GUIDE` FEM state/metrics clauses | action | `fem_state_metrics_guideline` |
-| `planner.PLANNER_ACTION_POLICY_GUIDE` Opt-routing clauses | planner | `opt_routing_guideline` |
-| `planner.PLANNER_ACTION_POLICY_GUIDE` IPC invalid-world clauses | scene/critic | `ipc_initial_geometry_failure_diagnosis_guideline`, `ipc_world_invalid_failure_signature_guideline` |
-| `planner.planner_available_actions_section` generated mesh retry and metadata clauses | planner | `planner_asset_retry_guideline` |
-| `planner.planner_available_actions_section` XML/MJCF asset request and actuator-contract clauses | planner | `xml_asset_request_contract_guideline` |
-| `planner.planner_available_actions_section` texture-dependent asset request clauses | planner | `visual_texture_asset_request_guideline` |
-| `planner.planner_fem_ipc_capability_section` adaptive IPC contact-distance clauses | scene | `ipc_runtime_config_mapping_guideline` |
-| `opt.build_opt_prompt` parameter-effectiveness clauses | opt | `opt_effective_parameter_restriction` |
-| `opt.build_opt_prompt` Opt candidate/structural-failure clauses | planner | `opt_routing_guideline` |
-| `opt.build_opt_prompt` metric/objective/success-criteria clauses | opt | `opt_metric_and_objective_design_guideline` |
-| `opt.build_opt_prompt` search-space and strategy clauses | opt | `opt_search_space_design_guideline` |
-| `opt.build_opt_prompt` XML scalar patch clauses | opt | `opt_xml_scalar_patch_restriction` |
-| `opt.build_opt_prompt` task-semantics preservation clauses | opt | `opt_task_semantics_restriction` |
+| `common.PHYSICAL_CAUSALITY_CONTRACT` | control_dynamics | `physical_causality_restriction` |
+| `common.PHYSICAL_CAUSALITY_CRITIC_GUIDE` | control_dynamics | `physical_causality_restriction` |
+| `common.PHYSICAL_CONTROL_METHOD_GUIDE` | control_dynamics | `physical_causality_restriction` |
+| `common.COLLISION_CONTACT_CONTRACT` | contact_collision | `collision_contact_restriction` |
+| `common.SCALE_POLICY_GUIDE` | contact_collision | `scale_policy_restriction` |
+| `common.BUILTIN_ASSET_POLICY_GUIDE` | assets_geometry | `builtin_asset_policy_restriction` |
+| `common.RENDER_CLARITY_GUIDE` | evidence_validation | `render_visual_evidence_restriction` |
+| `common.GENERATED_RESULT_QUALITY_GUIDE` | evidence_validation | `render_visual_evidence_restriction` plus role-level prompt protocol |
+| `common.SOURCE_AWARE_REPAIR_GUIDE` | diagnosis_repair | `source_aware_repair_guideline` |
+| `ipc.FEM_MATERIAL_SELECTION_GUIDE` | deformable_fem | `ipc_fem_material_selection_guideline` |
+| `ipc.RIGID_IPC_COUPLING_GUIDE` | contact_collision | `rigid_ipc_coupling_guideline` |
+| `ipc.EXTERNAL_ARTICULATION_MJCF_GUIDE` | contact_collision | `external_articulation_mjcf_guideline` |
+| `ipc.IPC_FAILURE_DIAGNOSTIC_GUIDE` | diagnosis_repair | `ipc_initial_geometry_failure_diagnosis_guideline`, `ipc_world_invalid_failure_signature_guideline` |
+| `critic.CRITIC_ASSET_EVALUATION_GUIDE` | assets_geometry | `critic_asset_evaluation_guideline` |
+| `critic.DEFORMABLE_CRITIC_GUIDE` | deformable_fem | `deformable_fem_ipc_scope_restriction` plus `ipc_fem_material_selection_guideline` |
+| `critic.CRITIC_VISUAL_EVIDENCE_GUIDE` | evidence_validation | `render_visual_evidence_restriction` |
+| `worker.RIGID_API_GUIDE` generated mesh manifest clauses | assets_geometry | `generated_mesh_manifest_usage_guideline` |
+| `worker.RIGID_API_GUIDE` rigid IPC config/control clauses | contact_collision/control_dynamics | `ipc_runtime_config_mapping_guideline`, `rigid_ipc_coupling_guideline`, `physical_causality_restriction` |
+| `worker.FEM_IPC_API_GUIDE` FEM/IPC config mapping clauses | contact_collision | `ipc_runtime_config_mapping_guideline` |
+| `worker.FEM_IPC_API_GUIDE` duplicate plane and FEM initial-clearance clauses | contact_collision | `fem_ipc_initial_geometry_restriction` |
+| `worker.FEM_IPC_API_GUIDE` FEM state/metrics clauses | deformable_fem | `fem_state_metrics_guideline` |
+| `planner.PLANNER_ACTION_POLICY_GUIDE` Opt-routing clauses | optimization | `opt_routing_guideline` |
+| `planner.PLANNER_ACTION_POLICY_GUIDE` IPC invalid-world clauses | diagnosis_repair | `ipc_initial_geometry_failure_diagnosis_guideline`, `ipc_world_invalid_failure_signature_guideline` |
+| `planner.planner_available_actions_section` generated mesh retry and metadata clauses | assets_geometry | `planner_asset_retry_guideline` |
+| `planner.planner_available_actions_section` XML/MJCF asset request and actuator-contract clauses | assets_geometry | `xml_asset_request_contract_guideline` |
+| `planner.planner_available_actions_section` texture-dependent asset request clauses | assets_geometry | `visual_texture_asset_request_guideline` |
+| `planner.planner_fem_ipc_capability_section` adaptive IPC contact-distance clauses | contact_collision | `ipc_runtime_config_mapping_guideline` |
+| `opt.build_opt_prompt` parameter-effectiveness clauses | optimization | `opt_effective_parameter_restriction` |
+| `opt.build_opt_prompt` Opt candidate/structural-failure clauses | optimization | `opt_routing_guideline` |
+| `opt.build_opt_prompt` metric/objective/success-criteria clauses | optimization | `opt_metric_and_objective_design_guideline` |
+| `opt.build_opt_prompt` search-space and strategy clauses | optimization | `opt_search_space_design_guideline` |
+| `opt.build_opt_prompt` XML scalar patch clauses | optimization | `opt_xml_scalar_patch_restriction` |
+| `opt.build_opt_prompt` task-semantics preservation clauses | optimization | `opt_task_semantics_restriction` |
 
 ## Kept In Prompt For Now
 

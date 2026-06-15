@@ -254,12 +254,12 @@ The migration should classify each prompt clause into one of four buckets:
 The current prompt files contain several high-value migration targets:
 
 - `code_agent/prompts/common.py`
-  - `PHYSICAL_CAUSALITY_CONTRACT` can become action/critic cards with hard restriction sections, while prompts keep only a short
-    universal causality reminder.
-  - `COLLISION_CONTACT_CONTRACT` can become body/contact cards.
-  - `SCALE_POLICY_GUIDE` can become scene/body/rendering cards with scale guidance and checks.
-  - `RENDER_CLARITY_GUIDE` can become rendering-evidence cards dispatched mostly to rendering and Critic.
-  - `SOURCE_AWARE_REPAIR_GUIDE` can become Planner/Critic repair-routing cards.
+  - `PHYSICAL_CAUSALITY_CONTRACT` can become `control_dynamics` cards with hard restriction sections, while prompts
+    keep only a short universal causality reminder.
+  - `COLLISION_CONTACT_CONTRACT` can become `contact_collision` cards.
+  - `SCALE_POLICY_GUIDE` can become `contact_collision` cards with scale guidance and checks.
+  - `RENDER_CLARITY_GUIDE` can become `evidence_validation` cards dispatched mostly to rendering and Critic.
+  - `SOURCE_AWARE_REPAIR_GUIDE` can become `diagnosis_repair` cards.
 - `code_agent/prompts/ipc.py`
   - `FEM_MATERIAL_SELECTION_GUIDE` should become FEM material cards.
   - `RIGID_IPC_COUPLING_GUIDE` should become rigid-IPC coupling selection cards.
@@ -276,7 +276,7 @@ The current prompt files contain several high-value migration targets:
 - `code_agent/prompts/critic.py`
   - Critic response schema and read-only role should stay in the prompt.
   - Asset evaluation, deformable evidence requirements, visual evidence checks, and IPC failure interpretation should
-    become Critic/rendering/body cards.
+    become problem-domain cards dispatched to Critic and relevant writers.
 - `code_agent/prompts/worker.py`
   - Worker file ownership, target-file editing rules, and module export contracts should stay in the prompt.
   - FEM/IPC placement pitfalls, duplicated support geometry, post-step FEM state-write warnings, and owner-specific
@@ -315,31 +315,30 @@ Start with a file-based library before adding a database.
 ```text
 code_agent/context/simdebug/
   catalog.json
-  cards/
-    planner/
-      planner_card_dispatch_guideline.yaml
-      planner_asset_retry_guideline.yaml
-      xml_asset_request_contract_guideline.yaml
-    scene/
-      ipc_runtime_config_mapping_guideline.yaml
-      scale_policy_restriction.yaml
-      soft_body_robust_layout_guideline.yaml
-    body/
-      generated_mesh_manifest_usage_guideline.yaml
-      collision_contact_restriction.yaml
-      rigid_ipc_coupling_guideline.yaml
-    action/
-      controller_schedule_guideline.yaml
-      physical_causality_restriction.yaml
-      rigid_contact_metrics_guideline.yaml
-    rendering/
-      render_visual_evidence_restriction.yaml
-    critic/
-      critic_asset_evaluation_guideline.yaml
-      source_aware_repair_guideline.yaml
-    opt/
-      opt_effective_parameter_restriction.yaml
-      opt_metric_and_objective_design_guideline.yaml
+  assets_geometry/
+    generated_mesh_manifest_usage_guideline.yaml
+    planner_asset_retry_guideline.yaml
+    xml_asset_request_contract_guideline.yaml
+  contact_collision/
+    collision_contact_restriction.yaml
+    ipc_runtime_config_mapping_guideline.yaml
+    rigid_ipc_coupling_guideline.yaml
+  control_dynamics/
+    controller_schedule_guideline.yaml
+    physical_causality_restriction.yaml
+  deformable_fem/
+    ipc_fem_material_selection_guideline.yaml
+    soft_body_robust_layout_guideline.yaml
+  evidence_validation/
+    render_visual_evidence_restriction.yaml
+    rigid_contact_metrics_guideline.yaml
+  diagnosis_repair/
+    source_aware_repair_guideline.yaml
+  optimization/
+    opt_effective_parameter_restriction.yaml
+    opt_metric_and_objective_design_guideline.yaml
+  workflow_orchestration/
+    planner_card_dispatch_guideline.yaml
 ```
 
 Do not add a separate README under `context/simdebug/`. Operational documentation for both Genesis context and
@@ -356,8 +355,8 @@ simdebug cards should live in `code_agent/docs/context.md`.
 - `failure_tags`
 - source path and source symbol for prompt-derived cards
 
-The subdirectory under `cards/` is the primary agent owner for maintainability. It is not the complete dispatch set;
-the card's `scopes` field remains the complete list of roles Planner may send that card to.
+The direct subdirectory under `context/simdebug/` is the simulation problem domain for maintainability. It is not the
+complete dispatch set; the card's `scopes` field remains the complete list of roles Planner may send that card to.
 
 ## Planner-Owned Selection And Dispatch
 
@@ -466,7 +465,7 @@ Recommended first connection order:
    - Seed cards can immediately improve variable selection and parameter-effectiveness checks.
 5. **Planner-dispatched writer cards**
    - Higher leverage but also higher risk because they shape source generation.
-   - Start with narrow action/body cards, then expand to scene/rendering.
+   - Start with narrow control/contact cards, then expand to assets, deformables, and evidence validation.
 
 This order allows Planner to learn which cards are useful as evaluative and diagnostic context before relying on them to
 shape generated source.
@@ -594,7 +593,8 @@ Initial migration workflow:
 1. Inventory long prompt constants and policy sections in `code_agent/prompts/`.
 2. Split each section into atomic rules.
 3. Classify each atom as `keep_in_prompt`, `simdebug_card`, or `api_context`.
-4. Create production YAML cards under the appropriate `cards/<primary_agent>/` category, preserving prompt provenance.
+4. Create production YAML cards under the appropriate `context/simdebug/<problem_domain>/` category, preserving prompt
+   provenance.
 5. Add cards to `catalog.json` and audit Planner candidate selection before removing the corresponding static prompt
    text.
 6. Replace prompt-derived static text with compact general hooks such as "follow Planner-dispatched human debugging
@@ -662,7 +662,7 @@ Early target suites:
 
 ### Milestone 2: Card Library Skeleton And Full Prompt Migration
 
-- Add `code_agent/context/simdebug/cards/` with primary-agent subdirectories.
+- Add `code_agent/context/simdebug/<problem_domain>/` subdirectories.
 - Define YAML schema and catalog builder.
 - Convert every prompt clause classified as `simdebug_card` into a production card.
 - Preserve prompt provenance for every prompt-derived card.
