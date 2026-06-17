@@ -10,6 +10,7 @@ from code_agent.assets.mesh.manifest import (
     manifest_entry_from_bundle,
     manifest_entry_from_ready_entry_with_request,
 )
+from code_agent.assets.mesh.cloth import generate_cloth_mesh_asset, is_cloth_mesh_request
 from code_agent.assets.mesh.models import MeshyApiConfig, MeshyPromptLengthError
 from code_agent.assets.mesh.pipeline import download_meshy_mesh_from_text, process_downloaded_meshy_mesh
 from code_agent.assets.mesh.request_adapter import (
@@ -41,6 +42,8 @@ def generate_mesh_assets_for_episode(
     manifest_path = assets_dir / "asset_manifest.json"
     report_path = case_dir / "reports" / "asset_generation_report.json"
     selected_requests, skipped_names = select_mesh_requests(planner_output, asset_names)
+    cloth_requests = [request for request in selected_requests if is_cloth_mesh_request(request)]
+    meshy_requests = [request for request in selected_requests if not is_cloth_mesh_request(request)]
     selected_names = [str(request.get("name", "")) for request in selected_requests]
     mentioned_names = {name for name in selected_names if name} | {name for name in asset_names or [] if name}
     preserved_entries = _preserved_ready_manifest_entries(manifest_path, mentioned_names)
@@ -72,16 +75,40 @@ def generate_mesh_assets_for_episode(
         dump_json(report, report_path)
         return report
 
+    output_root = assets_dir / "mesh"
+    cloth_results = _generate_cloth_mesh_assets(cloth_requests, output_root=output_root)
+    if cloth_results:
+        partial_entries = _merge_manifest_entries(preserved_entries, _manifest_entries_from_results(cloth_results))
+        dump_json(build_manifest(partial_entries, skipped_names=skipped_names), manifest_path)
+
+    if not meshy_requests:
+        return _write_final_mesh_generation_report(
+            results=cloth_results,
+            api_results=[],
+            selected_names=selected_names,
+            preserved_entries=preserved_entries,
+            preserved_results=preserved_results,
+            preserved_names=preserved_names,
+            skipped_names=skipped_names,
+            manifest_path=manifest_path,
+            report_path=report_path,
+            api_max_workers=1,
+            local_max_workers=1,
+        )
+
     try:
         api_config = MeshyApiConfig.from_env(timeout_sec=CONFIGS.meshy_request.timeout_sec)
     except Exception as exc:
         generated_entries = [
-            failed_manifest_entry(request, f"{type(exc).__name__}: {exc}") for request in selected_requests
+            failed_manifest_entry(request, f"{type(exc).__name__}: {exc}") for request in meshy_requests
         ]
-        entries = _merge_manifest_entries(preserved_entries, generated_entries)
+        entries = _merge_manifest_entries(
+            preserved_entries,
+            [*_manifest_entries_from_results(cloth_results), *generated_entries],
+        )
         generated_results = [
             {"ok": False, "request": request, "manifest_entry": entry, "error": entry["notes"][0]}
-            for request, entry in zip(selected_requests, generated_entries, strict=False)
+            for request, entry in zip(meshy_requests, generated_entries, strict=False)
         ]
         report = {
             "ok": False,
@@ -95,15 +122,14 @@ def generate_mesh_assets_for_episode(
             "preserved_asset_names": preserved_names,
             "skipped_asset_names": skipped_names,
             "failure_classes": ["mesh.provider_unavailable"],
-            "assets": preserved_results + generated_results,
+            "assets": preserved_results + cloth_results + generated_results,
         }
         dump_json(build_manifest(entries, skipped_names=skipped_names), manifest_path)
         dump_json(report, report_path)
         return report
 
-    output_root = assets_dir / "mesh"
-    api_max_workers = _meshy_api_max_workers(len(selected_requests))
-    local_max_workers = max(1, min(len(selected_requests), CONFIGS.meshy_request.max_parallel_local_processing))
+    api_max_workers = _meshy_api_max_workers(len(meshy_requests))
+    local_max_workers = max(1, min(len(meshy_requests), CONFIGS.meshy_request.max_parallel_local_processing))
     progress_report = {
         "ok": False,
         "status": "mesh_asset_generation_running",
@@ -120,12 +146,12 @@ def generate_mesh_assets_for_episode(
         "skipped_asset_names": skipped_names,
         "failure_classes": [],
         "api_assets": [],
-        "assets": preserved_results,
+        "assets": preserved_results + cloth_results,
     }
     dump_json(progress_report, report_path)
 
     api_results = _download_mesh_assets(
-        selected_requests=selected_requests,
+        selected_requests=meshy_requests,
         task=task,
         output_root=output_root,
         api_config=api_config,
@@ -135,17 +161,17 @@ def generate_mesh_assets_for_episode(
     )
     results = _process_mesh_assets(
         api_results=api_results,
-        selected_requests=selected_requests,
+        selected_requests=meshy_requests,
         task=task,
         preserved_entries=preserved_entries,
-        preserved_results=preserved_results,
+        preserved_results=preserved_results + cloth_results,
         skipped_names=skipped_names,
         progress_report=progress_report,
         manifest_path=manifest_path,
         report_path=report_path,
     )
     return _write_final_mesh_generation_report(
-        results=results,
+        results=cloth_results + results,
         api_results=api_results,
         selected_names=selected_names,
         preserved_entries=preserved_entries,
@@ -242,6 +268,17 @@ def _entries_by_logical_name(entries: list[dict[str, Any]]) -> dict[str, dict[st
         for entry in entries
         if entry.get("logical_name")
     }
+
+
+def _generate_cloth_mesh_assets(
+    selected_requests: list[dict[str, Any]],
+    *,
+    output_root: Path,
+) -> list[dict[str, Any]]:
+    return [
+        generate_cloth_mesh_asset(request=request, output_root=output_root, index=index)
+        for index, request in enumerate(selected_requests)
+    ]
 
 
 def _download_mesh_assets(
@@ -607,9 +644,22 @@ def _preserved_ready_manifest_entries(manifest_path: Path, selected_names: set[s
         name = str(entry.get("logical_name", ""))
         if name in selected_names:
             continue
-        if _is_ready_generated_mesh_entry(entry):
+        if _is_ready_preservable_mesh_entry(entry):
             preserved.append(entry)
     return preserved
+
+
+def _is_ready_preservable_mesh_entry(entry: dict[str, Any]) -> bool:
+    if entry.get("source_type") == "generated_mesh":
+        return _is_ready_generated_mesh_entry(entry)
+    if entry.get("source_type") != "cloth_mesh" or entry.get("status") != "ready":
+        return False
+    runtime_path = entry.get("runtime_path")
+    if not _manifest_file_available(runtime_path, required=True):
+        return False
+    if not _manifest_file_available(entry.get("visual_path"), required=False):
+        return False
+    return _manifest_file_available(entry.get("texture_path"), required=False)
 
 
 def _is_ready_generated_mesh_entry(entry: dict[str, Any]) -> bool:

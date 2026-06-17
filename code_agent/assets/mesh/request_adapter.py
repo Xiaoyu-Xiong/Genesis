@@ -3,11 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from code_agent.assets.mesh.cloth import CLOTH_MESH_ASSET_TYPES
 from code_agent.assets.mesh.models import MeshRepairConfig, MeshyGenerationConfig, MeshyTextureConfig
 from code_agent.configs import CONFIGS
 
 
-MESH_ASSET_TYPES = {"generated_mesh"}
+MESH_ASSET_TYPES = {"generated_mesh", *CLOTH_MESH_ASSET_TYPES}
 
 
 def select_mesh_requests(

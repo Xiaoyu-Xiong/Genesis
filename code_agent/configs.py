@@ -103,6 +103,26 @@ class DeformableConfigs:
     fem_hydroelastic_modulus: float = 1e7
     fem_contact_resistance: float | None = None
     fem_hessian_invariant: bool = False
+    fem_cloth_enabled: bool = True
+    cloth_density_default: float = 200.0
+    cloth_density_min: float = 50.0
+    cloth_density_max: float = 1000.0
+    cloth_youngs_modulus_default: float = 1e4
+    cloth_youngs_modulus_min: float = 1e3
+    cloth_youngs_modulus_max: float = 1e6
+    cloth_poisson_ratio_default: float = 0.48
+    cloth_poisson_ratio_min: float = 0.0
+    cloth_poisson_ratio_max: float = 0.499
+    cloth_thickness_default: float = 0.001
+    cloth_thickness_min: float = 0.0002
+    cloth_thickness_max: float = 0.01
+    cloth_bending_stiffness_default: float | None = 3.0
+    cloth_bending_stiffness_min: float = 0.0
+    cloth_bending_stiffness_max: float = 100.0
+    cloth_friction_mu_default: float = 0.5
+    cloth_grid_resolution_default: int = 20
+    cloth_target_edge_length_default: float = 0.01
+    cloth_max_faces: int = 20000
 
 
 @dataclass(slots=True, frozen=True)

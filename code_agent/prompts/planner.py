@@ -66,9 +66,17 @@ Available actions:
   body=`create_bodies(scene, task, *, deformable_cfg)`;
   action=`run_actions(scene, actors, *, out_dir, steps, render_state=None)`;
   rendering=`setup_rendering(..., render_every_n_steps, render_res)`, `capture_frame`, and `finalize_rendering`.
-- start_mesh_assets: start Planner-requested generated mesh assets in the background and return immediately. Use
-  `asset_names` to restrict generation to specific asset request names, or null/[] to generate all generated_mesh
-  requests. If retrying with changed mesh prompts, include a complete revised `planner_output`.
+- start_mesh_assets: start Planner-requested generated mesh assets and procedural FEM cloth mesh assets in the
+  background and return immediately. Use `asset_names` to restrict generation to specific asset request names, or
+  null/[] to generate all generated_mesh and cloth_mesh requests. Use asset_type `cloth_mesh_square`,
+  `cloth_mesh_rectangle`, `cloth_mesh_cylinder`, `cloth_mesh_sphere`, or `cloth_mesh` for predefined FEM.Cloth surface
+  meshes. Every asset_request must include `cloth_target_edge_length`; set it to null for non-cloth assets or when the
+  default is acceptable. For cloth_mesh assets, it is a per-asset target triangle edge length in meters: smaller values
+  create denser cloth meshes for folds/contact detail, larger values create cheaper coarser meshes; the generator still
+  enforces the configured max face budget. Asset request `bbox` components must all be positive; for flat cloth sheets
+  use a small positive thickness dimension such as 0.001, not 0.0. If retrying with changed mesh prompts, include a
+  complete revised
+  `planner_output`.
 - wait_mesh_assets: wait for a previously started background mesh asset job to finish and validate
   assets/asset_manifest.json.
 - update_mesh_asset_metadata: synchronously update ready generated mesh manifest metadata without modifying or

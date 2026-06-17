@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "candidate_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": { "type": "string" },
+          "video_url": { "type": "string" },
+          "title": { "type": "string" },
+          "project_url": { "type": ["string", "null"] },
+          "paper_title": { "type": ["string", "null"] },
+          "venue": { "type": ["string", "null"] },
+          "source_url": { "type": ["string", "null"] },
+          "license_notes": { "type": ["string", "null"] },
+          "source_policy_notes": { "type": ["string", "null"] },
+          "notes": { "type": ["string", "null"] },
+          "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+        },
+        "required": [
+          "candidate_id",
+          "video_url",
+          "title",
+          "project_url",
+          "paper_title",
+          "venue",
+          "source_url",
+          "license_notes",
+          "source_policy_notes",
+          "notes",
+          "confidence"
+        ]
+      }
+    }
+  },
+  "required": ["candidate_sources"]
+}

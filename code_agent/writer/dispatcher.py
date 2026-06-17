@@ -393,7 +393,9 @@ def _load_genesis_context(case_dir: Path) -> str:
             f"- Machine-readable context JSON: {context_json}",
             f"- Cached official docs directory: {docs_dir}",
             f"- Selected official-doc catalog: {catalog_path}",
-            "- Active non-rigid scope: FEM+IPC only. IPC may also be used for rigid/articulated contact when enabled.",
+            "- Active non-rigid scope: FEM+IPC only, including FEM.Cloth thin-shell cloth from ready cloth_mesh "
+            "assets. IPC may also be used for rigid/articulated contact when enabled.",
+            "- PBD cloth remains out of scope.",
             "- For rigid/mesh cases, use rigid/mesh/rendering docs as needed.",
             "- Prefer local Genesis source and examples over online docs if they disagree.",
         ]

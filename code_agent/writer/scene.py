@@ -8,7 +8,7 @@ SPEC = WorkerSpec(
     target_file="src/scene.py",
     required_export="create_scene",
     responsibility=(
-        "stage, fixed objects, global Genesis setup, IPC/FEM scene options, fixed props, fixed generated meshes, "
+        "stage, fixed objects, global Genesis setup, IPC/FEM scene options, fixed props, fixed generated/cloth meshes, "
         "and scene lifecycle"
     ),
     prompt_body="""
@@ -21,9 +21,10 @@ SPEC = WorkerSpec(
     from `deformable_cfg` into `gs.options.IPCCouplerOptions(...)`. This applies both to FEM+IPC deformable scenes and
     to rigid/articulated scenes whose contacts should be handled by IPC.
     If `deformable_cfg["ipc_enabled"]` is false, do not create `gs.options.IPCCouplerOptions`.
-    If `deformable_cfg["enabled"]` is true and the Planner requests soft-body behavior, keep the non-rigid parts in
-    the FEM+IPC family. Use `deformable_cfg["genesis_precision"]` for `gs.init(...)` precision. Do not use MPM, PBD,
-    SPH, or rigid-only substitutes for soft-body tasks.
+    If `deformable_cfg["enabled"]` is true and the Planner requests soft-body or cloth behavior, keep the non-rigid
+    parts in the FEM+IPC family. Use `deformable_cfg["genesis_precision"]` for `gs.init(...)` precision. Use
+    `gs.materials.FEM.Cloth` for thin-shell cloth when requested and a ready cloth_mesh asset exists. Do not use MPM,
+    PBD, SPH, or rigid-only substitutes for soft-body or cloth tasks.
     If `deformable_cfg["enabled"]` is false, do not create FEM materials/entities. If the task fundamentally requires
     deformable physics, fail clearly in the worker report instead of writing a rigid approximation.
     Add at most one global ground Plane when the scene needs a floor. If you create it here, store the returned entity
@@ -31,9 +32,10 @@ SPEC = WorkerSpec(
     scene-owned floor instead of adding a second coincident IPC plane. Never create duplicate overlapping ground planes
     in FEM+IPC scenes.
     Add a small number of fixed stage props suggested by the task, such as a wall, bin, ramp, stop, support,
-    or ready fixed generated mesh from `assets/asset_manifest.json`. For fixed generated meshes, use the manifest
-    runtime path, Genesis scale factors, and `file_meshes_are_zup` exactly; do not search the filesystem or infer
-    orientation at runtime. Repaired generated mesh assets keep strict-manifold simulation geometry in `runtime_path`;
+    or ready fixed generated mesh from `assets/asset_manifest.json`. For fixed generated meshes and cloth support
+    meshes, use the manifest runtime path, Genesis scale factors, and `file_meshes_are_zup` exactly; do not search the
+    filesystem or infer orientation at runtime. Repaired generated mesh assets keep strict-manifold simulation geometry
+    in `runtime_path`;
     `visual_path` is a seam-aware textured render mesh attached through
     `gs.morphs.Mesh(..., visual_file=entry["visual_path"], ...)`, not an independent simulation body. Keep fixed props
     lightweight: no more than 6 fixed objects. If a generated mesh entry is missing, failed, or invalid, fail clearly

@@ -160,7 +160,8 @@ def build_manifest(entries: list[dict[str, Any]], *, skipped_names: list[str]) -
     return {
         "assets": entries,
         "assumptions": [
-            "Generated mesh runtime paths are written before code writers run, so workers should read this manifest.",
+        "Generated mesh and procedural cloth_mesh runtime paths are written before code writers run, so workers should "
+        "read this manifest.",
         ],
         "unresolved_risks": unresolved,
     }

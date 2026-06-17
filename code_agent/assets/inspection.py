@@ -107,6 +107,7 @@ def _inspect_entry(entry: dict[str, Any], output_dir: Path) -> dict[str, Any]:
 
 
 def _inspect_mesh_entry(entry: dict[str, Any], runtime_path: Path, asset_dir: Path, report: dict[str, Any]) -> None:
+    source_type = str(entry.get("source_type") or "")
     try:
         import numpy as np
         import trimesh
@@ -143,7 +144,7 @@ def _inspect_mesh_entry(entry: dict[str, Any], runtime_path: Path, asset_dir: Pa
         report["geometry"] = geometry
         if len(vertices) == 0 or len(faces) == 0:
             report["errors"].append("Mesh has no vertices or faces.")
-        if not geometry["is_watertight"]:
+        if source_type != "cloth_mesh" and not geometry["is_watertight"]:
             report["warnings"].append("Mesh is not watertight; topology may be unsuitable for IPC/FEM contact.")
         genesis_views = _render_genesis_mesh_views(
             entry=entry,

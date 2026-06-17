@@ -7,7 +7,7 @@ SPEC = WorkerSpec(
     role="body",
     target_file="src/body.py",
     required_export="create_bodies",
-    responsibility="movable rigid, FEM primitive, generated-mesh, XML/MJCF, and task-participating bodies",
+    responsibility="movable rigid, FEM primitive/cloth, generated-mesh, XML/MJCF, and task-participating bodies",
     prompt_body="""
     Write `create_bodies(scene, task: str, *, deformable_cfg: dict)`.
     Return a list of dictionaries. Each dictionary must include:
@@ -19,12 +19,18 @@ SPEC = WorkerSpec(
     - `initial_velocity`: a 3-number tuple/list for FEM vertex velocity, or zeros
     - `material`: a short material description
     - `sample`: optional semantic sampling hints for action.py metrics
-    Use dynamic rigid primitives and/or ready generated mesh assets from `assets/asset_manifest.json` when the Planner
-    requested meshes. For each generated mesh, use the manifest runtime path, Genesis scale factors, and
+    Use dynamic rigid primitives and/or ready generated mesh/cloth assets from `assets/asset_manifest.json` when the
+    Planner requested assets. For each generated mesh or cloth mesh, use the manifest runtime path, Genesis scale
+    factors, and
     `file_meshes_are_zup` exactly; do not search the filesystem or infer orientation at runtime. Repaired generated
     mesh assets keep strict-manifold simulation geometry in `runtime_path`; `visual_path` is a seam-aware textured
     render mesh attached through `gs.morphs.Mesh(..., visual_file=entry["visual_path"], ...)`, not an independent
     simulation body.
+    For ready entries with `source_type == "cloth_mesh"`, create FEM shell cloth with
+    `gs.morphs.Mesh(file=entry["runtime_path"], scale=entry["scale"] or 1.0, file_meshes_are_zup=True, ...)` and
+    `gs.materials.FEM.Cloth(...)`. Use explicit cloth E, nu, rho, thickness, bending_stiffness, and friction_mu values
+    from deformable_cfg cloth defaults/ranges. Do not tetrahedralize cloth meshes and do not pass tet_resolution for
+    cloth morphs.
     If a generated mesh manifest entry is missing, has `status != "ready"`, reports failed validation, or fails Genesis
     import at runtime, fail clearly and ask Planner to regenerate that mesh asset through the mesh agent. Do not repair,
     simplify, retopologize, rescale, procedurally replace, or split the generated mesh inside body.py.
@@ -74,12 +80,15 @@ SPEC = WorkerSpec(
     computing stack heights; do not place a tilted bottom cube at exactly `side / 2` above the floor. If the scene
     needs compression or squeezing, let gravity/action/contact create it after the initial state is valid. When useful,
     include initial layout, bbox, and clearance metadata in returned actors so repair can inspect placement.
-    Use `gs.materials.FEM.Elastic(...)` for soft primitives when `deformable_cfg["enabled"]` is true. Follow the common
-    FEM material selection guide: pass explicit `E`, `nu`, and `rho`, keep them within the config ranges, and use config
-    defaults when the task does not justify a special material. Choose explicit task-appropriate `friction_mu` values
-    for FEM materials; do not read `deformable_cfg["fem_friction_mu"]`. Read FEM model, hydroelastic modulus, contact
-    resistance, and hessian-invariant settings from deformable_cfg.
+    Use `gs.materials.FEM.Elastic(...)` for volumetric soft primitives when `deformable_cfg["enabled"]` is true. Follow
+    the common FEM material selection guide: pass explicit `E`, `nu`, and `rho`, keep them within the config ranges, and
+    use config defaults when the task does not justify a special material. Choose explicit task-appropriate
+    `friction_mu` values for FEM materials; do not read `deformable_cfg["fem_friction_mu"]`. Read FEM model,
+    hydroelastic modulus, contact resistance, and hessian-invariant settings from deformable_cfg.
     Use morph `tet_resolution=deformable_cfg["tet_resolution"]` for FEM Box/Sphere/Cylinder primitives.
+    Use `gs.materials.FEM.Cloth(...)` for thin sheet, ribbon, cylindrical shell, or spherical shell cloth tasks when
+    `deformable_cfg["fem_cloth_enabled"]` is true and a ready `cloth_mesh` asset is available. PBD cloth remains out of
+    scope: do not instantiate `gs.materials.PBD.Cloth`, `gs.options.PBDOptions`, or built-in `meshes/cloth.obj`.
     If deformable_cfg is disabled and the task fundamentally requires soft-body deformation, fail clearly instead of
     producing rigid substitutes.
     Include at least one projectile or mover with nonzero initial velocity for impact/scatter tasks.

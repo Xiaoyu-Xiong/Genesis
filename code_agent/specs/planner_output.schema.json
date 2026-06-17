@@ -54,6 +54,7 @@
           "purpose",
           "scale",
           "bbox",
+          "cloth_target_edge_length",
           "texture_needs",
           "simulation_role"
         ],
@@ -68,6 +69,7 @@
             "minItems": 3,
             "maxItems": 3
           },
+          "cloth_target_edge_length": { "type": ["number", "null"], "exclusiveMinimum": 0 },
           "texture_needs": { "type": ["string", "null"] },
           "simulation_role": { "type": "string", "minLength": 1 }
         },

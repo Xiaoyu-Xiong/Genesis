@@ -37,6 +37,7 @@ def test_simdebug_catalog_loads_prompt_derived_cards():
     assert "controller_schedule_guideline" in ids
     assert "actuation_stress_relief_guideline" in ids
     assert "soft_body_robust_layout_guideline" in ids
+    assert "fem_cloth_shell_guideline" in ids
     assert "asset_inspection_decision_guideline" in ids
     assert "ipc_world_invalid_failure_signature_guideline" in ids
     assert all("provenance" in card for card in catalog["cards"])
@@ -77,6 +78,22 @@ def test_simdebug_selector_picks_fem_material_cards_for_soft_ipc_task():
     assert "score" not in selection["selected_cards"][0]
     assert "matched_terms" not in selection["selected_cards"][0]
     assert "kind" not in selection["selected_cards"][0]
+    assert selection["physics_modes"] == ["fem_ipc"]
+
+
+def test_simdebug_selector_picks_fem_cloth_card_for_cloth_task():
+    selection = select_simdebug_cards(
+        {
+            "task": "FEM cloth sheet drapes over a rigid cylinder with IPC contact",
+            "deformable_enabled": True,
+            "ipc_enabled": True,
+        },
+        target_role="body",
+    )
+
+    ids = _selected_ids(selection)
+    assert "fem_cloth_shell_guideline" in ids
+    assert "deformable_fem_ipc_scope_restriction" in ids
     assert selection["physics_modes"] == ["fem_ipc"]
 
 

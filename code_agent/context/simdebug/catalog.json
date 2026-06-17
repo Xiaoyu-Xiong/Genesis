@@ -3,7 +3,7 @@
   "library": "simdebug",
   "description": "Planner-selected human debugging experience cards for Genesis simulation generation.",
   "library_dir": "code_agent/context/simdebug",
-  "card_count": 38,
+  "card_count": 39,
   "cards": [
     {
       "schema_version": 1,
@@ -249,7 +249,7 @@
       "schema_version": 1,
       "id": "generated_mesh_manifest_usage_guideline",
       "title": "Generated mesh workers should use the asset manifest, not guessed paths or ad hoc replacements",
-      "summary": "Generated mesh assets must be instantiated from ready asset_manifest entries with their runtime mesh, visual mesh, scale, coordinate metadata, texture metadata, and simulation role preserved.",
+      "summary": "Generated mesh and procedural cloth mesh assets must be instantiated from ready asset_manifest entries with their runtime mesh, scale, coordinate metadata, texture metadata, and simulation role preserved.",
       "scopes": [
         "planner",
         "body",
@@ -261,6 +261,7 @@
       ],
       "task_tags": [
         "generated_mesh",
+        "cloth_mesh",
         "asset_manifest",
         "runtime_path",
         "visual_path",
@@ -280,6 +281,8 @@
       ],
       "guidance": [
         "For generated mesh assets, read assets/asset_manifest.json and use entries with source_type == generated_mesh and status == ready.",
+        "For FEM cloth assets, read entries with source_type == cloth_mesh and status == ready; these are surface meshes for gs.materials.FEM.Cloth and are not required to be watertight.",
+        "For procedural FEM cloth assets, inspect validation.cloth_mesh.target_edge_length, median_edge_length, and face_count to verify the Planner's requested cloth_target_edge_length produced an appropriate resolution.",
         "Instantiate runtime geometry from entry.runtime_path using the manifest scale, file_meshes_are_zup metadata, visual_path, and intended fixed/dynamic role.",
         "runtime_path is the strict-manifold simulation/collision mesh.",
         "visual_path is a seam-aware textured render mesh attached to the same rigid entity, not a separate object to instantiate as an independent simulation body.",
@@ -1256,7 +1259,7 @@
       "schema_version": 1,
       "id": "deformable_fem_ipc_scope_restriction",
       "title": "Soft-body tasks require real FEM+IPC when deformable generation is enabled",
-      "summary": "When a prompt requires soft-body behavior, generated source should use real FEM entities/materials and IPC evidence, not rigid substitutes or unsupported MPM/PBD/SPH shortcuts.",
+      "summary": "When a prompt requires soft-body or FEM cloth behavior, generated source should use real FEM entities/materials and IPC evidence, not rigid substitutes or unsupported MPM/PBD/SPH shortcuts.",
       "scopes": [
         "planner",
         "body",
@@ -1295,7 +1298,8 @@
         "If the prompt fundamentally requires soft-body or deformation behavior while deformable is disabled, Planner should finish inconclusive rather than write a rigid-body substitute.",
         "When deformable_config.ipc_enabled is false, generated source must not instantiate gs.options.IPCCouplerOptions.",
         "When deformable_config.enabled is false and ipc_enabled is true, IPC is allowed only for rigid/articulated contact; fail fake deformable behavior.",
-        "Do not use MPM, PBD, SPH, cloth-only shortcuts, or rigid-only substitutes for soft-body prompts in this pipeline.",
+        "Do not use MPM, PBD, SPH, PBD cloth shortcuts, or rigid-only substitutes for soft-body prompts in this pipeline.",
+        "When a prompt explicitly requires thin-shell cloth, use gs.materials.FEM.Cloth with a ready cloth_mesh surface asset and IPC, not volumetric FEM Elastic unless the task has been rewritten as a thick solid.",
         "Do not fake deformation through repeated FEM position or velocity writes after stepping starts.",
         "Require FEM material/entity construction, explicit E/nu/rho/friction_mu choices, config-driven FEM/IPC/tet parameters, and deformation evidence.",
         "Fail hardcoded FEM/IPC defaults, missing E/nu/rho, missing friction_mu, attempts to read deformable_cfg[\"fem_friction_mu\"], and mid-simulation FEM position/velocity writes that fake deformation."
@@ -1396,6 +1400,78 @@
         "motivation": "Older FEM runs scheduled disturbances or constraints through unsupported channels, producing zero applied forces, static bodies, or runtime shape errors."
       },
       "source_path": "code_agent/context/simdebug/deformable_fem/fem_actuation_channel_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "fem_cloth_shell_guideline",
+      "title": "FEM cloth uses IPC shell meshes, not PBD or volumetric tets",
+      "summary": "Thin cloth tasks should use gs.materials.FEM.Cloth with ready procedural cloth_mesh surface assets and IPC contact; PBD cloth and volumetric FEM substitutes remain out of scope unless the task is explicitly rewritten.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "action",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "fem_ipc"
+      ],
+      "task_tags": [
+        "cloth",
+        "thin_shell",
+        "sheet",
+        "ribbon",
+        "drape",
+        "twist",
+        "fold",
+        "fem",
+        "ipc"
+      ],
+      "failure_tags": [
+        "pbd_cloth",
+        "missing_cloth_mesh",
+        "volumetric_substitute",
+        "tet_resolution_for_cloth",
+        "cloth_asset_missing",
+        "cloth_initial_intersection"
+      ],
+      "guidance": [
+        "Request cloth geometry as asset_type cloth_mesh or one of cloth_mesh_square, cloth_mesh_rectangle, cloth_mesh_cylinder, or cloth_mesh_sphere; use the resulting asset_manifest entry with source_type cloth_mesh.",
+        "For cloth asset_request bbox, all three components must be positive; use a small positive thickness dimension such as 0.001 for flat square or rectangle sheets instead of 0.0.",
+        "Every asset_request includes cloth_target_edge_length; set it to null for non-cloth assets or default cloth resolution, or set a positive meter value to control cloth primitive mesh resolution per asset.",
+        "Choose cloth_target_edge_length relative to bbox size and contact needs, then check validation.cloth_mesh.target_edge_length, median_edge_length, and face_count; the generator may coarsen relative to the target when the configured max face budget would be exceeded.",
+        "Instantiate cloth with gs.morphs.Mesh(file=runtime_path, scale=scale or 1.0, file_meshes_are_zup=True) and gs.materials.FEM.Cloth.",
+        "Choose E, nu, rho, thickness, bending_stiffness, and friction_mu from deformable_cfg cloth defaults/ranges; do not use tet_resolution for FEM.Cloth.",
+        "For square and rectangle cloth, start with moderate grid resolution and positive clearance from rigid colliders.",
+        "For cylindrical and spherical cloth shells, keep the mesh coarse enough for IPC contact and avoid initial self-intersection or near-coincident folds.",
+        "Use IPC-compatible rigid contact participants such as ipc_only fixed floors/obstacles when they should collide with cloth."
+      ],
+      "restrictions": [
+        "Do not instantiate gs.materials.PBD.Cloth or gs.options.PBDOptions in code_agent cloth tasks.",
+        "Do not use Genesis built-in meshes/cloth.obj; use ready cloth_mesh assets generated into the case workspace.",
+        "Do not pass tet_resolution to cloth morphs or route cloth meshes through the generated_mesh watertight/tetgen repair path.",
+        "Do not fake cloth motion with rigid sheets, direct vertex pose edits after stepping starts, hidden constraints, or keyframed folding."
+      ],
+      "checks": [
+        "Check generated source for gs.materials.FEM.Cloth and absence of PBD cloth APIs.",
+        "Check asset_manifest for a ready source_type cloth_mesh entry whose runtime_path exists and whose face count is within budget.",
+        "Check initial layout for positive clearance relative to cloth thickness and ipc_contact_d_hat.",
+        "Check video and metrics for visible bending, draping, folding, or shell deformation rather than rigid-sheet motion."
+      ],
+      "dispatch_hints": [
+        "Send to Planner when a prompt mentions cloth, sheet, ribbon, drape, garment-like fabric, thin shell, or twisting cloth.",
+        "Send to Body when implementing FEM.Cloth entities from cloth_mesh assets.",
+        "Send to Critic when rejecting PBD, volumetric-only, rigid-sheet, or keyframed cloth approximations."
+      ],
+      "provenance": {
+        "source": "fem_cloth_pipeline_enablement",
+        "symbols": [
+          "FEM_IPC_API_GUIDE",
+          "planner_fem_ipc_capability_section"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/deformable_fem/fem_cloth_shell_guideline.yaml"
     },
     {
       "schema_version": 1,
@@ -1650,7 +1726,7 @@
         "For moving rigid tools pressing soft bodies, use staged approach and bounded force/gain rather than sudden penetration."
       ],
       "restrictions": [
-        "Do not use cloth/rope/thin-shell style geometry for volumetric FEM tasks unless the task explicitly demands it and the pipeline supports it.",
+        "Do not use cloth/rope/thin-shell style geometry for volumetric FEM tasks unless the task explicitly demands it and the pipeline supports FEM.Cloth for that case.",
         "Do not rely on exact mesh interlock, tiny clearances, or coincident surfaces for success.",
         "Do not fake soft-body behavior with rigid substitutes or post-step state writes."
       ],

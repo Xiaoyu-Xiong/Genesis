@@ -34,11 +34,16 @@ Genesis rigid primitive API constraints:
 
 
 FEM_IPC_API_GUIDE = """
-Genesis FEM+IPC primitive API constraints:
+Genesis FEM+IPC primitive and cloth API constraints:
 - `create_scene` receives `deformable_cfg`. Use `gs.init(..., precision=deformable_cfg["genesis_precision"], ...)`.
 - Scene setup should pass runtime timing through `gs.options.SimOptions(dt=sim_dt, substeps=sim_substeps, gravity=...)`.
 - FEM primitive soft bodies can use morphs such as `gs.morphs.Box(...)`, `gs.morphs.Sphere(...)`, and
   `gs.morphs.Cylinder(...)` with config-driven tet resolution.
+- FEM cloth is supported only through `gs.materials.FEM.Cloth(...)` plus `gs.morphs.Mesh(file=...)` surface meshes from
+  ready `cloth_mesh` asset-manifest entries. Do not use `tet_resolution` for cloth; choose E, nu, rho, thickness,
+  bending_stiffness, and friction_mu from the cloth fields in deformable_cfg.
+- Keep PBD cloth out of scope for generated code. Do not instantiate `gs.materials.PBD.Cloth` or
+  `gs.options.PBDOptions` for code_agent cloth tasks.
 - FEM state can be sampled with `entity.get_state()` when needed; convert tensors before writing JSON.
 - Use Planner-dispatched SimDebug cards for FEM/IPC scope, material parameters, IPC option mapping, initial geometry,
   state metrics, contact/coupling, and soft-body validity restrictions.

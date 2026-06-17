@@ -76,7 +76,7 @@ class PlannerSession:
             "capabilities": {
                 "deformable_enabled": config.deformable_enabled,
                 "ipc_enabled": config.ipc_enabled,
-                "deformable_scope": "FEM only when enabled; MPM/PBD/SPH remain out of scope.",
+                "deformable_scope": "FEM volumetric and FEM.Cloth thin-shell when enabled; MPM/PBD/SPH remain out of scope.",
                 "ipc_scope": "IPC may be enabled for rigid/articulated contact; deformable forces IPC on.",
                 "deformable_config_path": str(self.deformable_config_path),
             },
@@ -639,7 +639,8 @@ class PlannerSession:
                 f"- FEM deformable generation enabled: {self.config.deformable_enabled}.",
                 f"- IPC contact/coupling enabled: {self.config.ipc_enabled}.",
                 f"- Effective FEM/IPC config: {self.deformable_config_path}",
-                "- Active non-rigid scope when FEM is enabled: FEM+IPC only.",
+                "- Active non-rigid scope when FEM is enabled: FEM+IPC only, including FEM.Cloth thin-shell cloth.",
+                "- PBD cloth remains out of scope; use ready cloth_mesh assets plus gs.materials.FEM.Cloth for cloth.",
                 "- If FEM is disabled but IPC is enabled, rigid bodies and articulated MJCF/URDF assets may still use "
                 "IPC for contact/coupling.",
                 "- Rigid bodies, articulated MJCF/URDF robots, generated meshes, textures, and rendering are in scope "

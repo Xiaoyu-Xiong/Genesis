@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": ["duplicate", "distinct", "uncertain"]
+    },
+    "duplicate_of_clip_id": {
+      "type": ["string", "null"]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "required": ["decision", "duplicate_of_clip_id", "reason", "confidence"]
+}

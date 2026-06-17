@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 40
+    },
+    "coverage": {
+      "type": ["string", "null"],
+      "enum": ["pure_rigid", "articulated", "soft_one_way_rigid", "rigid_soft_two_way", "deformable", "fem_cloth", null]
+    },
+    "notes": {
+      "type": ["string", "null"]
+    }
+  },
+  "required": ["case_id", "prompt", "coverage", "notes"]
+}

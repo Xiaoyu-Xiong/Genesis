@@ -8,11 +8,12 @@ The pack covers the current code-agent scope:
 - ordinary rigid scenes
 - rigid/articulated scenes with IPC contact/coupling
 - FEM deformables with IPC
+- FEM.Cloth thin-shell cloth with IPC
 - generated meshes and XML/MJCF assets
 - rendering, visual evidence, execution, and critique
 
-Out-of-scope solver families such as MPM, PBD, SPH, fluid, and cloth are filtered out of generated context unless they
-are explicitly reintroduced later.
+Out-of-scope solver families such as MPM, PBD, SPH, and fluid are filtered out of generated context unless they are
+explicitly reintroduced later. PBD cloth remains out of scope; cloth tasks should use FEM.Cloth with IPC.
 
 Files written under the suite root:
 

@@ -38,6 +38,7 @@ class CodexExecRequest:
     output_schema_path: Path | None = None
     image_paths: tuple[Path, ...] = ()
     codex_bin: str = "codex"
+    codex_top_level_args: tuple[str, ...] = ()
     ask_for_approval: str = CONFIGS.codex.ask_for_approval
     reasoning_effort: str | None = CONFIGS.codex.reasoning_effort
     service_tier: Literal["fast", "standard"] | None = CONFIGS.codex.service_tier
@@ -89,6 +90,7 @@ def build_codex_exec_command(request: CodexExecRequest, *, resolved_codex: str |
 
     command = [
         resolved_codex or request.codex_bin,
+        *request.codex_top_level_args,
         "exec",
         "--cd",
         str(request.cwd),
@@ -186,6 +188,7 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
     error_type: str | None = None
     error_message: str | None = None
 
+    process: subprocess.Popen[str] | None = None
     with jsonl_path.open("w", encoding="utf-8") as jsonl_file, stderr_path.open("w", encoding="utf-8") as stderr_file:
         try:
             process = subprocess.Popen(
@@ -202,6 +205,17 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
             stdout, _ = process.communicate(input=request.prompt, timeout=request.timeout_sec)
             jsonl_file.write(stdout)
             exit_code = process.returncode
+        except KeyboardInterrupt:
+            if process is not None:
+                _kill_process_tree(process)
+                try:
+                    stdout, _ = process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    _kill_process_tree(process)
+                    stdout, _ = process.communicate()
+                jsonl_file.write(stdout)
+            _append_jsonl_error(jsonl_file, request.role, "interrupted", "Codex invocation interrupted by user")
+            raise
         except subprocess.TimeoutExpired:
             timed_out = True
             error_type = "timeout"

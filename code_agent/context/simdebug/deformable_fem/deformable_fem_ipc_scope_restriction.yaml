@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "deformable_fem_ipc_scope_restriction",
   "title": "Soft-body tasks require real FEM+IPC when deformable generation is enabled",
-  "summary": "When a prompt requires soft-body behavior, generated source should use real FEM entities/materials and IPC evidence, not rigid substitutes or unsupported MPM/PBD/SPH shortcuts.",
+  "summary": "When a prompt requires soft-body or FEM cloth behavior, generated source should use real FEM entities/materials and IPC evidence, not rigid substitutes or unsupported MPM/PBD/SPH shortcuts.",
   "scopes": ["planner", "body", "action", "critic", "opt"],
   "physics_modes": ["fem_ipc"],
   "task_tags": [
@@ -33,7 +33,8 @@
     "If the prompt fundamentally requires soft-body or deformation behavior while deformable is disabled, Planner should finish inconclusive rather than write a rigid-body substitute.",
     "When deformable_config.ipc_enabled is false, generated source must not instantiate gs.options.IPCCouplerOptions.",
     "When deformable_config.enabled is false and ipc_enabled is true, IPC is allowed only for rigid/articulated contact; fail fake deformable behavior.",
-    "Do not use MPM, PBD, SPH, cloth-only shortcuts, or rigid-only substitutes for soft-body prompts in this pipeline.",
+    "Do not use MPM, PBD, SPH, PBD cloth shortcuts, or rigid-only substitutes for soft-body prompts in this pipeline.",
+    "When a prompt explicitly requires thin-shell cloth, use gs.materials.FEM.Cloth with a ready cloth_mesh surface asset and IPC, not volumetric FEM Elastic unless the task has been rewritten as a thick solid.",
     "Do not fake deformation through repeated FEM position or velocity writes after stepping starts.",
     "Require FEM material/entity construction, explicit E/nu/rho/friction_mu choices, config-driven FEM/IPC/tet parameters, and deformation evidence.",
     "Fail hardcoded FEM/IPC defaults, missing E/nu/rho, missing friction_mu, attempts to read deformable_cfg[\"fem_friction_mu\"], and mid-simulation FEM position/velocity writes that fake deformation."

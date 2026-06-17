@@ -104,7 +104,8 @@ def _write_case_inputs(case_dir: Path, case: Case, *, deformable_enabled: bool, 
     if deformable_enabled:
         capability_line = (
             "FEM deformable generation is ENABLED for this case, and IPC contact is forced ON. Use only FEM+IPC for "
-            "non-rigid behavior; MPM, PBD, SPH, and other non-rigid families remain out of scope."
+            "non-rigid behavior, including FEM.Cloth thin-shell cloth when requested; MPM, PBD, SPH, and other "
+            "non-rigid families remain out of scope."
         )
     elif ipc_enabled:
         capability_line = (

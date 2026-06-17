@@ -75,6 +75,23 @@ def test_codex_command_hides_genesis_builtin_assets(tmp_path):
         assert str(tmp_path.resolve()) in command
 
 
+def test_codex_command_places_top_level_args_before_exec(tmp_path):
+    command = codex.build_codex_exec_command(
+        codex.CodexExecRequest(
+            role="test",
+            prompt="test",
+            cwd=Path("."),
+            output_jsonl_path=tmp_path / "events.jsonl",
+            final_message_path=tmp_path / "final.json",
+            codex_top_level_args=("--search",),
+            hide_builtin_assets=False,
+        ),
+        resolved_codex="/usr/bin/codex",
+    )
+
+    assert command[:3] == ["/usr/bin/codex", "--search", "exec"]
+
+
 def test_builtin_asset_guard_flags_genesis_assets_references():
     violations = builtin_asset_violations(
         {
@@ -327,7 +344,9 @@ def test_run_opt_agent_recovers_fresh_opt_report_after_timeout(tmp_path, monkeyp
             encoding="utf-8",
         )
         (case_dir / "reports" / "verification_report.json").write_text(
-            json.dumps({"schema_version": 1, "success": False, "score": 2.0, "target": {}, "measured": {}, "terms": {}}),
+            json.dumps(
+                {"schema_version": 1, "success": False, "score": 2.0, "target": {}, "measured": {}, "terms": {}}
+            ),
             encoding="utf-8",
         )
         (case_dir / "reports" / "opt_report.json").write_text(
@@ -705,9 +724,7 @@ def test_objective_without_success_criteria_is_not_successful():
             "objective": {
                 "type": "weighted_terms",
                 "direction": "maximize",
-                "terms": [
-                    {"name": "score", "metric_path": "score", "weight": 1.0, "transform": "identity"}
-                ],
+                "terms": [{"name": "score", "metric_path": "score", "weight": 1.0, "transform": "identity"}],
             },
         },
         metrics={"score": 10.0},
@@ -732,7 +749,7 @@ def test_cma_es_handles_tail_batches_without_pycma_update():
         samples = optimizer.ask(count=count)
         assert len(samples) == count
         assert all(0.0 <= sample[0] <= 1.0 for sample in samples)
-        optimizer.tell(samples, [-(sample[0] - 0.7) ** 2 for sample in samples], maximize=True)
+        optimizer.tell(samples, [-((sample[0] - 0.7) ** 2) for sample in samples], maximize=True)
 
     state = optimizer.state()
     assert state.iteration == 1
@@ -818,11 +835,48 @@ def test_planner_schema_lookup_is_repo_relative_when_cwd_is_polluted(tmp_path, m
     assert not any("schema missing" in error for error in errors)
 
 
+def test_planner_schemas_accept_cloth_target_edge_length(tmp_path):
+    session = PlannerSession(
+        PlannerSessionConfig(
+            case_id="case",
+            task="task",
+            case_dir=tmp_path / "case",
+            backend="gpu",
+            timeout_sec=1.0,
+            render=False,
+            repair_rounds=0,
+        )
+    )
+    planner_output = _planner_output_with_asset(
+        {
+            "name": "cloth_sheet",
+            "asset_type": "cloth_mesh_square",
+            "purpose": "square FEM cloth sheet",
+            "scale": 1.0,
+            "bbox": [0.4, 0.4, 0.001],
+            "cloth_target_edge_length": 0.04,
+            "texture_needs": None,
+            "simulation_role": "dynamic FEM cloth sheet",
+        }
+    )
+    action = _planner_action(
+        action="start_mesh_assets",
+        planner_output=planner_output,
+        asset_names=["cloth_sheet"],
+    )
+
+    assert not session.validate_json_schema(planner_output, Path("code_agent/specs/planner_output.schema.json"))
+    assert not session.validate_json_schema(action, Path("code_agent/specs/planner_action.schema.json"))
+
+
 def test_deformable_config_does_not_override_fem_friction_mu():
     cfg = deformable_config_dict(deformable_enabled=True, ipc_enabled=True)
 
     assert "fem_friction_mu" not in cfg
     assert "friction" in cfg
+    assert cfg["fem_cloth_enabled"] is True
+    assert cfg["cloth_thickness_default"] > 0.0
+    assert cfg["cloth_grid_resolution_default"] > 0
 
 
 def test_generated_main_adds_repo_root_before_code_agent_import(tmp_path):
@@ -944,7 +998,147 @@ def test_planner_update_mesh_asset_metadata_action_reuses_ready_geometry(tmp_pat
     assert entry["asset_request"] == updated_request
 
 
+def test_generate_procedural_cloth_mesh_assets(tmp_path):
+    case_dir = tmp_path / "case"
+    requests = [
+        {
+            "name": "cloth_square",
+            "asset_type": "cloth_mesh_square",
+            "purpose": "square FEM cloth sheet",
+            "scale": 1.0,
+            "bbox": [0.5, 0.5, 0.001],
+            "cloth_target_edge_length": 0.05,
+            "texture_needs": None,
+            "simulation_role": "dynamic FEM cloth square",
+        },
+        {
+            "name": "cloth_rectangle",
+            "asset_type": "cloth_mesh_rectangle",
+            "purpose": "rectangular FEM cloth ribbon",
+            "scale": 1.0,
+            "bbox": [0.8, 0.3, 0.001],
+            "texture_needs": None,
+            "simulation_role": "dynamic FEM cloth rectangle",
+        },
+        {
+            "name": "cloth_cylinder",
+            "asset_type": "cloth_mesh_cylinder",
+            "purpose": "cylindrical FEM cloth shell",
+            "scale": 1.0,
+            "bbox": [0.4, 0.4, 0.8],
+            "texture_needs": None,
+            "simulation_role": "dynamic FEM cloth cylinder shell",
+        },
+        {
+            "name": "cloth_sphere",
+            "asset_type": "cloth_mesh_sphere",
+            "purpose": "spherical FEM cloth shell",
+            "scale": 1.0,
+            "bbox": [0.5, 0.5, 0.5],
+            "texture_needs": None,
+            "simulation_role": "dynamic FEM cloth sphere shell",
+        },
+    ]
+
+    report = mesh_episode.generate_mesh_assets_for_episode(
+        case_dir=case_dir,
+        task="Create a FEM.Cloth smoke asset set.",
+        planner_output=_planner_output_with_asset_requests(requests),
+    )
+
+    assert report["ok"] is True
+    assert report["status"] == "mesh_assets_generated"
+    manifest_path = case_dir / "assets" / "asset_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    session = PlannerSession(
+        PlannerSessionConfig(
+            case_id="case",
+            task="task",
+            case_dir=case_dir,
+            backend="gpu",
+            timeout_sec=1.0,
+            render=False,
+            repair_rounds=0,
+        )
+    )
+    assert not session.validate_json_schema(manifest, Path("code_agent/specs/asset_manifest.schema.json"))
+    entries = {entry["logical_name"]: entry for entry in manifest["assets"]}
+    assert set(entries) == {request["name"] for request in requests}
+    for request in requests:
+        entry = entries[request["name"]]
+        runtime_path = Path(entry["runtime_path"])
+        assert entry["source_type"] == "cloth_mesh"
+        assert entry["status"] == "ready"
+        assert entry["file_meshes_are_zup"] is True
+        assert runtime_path.is_file()
+        text = runtime_path.read_text(encoding="utf-8")
+        assert "\nv " in "\n" + text
+        assert "\nf " in "\n" + text
+        validation = entry["validation"]["cloth_mesh"]
+        assert validation["shape"] in {"square", "rectangle", "cylinder", "sphere"}
+        assert validation["face_count"] <= deformable_config_dict()["cloth_max_faces"]
+        if request.get("cloth_target_edge_length") is not None:
+            assert validation["target_edge_length"] == request["cloth_target_edge_length"]
+            assert validation["target_edge_length_source"] == "asset_request"
+            assert validation["face_count"] == 200
+
+
+def test_planner_start_mesh_assets_action_generates_cloth_mesh(tmp_path):
+    case_dir = tmp_path / "case"
+    request = {
+        "name": "cloth_sheet",
+        "asset_type": "cloth_mesh_square",
+        "purpose": "square FEM cloth sheet",
+        "scale": 1.0,
+        "bbox": [0.4, 0.4, 0.001],
+        "cloth_target_edge_length": 0.04,
+        "texture_needs": None,
+        "simulation_role": "dynamic FEM cloth sheet",
+    }
+    session = PlannerSession(
+        PlannerSessionConfig(
+            case_id="case",
+            task="Create one procedural FEM.Cloth sheet.",
+            case_dir=case_dir,
+            backend="gpu",
+            timeout_sec=1.0,
+            render=False,
+            repair_rounds=0,
+        )
+    )
+    start = session.actions.execute(
+        _planner_action(
+            action="start_mesh_assets",
+            planner_output=_planner_output_with_asset(request),
+            asset_names=["cloth_sheet"],
+        ),
+        turn=0,
+    )
+
+    result = session.actions.execute(_planner_action(action="wait_mesh_assets"), turn=1)
+
+    assert start["ok"] is True
+    assert start["status"] == "mesh_assets_started"
+    assert result["ok"] is True
+    assert result["status"] == "mesh_assets_generated"
+    assert session.state["assets"]["jobs"]["mesh"]["status"] == "ready"
+    manifest = json.loads((case_dir / "assets" / "asset_manifest.json").read_text(encoding="utf-8"))
+    entry = manifest["assets"][0]
+    assert entry["logical_name"] == "cloth_sheet"
+    assert entry["source_type"] == "cloth_mesh"
+    assert entry["validation"]["cloth_mesh"]["target_edge_length"] == 0.04
+    assert Path(entry["runtime_path"]).is_file()
+
+
 def _planner_output_with_asset(asset_request: dict[str, object]) -> dict[str, object]:
+    return _planner_output_with_asset_requests([asset_request])
+
+
+def _planner_output_with_asset_requests(asset_requests: list[dict[str, object]]) -> dict[str, object]:
+    normalized_asset_requests = [
+        {"cloth_target_edge_length": None, **asset_request}
+        for asset_request in asset_requests
+    ]
     return {
         "scene_brief": {
             "user_intent": "test",
@@ -960,7 +1154,7 @@ def _planner_output_with_asset(asset_request: dict[str, object]) -> dict[str, ob
             "resource_level": "low",
             "rendering_needs": [],
         },
-        "asset_requests": [asset_request],
+        "asset_requests": normalized_asset_requests,
         "module_contracts": [
             {
                 "owner_role": role,
@@ -1132,6 +1326,7 @@ def test_adaptive_d_hat_uses_planner_asset_request_bbox_fallback(tmp_path, monke
                 "asset_type": "primitive_box",
                 "scale": None,
                 "bbox": [0.3, 0.2, 0.1],
+                "cloth_target_edge_length": None,
                 "simulation_role": "planned primitive with no mesh file",
             }
         ]

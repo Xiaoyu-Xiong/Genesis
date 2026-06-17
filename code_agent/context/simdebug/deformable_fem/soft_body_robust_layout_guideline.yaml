@@ -35,7 +35,7 @@
     "For moving rigid tools pressing soft bodies, use staged approach and bounded force/gain rather than sudden penetration."
   ],
   "restrictions": [
-    "Do not use cloth/rope/thin-shell style geometry for volumetric FEM tasks unless the task explicitly demands it and the pipeline supports it.",
+    "Do not use cloth/rope/thin-shell style geometry for volumetric FEM tasks unless the task explicitly demands it and the pipeline supports FEM.Cloth for that case.",
     "Do not rely on exact mesh interlock, tiny clearances, or coincident surfaces for success.",
     "Do not fake soft-body behavior with rigid substitutes or post-step state writes."
   ],

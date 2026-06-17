@@ -206,6 +206,7 @@ OFFICIAL_DOCS: tuple[OfficialDoc, ...] = (
 LOCAL_CONTEXT_ANCHORS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("genesis/engine/entities/rigid_entity/rigid_entity.py", ("local RigidEntity implementation",)),
     ("genesis/engine/entities/fem_entity.py", ("local FEMEntity implementation",)),
+    ("genesis/engine/materials/FEM/cloth.py", ("FEM.Cloth material implementation",)),
     ("genesis/engine/materials/rigid.py", ("rigid IPC coupling material behavior")),
     ("genesis/options/solvers.py", ("IPC coupler options and solver defaults")),
     ("genesis/utils/mesh.py", ("local mesh processing behavior",)),
@@ -215,6 +216,7 @@ LOCAL_CONTEXT_ANCHORS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("examples/coupling/grasp_soft_cube.py", ("FEM grasp/coupling example")),
     ("examples/coupling/cut_dragon.py", ("mesh FEM interaction example")),
     ("examples/IPC_Solver", ("IPC examples",)),
+    ("examples/IPC_Solver/ipc_objects_falling.py", ("FEM.Cloth IPC example")),
     ("examples/fem_hard_and_soft_constraint.py", ("FEM constraint example")),
     ("examples/elastic_dragon.py", ("FEM mesh example")),
 )
@@ -338,7 +340,10 @@ def _source_url_candidates(url: str) -> list[str]:
 def _selected_catalog() -> dict[str, Any]:
     return {
         "indexes": [USER_GUIDE_INDEX_URL, API_REFERENCE_INDEX_URL],
-        "scope": "selected FEM+IPC, rigid interaction, articulated interaction, mesh/texture, and rendering docs only",
+        "scope": (
+            "selected FEM+IPC, FEM.Cloth thin-shell cloth, rigid interaction, articulated interaction, mesh/texture, "
+            "and rendering docs only"
+        ),
         "links": [
             {"title": doc.title, "url": doc.url, "scopes": list(doc.scopes)}
             for doc in OFFICIAL_DOCS
@@ -449,6 +454,7 @@ def _render_markdown(payload: dict[str, Any]) -> str:
 def _scope_policy() -> list[str]:
     return [
         "FEM deformable simulation with IPC coupling is the only non-rigid target family.",
+        "FEM.Cloth thin-shell cloth with IPC is in scope when requested; PBD cloth remains out of scope.",
         "Rigid and articulated scenes may run without IPC or with IPC contact/coupling.",
         "Articulated MJCF/URDF robots are in scope as controlled mechanisms and IPC contact participants.",
         "Generated mesh lifecycle, Meshy assets, repair, manifold readiness, texture transfer, and FEM meshes.",

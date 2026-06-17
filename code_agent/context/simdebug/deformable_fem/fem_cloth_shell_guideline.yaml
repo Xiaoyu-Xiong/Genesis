@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "id": "fem_cloth_shell_guideline",
+  "title": "FEM cloth uses IPC shell meshes, not PBD or volumetric tets",
+  "summary": "Thin cloth tasks should use gs.materials.FEM.Cloth with ready procedural cloth_mesh surface assets and IPC contact; PBD cloth and volumetric FEM substitutes remain out of scope unless the task is explicitly rewritten.",
+  "scopes": ["planner", "scene", "body", "action", "critic", "opt"],
+  "physics_modes": ["fem_ipc"],
+  "task_tags": [
+    "cloth",
+    "thin_shell",
+    "sheet",
+    "ribbon",
+    "drape",
+    "twist",
+    "fold",
+    "fem",
+    "ipc"
+  ],
+  "failure_tags": [
+    "pbd_cloth",
+    "missing_cloth_mesh",
+    "volumetric_substitute",
+    "tet_resolution_for_cloth",
+    "cloth_asset_missing",
+    "cloth_initial_intersection"
+  ],
+  "guidance": [
+    "Request cloth geometry as asset_type cloth_mesh or one of cloth_mesh_square, cloth_mesh_rectangle, cloth_mesh_cylinder, or cloth_mesh_sphere; use the resulting asset_manifest entry with source_type cloth_mesh.",
+    "For cloth asset_request bbox, all three components must be positive; use a small positive thickness dimension such as 0.001 for flat square or rectangle sheets instead of 0.0.",
+    "Every asset_request includes cloth_target_edge_length; set it to null for non-cloth assets or default cloth resolution, or set a positive meter value to control cloth primitive mesh resolution per asset.",
+    "Choose cloth_target_edge_length relative to bbox size and contact needs, then check validation.cloth_mesh.target_edge_length, median_edge_length, and face_count; the generator may coarsen relative to the target when the configured max face budget would be exceeded.",
+    "Instantiate cloth with gs.morphs.Mesh(file=runtime_path, scale=scale or 1.0, file_meshes_are_zup=True) and gs.materials.FEM.Cloth.",
+    "Choose E, nu, rho, thickness, bending_stiffness, and friction_mu from deformable_cfg cloth defaults/ranges; do not use tet_resolution for FEM.Cloth.",
+    "For square and rectangle cloth, start with moderate grid resolution and positive clearance from rigid colliders.",
+    "For cylindrical and spherical cloth shells, keep the mesh coarse enough for IPC contact and avoid initial self-intersection or near-coincident folds.",
+    "Use IPC-compatible rigid contact participants such as ipc_only fixed floors/obstacles when they should collide with cloth."
+  ],
+  "restrictions": [
+    "Do not instantiate gs.materials.PBD.Cloth or gs.options.PBDOptions in code_agent cloth tasks.",
+    "Do not use Genesis built-in meshes/cloth.obj; use ready cloth_mesh assets generated into the case workspace.",
+    "Do not pass tet_resolution to cloth morphs or route cloth meshes through the generated_mesh watertight/tetgen repair path.",
+    "Do not fake cloth motion with rigid sheets, direct vertex pose edits after stepping starts, hidden constraints, or keyframed folding."
+  ],
+  "checks": [
+    "Check generated source for gs.materials.FEM.Cloth and absence of PBD cloth APIs.",
+    "Check asset_manifest for a ready source_type cloth_mesh entry whose runtime_path exists and whose face count is within budget.",
+    "Check initial layout for positive clearance relative to cloth thickness and ipc_contact_d_hat.",
+    "Check video and metrics for visible bending, draping, folding, or shell deformation rather than rigid-sheet motion."
+  ],
+  "dispatch_hints": [
+    "Send to Planner when a prompt mentions cloth, sheet, ribbon, drape, garment-like fabric, thin shell, or twisting cloth.",
+    "Send to Body when implementing FEM.Cloth entities from cloth_mesh assets.",
+    "Send to Critic when rejecting PBD, volumetric-only, rigid-sheet, or keyframed cloth approximations."
+  ],
+  "provenance": {
+    "source": "fem_cloth_pipeline_enablement",
+    "symbols": ["FEM_IPC_API_GUIDE", "planner_fem_ipc_capability_section"]
+  }
+}

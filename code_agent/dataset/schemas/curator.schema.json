@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["accept", "reject"] },
+          "reason": { "type": "string" },
+          "avoid_similarity_note": { "type": ["string", "null"] }
+        },
+        "required": ["candidate_id", "status", "reason", "avoid_similarity_note"]
+      }
+    }
+  },
+  "required": ["decisions"]
+}

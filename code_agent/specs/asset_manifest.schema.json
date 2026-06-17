@@ -14,7 +14,7 @@
           "logical_name": { "type": "string", "minLength": 1 },
           "source_type": {
             "type": "string",
-            "enum": ["primitive", "generated_mesh", "repo_asset", "input_mesh", "derived_mesh", "mjcf", "urdf"]
+            "enum": ["primitive", "generated_mesh", "cloth_mesh", "repo_asset", "input_mesh", "derived_mesh", "mjcf", "urdf"]
           },
           "runtime_path": {
             "oneOf": [
