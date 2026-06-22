@@ -25,8 +25,6 @@ def _cmd_run_suite(args: argparse.Namespace) -> None:
         steps=args.steps,
         duration_sec=args.duration_sec,
         render_fps=args.render_fps,
-        deformable_enabled=args.deformable_enabled,
-        ipc_enabled=args.ipc_enabled,
         opt_enabled=args.opt_enabled,
     )
     summary_path = out_dir / "summary.json"
@@ -83,12 +81,6 @@ def build_parser() -> argparse.ArgumentParser:
     run_suite_parser.add_argument("--duration-sec", type=float, default=None)
     run_suite_parser.add_argument("--render-fps", type=int, default=None)
     run_suite_parser.add_argument("--repair-rounds", type=int, default=CONFIGS.harness.max_repair_rounds)
-    deformable_group = run_suite_parser.add_mutually_exclusive_group()
-    deformable_group.add_argument("--enable-deformable", action="store_true", dest="deformable_enabled", default=None)
-    deformable_group.add_argument("--disable-deformable", action="store_false", dest="deformable_enabled")
-    ipc_group = run_suite_parser.add_mutually_exclusive_group()
-    ipc_group.add_argument("--enable-ipc", action="store_true", dest="ipc_enabled", default=None)
-    ipc_group.add_argument("--disable-ipc", action="store_false", dest="ipc_enabled")
     opt_group = run_suite_parser.add_mutually_exclusive_group()
     opt_group.add_argument("--enable-opt", action="store_true", dest="opt_enabled", default=None)
     opt_group.add_argument("--disable-opt", action="store_false", dest="opt_enabled")

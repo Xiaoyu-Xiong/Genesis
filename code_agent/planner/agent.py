@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from code_agent.configs import CONFIGS
+from code_agent.configs import CONFIGS, runtime_defaults_dict
 from code_agent.io_utils import load_json_object
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
 from code_agent.prompts.planner import (
@@ -98,13 +98,10 @@ class EpisodePlanner:
         return payload
 
     def _planner_prompt(self, *, turn: int | None = None) -> str:
-        sim_dt = CONFIGS.runtime.sim_dt
-        sim_substeps = CONFIGS.runtime.sim_substeps
-        render_every_n_steps = CONFIGS.runtime.render_every_n_steps
-        render_fps = CONFIGS.runtime.render_fps
-        render_res = CONFIGS.runtime.render_res
-        deformable_enabled = self.session.config.deformable_enabled
-        ipc_enabled = self.session.config.ipc_enabled
+        non_ipc_defaults = runtime_defaults_dict(ipc_enabled=False)
+        ipc_defaults = runtime_defaults_dict(ipc_enabled=True)
+        deformable_enabled = bool(self.session.deformable_config.get("enabled"))
+        ipc_enabled = bool(self.session.deformable_config.get("ipc_enabled"))
         deformable_config_text = json.dumps(self.session.deformable_config, indent=2)
         prompt_state = self._prompt_state()
         state_text = json.dumps(prompt_state, indent=2)
@@ -114,15 +111,13 @@ class EpisodePlanner:
         capability_section = planner_fem_ipc_capability_section(
             deformable_enabled=deformable_enabled,
             ipc_enabled=ipc_enabled,
+            physics_modes=self.session.simdebug_physics_modes(),
             deformable_config_path=self.session.deformable_config_path,
             deformable_config_text=deformable_config_text,
         )
         actions_section = planner_available_actions_section(
-            sim_dt=sim_dt,
-            sim_substeps=sim_substeps,
-            render_every_n_steps=render_every_n_steps,
-            render_fps=render_fps,
-            render_res=render_res,
+            non_ipc_defaults=non_ipc_defaults,
+            ipc_defaults=ipc_defaults,
             opt_enabled=self.session.config.opt_enabled,
         )
         return "\n\n".join(

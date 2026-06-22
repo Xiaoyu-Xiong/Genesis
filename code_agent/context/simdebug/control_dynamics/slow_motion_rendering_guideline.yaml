@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "slow_motion_rendering_guideline",
+  "title": "Implement slow motion without lowering output FPS",
+  "summary": "Slow-motion requests should keep output FPS readable while slowing the physical action schedule and increasing captured temporal detail, rather than skipping more simulation steps per frame.",
+  "scopes": ["planner", "action", "rendering", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "slow_motion",
+    "render_every_n_steps",
+    "fps",
+    "timing",
+    "action_schedule",
+    "sim_dt",
+    "frames"
+  ],
+  "failure_tags": [
+    "fast_forward_video",
+    "low_fps",
+    "choppy_motion",
+    "wrong_render_cadence",
+    "missed_impact",
+    "temporal_aliasing"
+  ],
+  "guidance": [
+    "In the current code_agent render semantics, render_every_n_steps means how many simulation steps are skipped between captured frames. Increasing it while keeping output FPS fixed makes physical time advance faster per video second, not slower.",
+    "For slow motion, keep output FPS fixed, slow the action schedule or velocities, and reduce render_every_n_steps or increase total captured frames so intermediate states are visible.",
+    "If slowing action and capturing more frames is still insufficient, reduce sim_dt and increase steps accordingly so the same physical behavior is resolved with more simulation samples.",
+    "Preserve requested duration semantics explicitly: distinguish physical behavior duration from output video playback speed in the plan and reports."
+  ],
+  "restrictions": [
+    "Do not create slow motion by lowering render_fps to a choppy value.",
+    "Do not increase render_every_n_steps as the primary slow-motion mechanism under the current renderer semantics.",
+    "Do not shorten or truncate the requested behavior to make it appear slower."
+  ],
+  "checks": [
+    "Check timing.json, render_stats.json, and action schedule values for FPS, render_every_n_steps, sim_dt, steps, and captured frame count.",
+    "Inspect the video around fast contacts or impacts for temporal aliasing."
+  ],
+  "dispatch_hints": [
+    "Send to planner/action/rendering whenever the prompt mentions slow motion or when fast contact is visually aliased.",
+    "Send to critic when playback speed, FPS, or render cadence makes the behavior hard to judge."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Correct the prior slow-motion guidance for render_every_n_steps semantics."
+  }
+}

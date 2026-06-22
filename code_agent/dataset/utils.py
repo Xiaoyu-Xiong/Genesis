@@ -4,7 +4,7 @@ import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 def now_iso() -> str:
@@ -51,8 +51,16 @@ def is_youtube_or_vimeo_url(url: str) -> bool:
 
 
 def is_ytdlp_supported_url(url: str) -> bool:
-    host = urlparse(url).netloc.lower()
-    return any(domain in host for domain in ("youtube.com", "youtu.be", "vimeo.com", "bilibili.com", "b23.tv"))
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    path = parsed.path.rstrip("/")
+    if "youtu.be" in host:
+        return bool(path.strip("/"))
+    if any(domain in host for domain in ("youtube.com", "youtube-nocookie.com")):
+        if path == "/watch":
+            return bool(parse_qs(parsed.query).get("v"))
+        return any(path.startswith(prefix) for prefix in ("/embed/", "/shorts/", "/live/"))
+    return any(domain in host for domain in ("vimeo.com", "bilibili.com", "b23.tv"))
 
 
 def hamming_distance_hex(left: str | None, right: str | None) -> int | None:

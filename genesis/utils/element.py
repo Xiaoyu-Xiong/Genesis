@@ -13,6 +13,9 @@ import genesis as gs
 from . import mesh as mu
 
 _TEXTURED_RENDER_ARTIFACTS: dict[str, dict[str, object]] = {}
+_PRIMITIVE_TET_RESOLUTION_BOOST = 1
+_PRIMITIVE_SPHERE_MIN_SUBDIVISIONS = 2
+_PRIMITIVE_CYLINDER_MIN_SECTIONS = 32
 
 
 def _mesh_to_elements_texture_key(file, scale, tet_cfg: dict, file_meshes_are_zup=True) -> str:
@@ -185,7 +188,7 @@ def _locate_textured_source_transform(*, file, target_vertices):
 
 
 def box_to_elements(pos=(0, 0, 0), size=(1, 1, 1), tet_cfg=dict()):
-    resolution = _tet_resolution(tet_cfg)
+    resolution = _primitive_tet_resolution(tet_cfg)
     target_edge = _primitive_target_edge(feature_sizes=size, resolution=resolution)
     trimesh_obj = trimesh.creation.box(extents=size)
     trimesh_obj = mu.remesh_surface_mesh(trimesh_obj, edge_len_abs=target_edge, fix=False)
@@ -197,9 +200,12 @@ def box_to_elements(pos=(0, 0, 0), size=(1, 1, 1), tet_cfg=dict()):
 
 
 def sphere_to_elements(pos=(0, 0, 0), radius=0.5, tet_cfg=dict()):
-    resolution = _tet_resolution(tet_cfg)
+    resolution = _primitive_tet_resolution(tet_cfg)
     target_edge = _primitive_target_edge(feature_sizes=(2.0 * radius,), resolution=resolution)
-    trimesh_obj = trimesh.creation.icosphere(subdivisions=max(1, resolution), radius=radius)
+    trimesh_obj = trimesh.creation.icosphere(
+        subdivisions=max(_PRIMITIVE_SPHERE_MIN_SUBDIVISIONS, resolution),
+        radius=radius,
+    )
     trimesh_obj = mu.remesh_surface_mesh(trimesh_obj, edge_len_abs=target_edge, fix=False)
     tet_cfg = _primitive_tet_cfg(tet_cfg, target_edge=target_edge)
     trimesh_obj.vertices += np.array(pos)
@@ -209,9 +215,12 @@ def sphere_to_elements(pos=(0, 0, 0), radius=0.5, tet_cfg=dict()):
 
 
 def cylinder_to_elements(pos=(0, 0, 0), radius=0.5, height=1.0, tet_cfg=dict()):
-    resolution = _tet_resolution(tet_cfg)
+    resolution = _primitive_tet_resolution(tet_cfg)
     target_edge = _primitive_target_edge(feature_sizes=(2.0 * radius, height), resolution=resolution)
-    sections = max(24, int(math.ceil((2.0 * math.pi * radius) / max(target_edge, 1e-9))))
+    sections = max(
+        _PRIMITIVE_CYLINDER_MIN_SECTIONS,
+        int(math.ceil((2.0 * math.pi * radius) / max(target_edge, 1e-9))),
+    )
     trimesh_obj = trimesh.creation.cylinder(radius=radius, height=height, sections=sections)
     trimesh_obj = mu.remesh_surface_mesh(trimesh_obj, edge_len_abs=target_edge, fix=False)
     tet_cfg = _primitive_tet_cfg(tet_cfg, target_edge=target_edge)
@@ -547,6 +556,10 @@ def split_all_surface_tets(verts, elems, uvs=None):
 
 def _tet_resolution(tet_cfg: dict) -> int:
     return max(1, int(tet_cfg.get("tet_resolution", 3)))
+
+
+def _primitive_tet_resolution(tet_cfg: dict) -> int:
+    return _tet_resolution(tet_cfg) + _PRIMITIVE_TET_RESOLUTION_BOOST
 
 
 def _primitive_target_edge(*, feature_sizes, resolution: int) -> float:

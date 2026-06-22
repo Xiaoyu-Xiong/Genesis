@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import random
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +48,16 @@ CLIP_SHORT_FIELD_ORDER = (
     "case_id",
     "prompt",
     "category",
+    "category_source",
+    "split",
+    "split_source",
+    "split_group_id",
+    "split_group_title",
+    "split_assigned_at",
+    "trained",
+    "trained_at",
+    "trained_run_id",
+    "training_history",
     "prompt_revisions",
     "status",
     "created_at",
@@ -60,8 +72,15 @@ CLIP_SHORT_FIELD_ORDER = (
     "multi_example",
     "truncated",
 )
+DEPRECATED_CLIP_FIELDS = (
+    "prompt_from_paper",
+    "prompt_from_paper_revisions",
+)
 
 CLIP_CATEGORIES = ("rigid", "deformable_bodies", "cloth")
+PERMANENT_DATASET_SPLITS = ("train", "test")
+TMP_DATASET_SPLITS = ("train-tmp", "test-tmp")
+DATASET_SPLITS = (*PERMANENT_DATASET_SPLITS, *TMP_DATASET_SPLITS)
 
 
 class DatasetStore:
@@ -332,9 +351,305 @@ class DatasetStore:
         )
         event["before_category"] = before_category
         event["after_category"] = normalized_category
+        clip["category_source"] = "human"
         manifest["review_events"].append(event)
         self.save(manifest)
         return event
+
+    def set_clip_split(self, clip_id: str, *, split: str, reason: str | None = None) -> dict[str, Any]:
+        normalized_split = normalize_dataset_split(split)
+        manifest = self.load()
+        clip = self._find_clip(manifest, clip_id)
+        before_split = clip.get("split")
+        before_status = clip.get("status")
+        clip["split"] = normalized_split
+        clip["split_source"] = "human"
+        clip["split_assigned_at"] = now_iso()
+        clip["updated_at"] = now_iso()
+        event = self._review_event(
+            clip_id,
+            "set_split",
+            reason=reason or "human split label",
+            before_status=before_status,
+            before_prompt=clip.get("prompt"),
+        )
+        event["before_split"] = before_split
+        event["after_split"] = normalized_split
+        manifest["review_events"].append(event)
+        self.save(manifest)
+        return event
+
+    def backfill_auto_categories(self, manifest: dict[str, Any]) -> int:
+        changed = 0
+        for clip in manifest.get("clips", []):
+            if not isinstance(clip, dict) or clip.get("status") != "accepted":
+                continue
+            if clip.get("category") in CLIP_CATEGORIES:
+                continue
+            category = infer_clip_category(clip)
+            clip["category"] = category
+            clip["category_source"] = "auto_prompt_heuristic"
+            clip["updated_at"] = now_iso()
+            changed += 1
+        return changed
+
+    def assign_train_test_splits(
+        self,
+        manifest: dict[str, Any],
+        *,
+        test_fraction: float = 0.30,
+        temporary: bool = True,
+        include_unset: bool = True,
+        overwrite_permanent: bool = False,
+    ) -> dict[str, Any]:
+        self.backfill_auto_categories(manifest)
+        sources_by_id = {
+            str(source.get("id")): source
+            for source in manifest.get("source_videos", [])
+            if isinstance(source, dict) and source.get("id") is not None
+        }
+        accepted = [
+            clip
+            for clip in manifest.get("clips", [])
+            if isinstance(clip, dict) and clip.get("status") == "accepted"
+        ]
+        if temporary:
+            target_train, target_test = "train-tmp", "test-tmp"
+            eligible = [
+                clip
+                for clip in accepted
+                if clip.get("split") in TMP_DATASET_SPLITS
+                or (include_unset and clip.get("split") not in DATASET_SPLITS)
+            ]
+            split_source = "auto_tmp_paper_grouped"
+        else:
+            target_train, target_test = "train", "test"
+            eligible = [
+                clip
+                for clip in accepted
+                if overwrite_permanent
+                or clip.get("split") in TMP_DATASET_SPLITS
+                or (include_unset and clip.get("split") not in DATASET_SPLITS)
+            ]
+            split_source = "auto_final_paper_grouped"
+
+        groups: dict[str, dict[str, Any]] = {}
+        for clip in eligible:
+            source = sources_by_id.get(str(clip.get("source_video_id")))
+            group_id, group_title = paper_group_for_clip(clip, source)
+            group = groups.setdefault(group_id, {"id": group_id, "title": group_title, "clips": []})
+            group["clips"].append(clip)
+
+        target_by_category = {
+            category: round(
+                sum(1 for clip in eligible if clip.get("category") == category) * max(0.0, min(test_fraction, 1.0))
+            )
+            for category in CLIP_CATEGORIES
+        }
+        current_test = Counter()
+
+        assignable_groups = []
+        for group in groups.values():
+            counts = Counter(clip.get("category") for clip in group["clips"])
+            group["category_counts"] = counts
+            assignable_groups.append(group)
+
+        selected_test = _choose_test_group_ids(
+            assignable_groups,
+            current_test=current_test,
+            target_by_category=target_by_category,
+            test_fraction=test_fraction,
+            accepted_count=len(eligible),
+        )
+
+        timestamp = now_iso()
+        changed = 0
+        for group in groups.values():
+            target_split = target_test if group["id"] in selected_test else target_train
+            for clip in group["clips"]:
+                if (
+                    clip.get("split") != target_split
+                    or clip.get("split_source") != split_source
+                    or clip.get("split_group_id") != group["id"]
+                ):
+                    clip["split"] = target_split
+                    clip["split_source"] = split_source
+                    clip["split_group_id"] = group["id"]
+                    clip["split_group_title"] = group["title"]
+                    clip["split_assigned_at"] = timestamp
+                    clip["updated_at"] = timestamp
+                    if target_split == "train":
+                        clip.setdefault("trained", False)
+                    changed += 1
+
+        return self.split_summary(manifest) | {
+            "changed": changed,
+            "temporary": temporary,
+            "eligible": len(eligible),
+            "target_test_by_category": target_by_category,
+        }
+
+    def finalize_tmp_splits(self, manifest: dict[str, Any]) -> dict[str, Any]:
+        timestamp = now_iso()
+        changed = 0
+        for clip in manifest.get("clips", []):
+            if not isinstance(clip, dict) or clip.get("status") != "accepted":
+                continue
+            before_split = clip.get("split")
+            if before_split == "train-tmp":
+                clip["split"] = "train"
+                clip.setdefault("trained", False)
+            elif before_split == "test-tmp":
+                clip["split"] = "test"
+            else:
+                continue
+            clip["split_source"] = "tmp_promoted"
+            clip["split_assigned_at"] = timestamp
+            clip["updated_at"] = timestamp
+            changed += 1
+        return self.split_summary(manifest) | {"changed": changed}
+
+    def drop_paper_prompts(self, manifest: dict[str, Any]) -> dict[str, Any]:
+        timestamp = now_iso()
+        changed = 0
+        for clip in manifest.get("clips", []):
+            if not isinstance(clip, dict):
+                continue
+            removed = False
+            for key in DEPRECATED_CLIP_FIELDS:
+                if key in clip:
+                    clip.pop(key, None)
+                    removed = True
+            if removed:
+                clip["updated_at"] = timestamp
+                changed += 1
+        return {"changed": changed, "deprecated_fields": list(DEPRECATED_CLIP_FIELDS)}
+
+    def split_summary(self, manifest: dict[str, Any] | None = None) -> dict[str, Any]:
+        manifest = self.load() if manifest is None else manifest
+        sources_by_id = {
+            str(source.get("id")): source
+            for source in manifest.get("source_videos", [])
+            if isinstance(source, dict) and source.get("id") is not None
+        }
+        accepted = [
+            clip
+            for clip in manifest.get("clips", [])
+            if isinstance(clip, dict) and clip.get("status") == "accepted"
+        ]
+        counts: dict[str, dict[str, int]] = {
+            split: {category: 0 for category in CLIP_CATEGORIES} | {"unknown": 0, "total": 0}
+            for split in DATASET_SPLITS
+        }
+        counts["unset"] = {category: 0 for category in CLIP_CATEGORIES} | {"unknown": 0, "total": 0}
+        training = {"train_total": 0, "trained": 0, "untrained": 0}
+        groups: dict[str, dict[str, Any]] = {}
+        for clip in accepted:
+            split = clip.get("split") if clip.get("split") in DATASET_SPLITS else "unset"
+            category = clip.get("category") if clip.get("category") in CLIP_CATEGORIES else "unknown"
+            counts[split][category] += 1
+            counts[split]["total"] += 1
+            if split == "train":
+                training["train_total"] += 1
+                if clip.get("trained") is True:
+                    training["trained"] += 1
+                else:
+                    training["untrained"] += 1
+            source = sources_by_id.get(str(clip.get("source_video_id")))
+            group_id, group_title = paper_group_for_clip(clip, source)
+            group = groups.setdefault(group_id, {"title": group_title, "splits": Counter(), "clips": []})
+            group["splits"].update([split])
+            group["clips"].append(clip)
+
+        complete_test_groups = {
+            group_id: group
+            for group_id, group in groups.items()
+            if group["splits"] == Counter({"test": len(group["clips"])})
+        }
+        mixed_groups = {
+            group_id: group
+            for group_id, group in groups.items()
+            if len([split for split, count in group["splits"].items() if count]) > 1
+        }
+        return {
+            "accepted": len(accepted),
+            "counts": counts,
+            "paper_groups": len(groups),
+            "complete_test_papers": len(complete_test_groups),
+            "complete_test_clips": sum(len(group["clips"]) for group in complete_test_groups.values()),
+            "mixed_papers": len(mixed_groups),
+            "training": training,
+        }
+
+    def make_run_batch(
+        self,
+        *,
+        mode: str,
+        count: int,
+        out_path: Path,
+        seed: int | None = None,
+        mark_trained: bool = True,
+    ) -> dict[str, Any]:
+        normalized_mode = mode.strip().lower()
+        if normalized_mode not in {"train", "test"}:
+            raise ValueError("mode must be either 'train' or 'test'.")
+        manifest = self.load()
+        accepted = [
+            clip
+            for clip in manifest.get("clips", [])
+            if isinstance(clip, dict)
+            and clip.get("status") == "accepted"
+            and clip.get("split") == normalized_mode
+            and str(clip.get("prompt") or "").strip()
+        ]
+        requested = max(0, int(count))
+        if normalized_mode == "train":
+            eligible = [clip for clip in accepted if clip.get("trained") is not True]
+            selected = eligible[:requested]
+        else:
+            eligible = list(accepted)
+            rng = random.Random(seed)
+            selected = rng.sample(eligible, k=min(requested, len(eligible)))
+            selected.sort(key=lambda clip: str(clip.get("id") or ""))
+
+        lines = [case_line_for_clip(clip) for clip in selected]
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+        run_id = f"{normalized_mode}_{now_iso().replace(':', '').replace('-', '').replace('+', '_')}"
+        timestamp = now_iso()
+        if normalized_mode == "train" and mark_trained and selected:
+            selected_ids = {clip.get("id") for clip in selected}
+            for clip in manifest.get("clips", []):
+                if not isinstance(clip, dict) or clip.get("id") not in selected_ids:
+                    continue
+                clip["trained"] = True
+                clip["trained_at"] = timestamp
+                clip["trained_run_id"] = run_id
+                history = clip.setdefault("training_history", [])
+                if isinstance(history, list):
+                    history.append(
+                        {
+                            "run_id": run_id,
+                            "timestamp": timestamp,
+                            "mode": "train",
+                            "out_path": str(out_path),
+                        }
+                    )
+                clip["updated_at"] = timestamp
+            self.save(manifest)
+
+        return {
+            "mode": normalized_mode,
+            "requested": requested,
+            "selected": len(selected),
+            "eligible": len(eligible),
+            "out": str(out_path),
+            "seed": seed,
+            "marked_trained": bool(normalized_mode == "train" and mark_trained),
+            "run_id": run_id if selected else None,
+            "clip_ids": [clip.get("id") for clip in selected],
+        }
 
     def delete_duplicate_clip(
         self,
@@ -426,10 +741,9 @@ class DatasetStore:
         for clip in sorted(manifest["clips"], key=lambda item: str(item.get("id"))):
             if clip.get("status") != "accepted":
                 continue
-            case_id = str(clip.get("case_id") or clip.get("id"))
-            prompt = str(clip.get("prompt") or "").strip()
-            if prompt:
-                lines.append(f"{case_id}|{prompt}")
+            line = case_line_for_clip(clip)
+            if line:
+                lines.append(line)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         return len(lines)
@@ -450,13 +764,15 @@ class DatasetStore:
             clip["clip_uri"] = self.file_uri(self.abspath(clip_path))
 
     def normalize_clip_record(self, clip: dict[str, Any]) -> dict[str, Any]:
+        if clip.get("split") == "train" and "trained" not in clip:
+            clip = {**clip, "trained": False}
         self.add_clip_open_reference(clip)
         ordered: dict[str, Any] = {}
         for key in CLIP_SHORT_FIELD_ORDER:
             if key in clip:
                 ordered[key] = clip[key]
         for key, value in clip.items():
-            if key not in ordered and key not in CLIP_LONG_FIELD_ORDER:
+            if key not in ordered and key not in CLIP_LONG_FIELD_ORDER and key not in DEPRECATED_CLIP_FIELDS:
                 ordered[key] = value
         for key in CLIP_LONG_FIELD_ORDER:
             if key in clip:
@@ -519,6 +835,56 @@ def split_case_prompt(text: str) -> tuple[str, str]:
     return case_id, prompt
 
 
+def case_line_for_clip(clip: dict[str, Any]) -> str:
+    case_id = str(clip.get("case_id") or clip.get("id") or "case").strip()
+    prompt = str(clip.get("prompt") or "").strip()
+    return f"{case_id}|{prompt}" if prompt else ""
+
+
+def _choose_test_group_ids(
+    groups: list[dict[str, Any]],
+    *,
+    current_test: Counter,
+    target_by_category: dict[str, int],
+    test_fraction: float,
+    accepted_count: int,
+) -> set[str]:
+    if not groups:
+        return set()
+
+    states: dict[tuple[int, ...], tuple[int, ...]] = {(0,) * len(CLIP_CATEGORIES): ()}
+    for group_index, group in enumerate(groups):
+        counts = group.get("category_counts")
+        if not isinstance(counts, Counter):
+            counts = Counter(counts or {})
+        vector = tuple(int(counts.get(category, 0)) for category in CLIP_CATEGORIES)
+        if not any(vector):
+            continue
+        for state, selected_indices in list(states.items()):
+            next_state = tuple(state[index] + vector[index] for index in range(len(CLIP_CATEGORIES)))
+            if next_state not in states:
+                states[next_state] = selected_indices + (group_index,)
+
+    target_total = round(accepted_count * max(0.0, min(test_fraction, 1.0)))
+
+    def score(state: tuple[int, ...]) -> tuple[float, float, int, int, int]:
+        final_counts = {
+            category: int(current_test.get(category, 0)) + state[index]
+            for index, category in enumerate(CLIP_CATEGORIES)
+        }
+        category_error = sum(
+            ((final_counts[category] - target_by_category[category]) / max(target_by_category[category], 1)) ** 2
+            for category in CLIP_CATEGORIES
+        )
+        total = sum(final_counts.values())
+        total_error = ((total - target_total) / max(target_total, 1)) ** 2
+        overshoot = sum(max(final_counts[category] - target_by_category[category], 0) for category in CLIP_CATEGORIES)
+        return (category_error, total_error, abs(total - target_total), overshoot, len(states[state]))
+
+    best_state = min(states, key=score)
+    return {str(groups[index]["id"]) for index in states[best_state]}
+
+
 def normalize_clip_category(category: str) -> str:
     normalized = category.strip().lower().replace("-", "_").replace(" ", "_")
     aliases = {
@@ -536,6 +902,142 @@ def normalize_clip_category(category: str) -> str:
         valid = ", ".join(CLIP_CATEGORIES)
         raise ValueError(f"Unknown clip category {category!r}. Expected one of: {valid}.")
     return normalized
+
+
+def normalize_dataset_split(split: str) -> str:
+    normalized = split.strip().lower().replace("_", "-").replace(" ", "-")
+    aliases = {
+        "training": "train",
+        "train-set": "train",
+        "training-set": "train",
+        "testing": "test",
+        "test-set": "test",
+        "eval": "test",
+        "evaluation": "test",
+        "train-temporary": "train-tmp",
+        "temporary-train": "train-tmp",
+        "test-temporary": "test-tmp",
+        "temporary-test": "test-tmp",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in DATASET_SPLITS:
+        valid = ", ".join(DATASET_SPLITS)
+        raise ValueError(f"Unknown dataset split {split!r}. Expected one of: {valid}.")
+    return normalized
+
+
+def infer_clip_category(clip: dict[str, Any]) -> str:
+    text = " ".join(
+        str(clip.get(key) or "")
+        for key in ("case_id", "prompt", "title", "visual_summary", "segment_reason")
+    )
+    text = text.lower()
+    scores = {
+        "cloth": _keyword_score(
+            text,
+            (
+                "cloth",
+                "fabric",
+                "garment",
+                "shirt",
+                "skirt",
+                "towel",
+                "curtain",
+                "ribbon",
+                "thin-shell",
+                "thin shell",
+                "sheet",
+                "drape",
+                "wrinkle",
+                "fold",
+                "sewing",
+                "knit",
+                "woven",
+                "textile",
+            ),
+        ),
+        "rigid": _keyword_score(
+            text,
+            (
+                "pure rigid",
+                "rigid-body",
+                "rigid body",
+                "rigid bodies",
+                "articulated",
+                "multibody",
+                "mechanism",
+                "chain",
+                "gear",
+                "pulley",
+                "ragdoll",
+                "jenga",
+                "block stack",
+                "house of cards",
+                "tumbler",
+                "granular",
+                "grains",
+                "dice",
+                "trebuchet",
+                "vehicle",
+            ),
+        ),
+        "deformable_bodies": _keyword_score(
+            text,
+            (
+                "fem+ipc",
+                "deformable",
+                "soft body",
+                "soft-body",
+                "hyperelastic",
+                "elastic body",
+                "elastic bodies",
+                "rubber",
+                "jelly",
+                "gel",
+                "tactile",
+                "plastic",
+                "putty",
+                "volume",
+                "volumetric",
+            ),
+        ),
+    }
+    if "cloth" in text or "fem.cloth" in text:
+        scores["cloth"] += 3
+    if text.startswith("create a rigid") or "pure rigid" in text:
+        scores["rigid"] += 3
+    if text.startswith("create a fem+ipc") or "hyperelastic" in text:
+        scores["deformable_bodies"] += 2
+    priority = {"cloth": 3, "deformable_bodies": 2, "rigid": 1}
+    return max(("cloth", "deformable_bodies", "rigid"), key=lambda category: (scores[category], priority[category]))
+
+
+def paper_group_for_clip(clip: dict[str, Any], source: dict[str, Any] | None) -> tuple[str, str]:
+    source = source or {}
+    title = _optional_text(source.get("paper_title")) or _optional_text(source.get("title"))
+    key_text = (
+        _optional_text(source.get("paper_url"))
+        or _optional_text(source.get("paper_title"))
+        or _optional_text(source.get("project_url"))
+        or _optional_text(source.get("source_url"))
+        or _optional_text(source.get("url"))
+        or _optional_text(source.get("id"))
+        or _optional_text(clip.get("source_video_id"))
+        or _optional_text(clip.get("id"))
+        or "unknown_paper"
+    )
+    return slugify(key_text, fallback="paper_group"), title or key_text
+
+
+def _keyword_score(text: str, keywords: tuple[str, ...]) -> int:
+    return sum(text.count(keyword) for keyword in keywords)
+
+
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _normalize_visual_signature(

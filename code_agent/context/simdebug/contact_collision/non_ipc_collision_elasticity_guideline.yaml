@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "non_ipc_collision_elasticity_guideline",
+  "title": "Tune non-IPC rigid collision response through contact solver parameters only",
+  "summary": "For ordinary rigid Genesis contact, collision bounce/compliance should be adjusted through local contact solver parameters such as sol_params, not by changing task energy, friction, geometry, or unrelated global hyperparameters.",
+  "scopes": ["planner", "body", "action", "critic", "opt"],
+  "physics_modes": ["rigid"],
+  "task_tags": [
+    "rigid",
+    "collision",
+    "contact",
+    "elasticity",
+    "bounce",
+    "sol_params",
+    "solver_parameters"
+  ],
+  "failure_tags": [
+    "dead_collision",
+    "too_bouncy",
+    "mushy_contact",
+    "overdamped_contact",
+    "rigid_contact_jitter",
+    "contact_instability"
+  ],
+  "guidance": [
+    "Use ordinary rigid contact solver parameters when the requested behavior specifically needs a more or less elastic collision response in non-IPC rigid mode.",
+    "Genesis rigid contact sol_params are (timeconst, dampratio, dmin, dmax, width, mid, power). The internal note in genesis.utils.geom.default_solver_params states that timeconst controls velocity damping and dampratio controls spring stiffness, despite the name.",
+    "To make collision less dead while staying within contact-only tuning, reduce contact velocity damping by using a larger positive timeconst, and increase elastic restoring stiffness by using a smaller positive dampratio. Keep dampratio strictly positive.",
+    "To make collision less bouncy or reduce jitter, increase dampratio or use a shorter/more dissipative timeconst, while keeping timeconst above the solver safety minimum enforced by Genesis.",
+    "Prefer local per-geom set_sol_params for task-critical colliders instead of broad global changes; record any effective sol_params in metrics or reports when they were important."
+  ],
+  "restrictions": [
+    "Do not alter initial velocity, actuation strength, gravity, mass, shape, FEM/cloth material properties, or friction to satisfy this collision-elasticity card.",
+    "Do not change pre-specified runtime hyperparameters such as sim_dt, sim_substeps, solver iteration counts, or global rigid solver options under this card; route those as separate hyperparameter or execution-quality work.",
+    "Do not set dampratio to zero; Genesis forbids zero because it removes the elastic restoring force.",
+    "Do not use non-IPC sol_params advice for IPC scenes; IPC contact should use the IPC tuning card instead."
+  ],
+  "checks": [
+    "Check the case is in rigid physics mode rather than rigid_ipc or fem_ipc.",
+    "Check any sol_params change affects colliding geoms that actually participate in the requested contact.",
+    "Check the video for both semantic correctness and absence of excessive jitter/ejection after tuning."
+  ],
+  "dispatch_hints": [
+    "Send to body/action when local rigid contact response needs collision-only tuning.",
+    "Send to critic and opt when a rigid contact result is close but collision response is too dead, too soft, or too unstable."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Keep non-IPC collision elasticity fixes scoped to collision-contact parameters rather than unrelated task or hyperparameter changes."
+  }
+}

@@ -16,6 +16,7 @@ from code_agent.dataset.media import (
     build_contact_sheet,
     cut_clip,
     detect_scene_segments,
+    discover_video_urls_from_page,
     probe_video,
     resolve_ytdlp_command,
     visual_signature,
@@ -190,6 +191,35 @@ def test_dataset_store_detects_visual_near_duplicates_from_foreground_components
     assert candidates[0]["reason"] == "foreground_components"
 
 
+def test_discover_video_urls_from_project_page(monkeypatch):
+    class FakeResponse:
+        headers = {"Content-Type": "text/html; charset=utf-8"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, _size):
+            return (
+                b'<iframe src="//www.youtube.com/embed/abc123"></iframe>'
+                b'<a href="videos/demo.mp4">demo</a>'
+                b'<img src="thumb.jpg">'
+            )
+
+    def fake_urlopen(_request, timeout):
+        assert timeout == 30.0
+        return FakeResponse()
+
+    monkeypatch.setattr("code_agent.dataset.media.urllib.request.urlopen", fake_urlopen)
+
+    assert discover_video_urls_from_page("https://example.test/project/index.html") == [
+        "https://www.youtube.com/embed/abc123",
+        "https://example.test/project/videos/demo.mp4",
+    ]
+
+
 def test_delete_duplicate_removes_clip_without_negative_memory(tmp_path):
     store = DatasetStore(tmp_path / "dataset")
     manifest = store.empty_manifest()
@@ -268,6 +298,134 @@ def test_set_clip_category_records_review_event(tmp_path):
     assert manifest["clips"][0]["category"] == "deformable_bodies"
     assert manifest["clips"][0]["status"] == "accepted"
     assert manifest["review_events"][-1]["reason"] == "review label"
+
+
+def test_deprecated_paper_prompt_fields_are_dropped_and_splits_support_tmp(tmp_path):
+    store = DatasetStore(tmp_path / "dataset")
+    manifest = store.empty_manifest()
+    store.add_clip(
+        manifest,
+        {
+            "id": "clip_paper",
+            "status": "accepted",
+            "case_id": "visual_case",
+            "prompt": "Create a FEM+IPC scene inspired by a visual soft body demo. Render 10s behavior.",
+            "clip_path": "clips/clip_paper.mp4",
+            "prompt_from_paper": {"status": "generated", "case_id": "paper_case", "prompt": "old"},
+            "prompt_from_paper_revisions": [{"prompt": "older"}],
+        },
+    )
+    store.save(manifest)
+
+    manifest = store.load()
+    summary = store.drop_paper_prompts(manifest)
+    store.save(manifest)
+    split_event = store.set_clip_split("clip_paper", split="test-tmp", reason="holdout candidate")
+    manifest = store.load()
+    clip = manifest["clips"][0]
+
+    assert summary["changed"] in {0, 1}
+    assert split_event["type"] == "set_split"
+    assert clip["case_id"] == "visual_case"
+    assert "prompt_from_paper" not in clip
+    assert "prompt_from_paper_revisions" not in clip
+    assert clip["split"] == "test-tmp"
+    assert clip["split_source"] == "human"
+
+
+def test_assign_train_test_splits_groups_whole_papers_and_backfills_category(tmp_path):
+    store = DatasetStore(tmp_path / "dataset")
+    manifest = store.empty_manifest()
+    manifest["source_videos"].extend(
+        [
+            {"id": "paper_a", "paper_title": "Rigid Paper", "url": "https://example.test/a.mp4"},
+            {"id": "paper_b", "paper_title": "Cloth Paper", "url": "https://example.test/b.mp4"},
+            {"id": "paper_c", "paper_title": "Soft Paper", "url": "https://example.test/c.mp4"},
+        ]
+    )
+    for index in range(3):
+        store.add_clip(
+            manifest,
+            {
+                "id": f"rigid_{index}",
+                "source_video_id": "paper_a",
+                "status": "accepted",
+                "case_id": f"rigid_{index}",
+                "prompt": "Create a pure rigid multibody block stack scene. Render 10s behavior.",
+            },
+        )
+    for index in range(3):
+        store.add_clip(
+            manifest,
+            {
+                "id": f"cloth_{index}",
+                "source_video_id": "paper_b",
+                "status": "accepted",
+                "case_id": f"cloth_{index}",
+                "prompt": "Create a FEM.Cloth fabric sheet draping scene. Render 10s behavior.",
+            },
+        )
+    for index in range(4):
+        store.add_clip(
+            manifest,
+            {
+                "id": f"soft_{index}",
+                "source_video_id": "paper_c",
+                "status": "accepted",
+                "case_id": f"soft_{index}",
+                "prompt": "Create a FEM+IPC hyperelastic soft body compression scene. Render 10s behavior.",
+            },
+        )
+
+    summary = store.assign_train_test_splits(manifest, test_fraction=0.3, temporary=True)
+
+    assert summary["accepted"] == 10
+    assert summary["temporary"] is True
+    assert all(clip.get("category") in {"rigid", "cloth", "deformable_bodies"} for clip in manifest["clips"])
+    assert all(clip.get("split") in {"train-tmp", "test-tmp"} for clip in manifest["clips"])
+    for source_id in ("paper_a", "paper_b", "paper_c"):
+        splits = {
+            clip["split"]
+            for clip in manifest["clips"]
+            if clip.get("source_video_id") == source_id and clip.get("status") == "accepted"
+        }
+        assert len(splits) == 1
+
+    promoted = store.finalize_tmp_splits(manifest)
+    assert promoted["changed"] == 10
+    assert all(clip.get("split") in {"train", "test"} for clip in manifest["clips"])
+    assert all(clip.get("trained") is False for clip in manifest["clips"] if clip.get("split") == "train")
+
+
+def test_make_run_batch_uses_only_permanent_splits_and_marks_train_order(tmp_path):
+    store = DatasetStore(tmp_path / "dataset")
+    manifest = store.empty_manifest()
+    for index, split in enumerate(("train", "train", "train-tmp", "test", "test-tmp"), start=1):
+        store.add_clip(
+            manifest,
+            {
+                "id": f"clip_{index}",
+                "status": "accepted",
+                "case_id": f"case_{index}",
+                "prompt": f"Create a FEM+IPC scene inspired by demo {index}. Render 10s behavior.",
+                "split": split,
+                "trained": index == 1,
+            },
+        )
+    store.save(manifest)
+
+    train_summary = store.make_run_batch(mode="train", count=2, out_path=tmp_path / "train.txt")
+    manifest = store.load()
+
+    assert train_summary["clip_ids"] == ["clip_2"]
+    assert "case_2|Create a FEM+IPC scene" in (tmp_path / "train.txt").read_text(encoding="utf-8")
+    assert next(clip for clip in manifest["clips"] if clip["id"] == "clip_2")["trained"] is True
+    assert next(clip for clip in manifest["clips"] if clip["id"] == "clip_3")["trained"] is False
+
+    test_summary = store.make_run_batch(mode="test", count=5, out_path=tmp_path / "test.txt", seed=7)
+
+    assert test_summary["clip_ids"] == ["clip_4"]
+    assert "case_4|Create a FEM+IPC scene" in (tmp_path / "test.txt").read_text(encoding="utf-8")
 
 
 def test_review_tui_start_position_helpers_follow_last_reviewed_clip(tmp_path):
@@ -375,6 +533,10 @@ def test_review_tui_defaults_to_modern_waiting_editor(monkeypatch):
 def test_bilibili_urls_are_routed_to_ytdlp():
     assert is_ytdlp_supported_url("https://www.bilibili.com/video/BV1964y1275C/")
     assert is_ytdlp_supported_url("https://b23.tv/example")
+    assert is_ytdlp_supported_url("https://www.youtube.com/watch?v=demo")
+    assert is_ytdlp_supported_url("https://www.youtube.com/embed/demo")
+    assert not is_ytdlp_supported_url("https://www.youtube.com/user/DisneyResearchHub")
+    assert not is_ytdlp_supported_url("https://www.youtube.com/channel/UCdemo")
 
 
 def test_failed_source_urls_are_retryable(tmp_path):
@@ -636,6 +798,11 @@ def test_segment_and_prompt_writer_prompts_warn_against_truncated_examples(tmp_p
     )
     agents.write_prompt(
         clip_record={"id": "clip_demo", "start_sec": 1.0, "end_sec": 3.0, "visual_summary": "partial demo"},
+        source_record={
+            "paper_title": "Example Contact Paper",
+            "paper_url": "https://example.test/paper.pdf",
+            "project_url": "https://example.test/project",
+        },
         manifest={},
         clip_sheet=tmp_path / "missing_clip.jpg",
         logs_dir=logs_dir,
@@ -648,6 +815,9 @@ def test_segment_and_prompt_writer_prompts_warn_against_truncated_examples(tmp_p
     assert "starts after the main setup" in writer_prompt
     assert "cuts off before" in writer_prompt
     assert "the main outcome/settling" in writer_prompt
+    assert "Source/paper metadata" in writer_prompt
+    assert "Example Contact Paper" in writer_prompt
+    assert "Do not create a separate paper-only prompt" in writer_prompt
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is required for video tests")
@@ -879,6 +1049,7 @@ def _payload_for_role(role: str) -> dict[str, object]:
                     "video_url": "https://example.test/demo.mp4",
                     "title": "Demo",
                     "project_url": None,
+                    "paper_url": "https://example.test/paper.pdf",
                     "paper_title": "Paper",
                     "venue": "SIGGRAPH",
                     "source_url": "https://example.test/project",

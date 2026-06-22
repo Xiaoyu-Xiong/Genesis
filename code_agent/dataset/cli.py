@@ -8,6 +8,7 @@ from code_agent.dataset.builder import build_dataset
 from code_agent.dataset.models import BuildConfig
 from code_agent.dataset.review_tui import run_review_tui
 from code_agent.dataset.store import DEFAULT_DATA_ROOT, DatasetStore
+from code_agent.io_utils import load_json_object
 
 
 def _cmd_build(args: argparse.Namespace) -> None:
@@ -49,6 +50,73 @@ def _cmd_set_category(args: argparse.Namespace) -> None:
     store = DatasetStore(args.data_root)
     event = store.set_clip_category(args.clip_id, category=args.category, reason=args.reason)
     print(json.dumps(event, indent=2, ensure_ascii=False))
+
+
+def _cmd_set_split(args: argparse.Namespace) -> None:
+    store = DatasetStore(args.data_root)
+    event = store.set_clip_split(args.clip_id, split=args.split, reason=args.reason)
+    print(json.dumps(event, indent=2, ensure_ascii=False))
+
+
+def _cmd_assign_splits(args: argparse.Namespace) -> None:
+    store = DatasetStore(args.data_root)
+    manifest = store.load()
+    summary = store.assign_train_test_splits(
+        manifest,
+        test_fraction=args.test_fraction,
+        temporary=True,
+        include_unset=not args.no_include_unset,
+        overwrite_permanent=False,
+    )
+    store.save(manifest)
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
+def _cmd_assign_final_splits(args: argparse.Namespace) -> None:
+    store = DatasetStore(args.data_root)
+    manifest = store.load()
+    summary = store.assign_train_test_splits(
+        manifest,
+        test_fraction=args.test_fraction,
+        temporary=False,
+        include_unset=True,
+        overwrite_permanent=True,
+    )
+    store.save(manifest)
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
+def _cmd_finalize_tmp_splits(args: argparse.Namespace) -> None:
+    store = DatasetStore(args.data_root)
+    manifest = store.load()
+    summary = store.finalize_tmp_splits(manifest)
+    store.save(manifest)
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
+def _cmd_split_summary(args: argparse.Namespace) -> None:
+    store = DatasetStore(args.data_root)
+    print(json.dumps(store.split_summary(), indent=2, ensure_ascii=False))
+
+
+def _cmd_drop_paper_prompts(args: argparse.Namespace) -> None:
+    store = DatasetStore(args.data_root)
+    manifest = load_json_object(store.manifest_path) or store.empty_manifest()
+    summary = store.drop_paper_prompts(manifest)
+    store.save(manifest)
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
+def _cmd_make_run_batch(args: argparse.Namespace) -> None:
+    store = DatasetStore(args.data_root)
+    summary = store.make_run_batch(
+        mode=args.mode,
+        count=args.count,
+        out_path=args.out,
+        seed=args.seed,
+        mark_trained=not args.no_mark_trained,
+    )
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
 def _cmd_delete_duplicate(args: argparse.Namespace) -> None:
@@ -139,6 +207,65 @@ def build_parser() -> argparse.ArgumentParser:
     )
     category.add_argument("--reason", default="human category label")
     category.set_defaults(func=_cmd_set_category)
+
+    split = sub.add_parser("set-split", help="Set a clip's dataset split label.")
+    split.add_argument("--clip-id", required=True)
+    split.add_argument("--split", required=True, choices=("train", "test", "train-tmp", "test-tmp"))
+    split.add_argument("--reason", default="human split label")
+    split.set_defaults(func=_cmd_set_split)
+
+    assign_splits = sub.add_parser(
+        "assign-splits",
+        help="Alias for assign-tmp-splits: assign train-tmp/test-tmp labels without touching permanent labels.",
+    )
+    assign_splits.add_argument("--test-fraction", type=float, default=0.30)
+    assign_splits.add_argument("--no-include-unset", action="store_true")
+    assign_splits.set_defaults(func=_cmd_assign_splits)
+
+    assign_tmp_splits = sub.add_parser(
+        "assign-tmp-splits",
+        help="Reassign all temporary/unset accepted clips to train-tmp/test-tmp.",
+    )
+    assign_tmp_splits.add_argument("--test-fraction", type=float, default=0.30)
+    assign_tmp_splits.add_argument("--no-include-unset", action="store_true")
+    assign_tmp_splits.set_defaults(func=_cmd_assign_splits)
+
+    finalize_tmp_splits = sub.add_parser(
+        "finalize-tmp-splits",
+        help="Promote train-tmp/test-tmp labels to permanent train/test labels.",
+    )
+    finalize_tmp_splits.set_defaults(func=_cmd_finalize_tmp_splits)
+
+    assign_final_splits = sub.add_parser(
+        "assign-final-splits",
+        help="Reassign all accepted clips directly to permanent train/test labels.",
+    )
+    assign_final_splits.add_argument("--test-fraction", type=float, default=0.30)
+    assign_final_splits.set_defaults(func=_cmd_assign_final_splits)
+
+    split_summary = sub.add_parser("split-summary", help="Print train/test split summary.")
+    split_summary.set_defaults(func=_cmd_split_summary)
+
+    drop_paper_prompts = sub.add_parser(
+        "drop-paper-prompts",
+        help="Remove deprecated prompt_from_paper blocks from clip records.",
+    )
+    drop_paper_prompts.set_defaults(func=_cmd_drop_paper_prompts)
+
+    run_batch = sub.add_parser(
+        "make-run-batch",
+        help="Export a train/test batch. Train batches advance through untrained permanent train data in order.",
+    )
+    run_batch.add_argument("--mode", required=True, choices=("train", "test"))
+    run_batch.add_argument("--count", type=int, required=True)
+    run_batch.add_argument("--out", type=Path, required=True)
+    run_batch.add_argument("--seed", type=int, default=None, help="Random seed for test mode.")
+    run_batch.add_argument(
+        "--no-mark-trained",
+        action="store_true",
+        help="Do not mark selected train clips as trained after exporting.",
+    )
+    run_batch.set_defaults(func=_cmd_make_run_batch)
 
     delete_duplicate = sub.add_parser(
         "delete-duplicate",

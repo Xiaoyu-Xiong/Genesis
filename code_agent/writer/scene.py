@@ -20,6 +20,8 @@ SPEC = WorkerSpec(
     If `deformable_cfg["ipc_enabled"]` is true, configure IPC through Genesis scene options and map IPC option values
     from `deformable_cfg` into `gs.options.IPCCouplerOptions(...)`. This applies both to FEM+IPC deformable scenes and
     to rigid/articulated scenes whose contacts should be handled by IPC.
+    Only pass actual `IPCCouplerOptions` fields to Genesis; do not pass config metadata keys ending in `_default`,
+    `_min`, or `_max`.
     If `deformable_cfg["ipc_enabled"]` is false, do not create `gs.options.IPCCouplerOptions`.
     If `deformable_cfg["enabled"]` is true and the Planner requests soft-body or cloth behavior, keep the non-rigid
     parts in the FEM+IPC family. Use `deformable_cfg["genesis_precision"]` for `gs.init(...)` precision. Use

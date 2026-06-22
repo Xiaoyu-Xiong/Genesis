@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import re
 import json
 import importlib.util
 import shutil
+import ssl
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from html import unescape
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
 from PIL import Image, ImageDraw
 
@@ -46,9 +51,16 @@ def download_video(candidate: SourceCandidate, *, out_dir: Path, source_id: str,
         return _download_with_ytdlp(candidate.video_url, out_path, timeout_sec=timeout_sec)
     if is_probably_video_url(candidate.video_url):
         return _download_direct(candidate.video_url, out_path, timeout_sec=timeout_sec)
+    resolved_urls = discover_video_urls_from_page(candidate.video_url, timeout_sec=min(timeout_sec, 30.0))
+    if resolved_urls:
+        resolved_url = resolved_urls[0]
+        resolved_path = out_path.with_suffix(_download_suffix(resolved_url))
+        if is_ytdlp_supported_url(resolved_url):
+            return _download_with_ytdlp(resolved_url, resolved_path, timeout_sec=timeout_sec)
+        return _download_direct(resolved_url, resolved_path, timeout_sec=timeout_sec)
     raise RuntimeError(
         "Source URL is not a direct video URL and is not recognized as a supported yt-dlp site. "
-        "Use Codex scout to resolve project pages to demo video URLs first."
+        "No supported demo video URL was found on the page."
     )
 
 
@@ -296,10 +308,50 @@ def resolve_ytdlp_command() -> list[str]:
     )
 
 
+def discover_video_urls_from_page(page_url: str, *, timeout_sec: float = 30.0, max_links: int = 20) -> list[str]:
+    if _is_unsupported_youtube_page(page_url):
+        return []
+    parsed = urlparse(page_url)
+    if parsed.scheme not in {"http", "https"}:
+        return []
+    request = urllib.request.Request(page_url, headers={"User-Agent": "GenesisDatasetBuilder/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+            content_type = response.headers.get("Content-Type", "")
+            if content_type and not any(kind in content_type.lower() for kind in ("html", "text", "xml")):
+                return []
+            raw = response.read(2_000_000)
+    except OSError:
+        return []
+    encoding = _charset_from_content_type(content_type) or "utf-8"
+    html_text = raw.decode(encoding, errors="replace")
+    links: list[str] = []
+    seen: set[str] = set()
+    for raw_link in _candidate_links_from_html(html_text):
+        link = _normalize_page_video_link(page_url, raw_link)
+        if not link or link in seen:
+            continue
+        if is_probably_video_url(link) or is_ytdlp_supported_url(link):
+            links.append(link)
+            seen.add(link)
+            if len(links) >= max_links:
+                break
+    return links
+
+
 def _download_direct(url: str, out_path: Path, *, timeout_sec: float) -> Path:
     request = urllib.request.Request(url, headers={"User-Agent": "GenesisDatasetBuilder/1.0"})
-    with urllib.request.urlopen(request, timeout=timeout_sec) as response, out_path.open("wb") as file:
-        shutil.copyfileobj(response, file)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_sec) as response, out_path.open("wb") as file:
+            shutil.copyfileobj(response, file)
+    except urllib.error.URLError as exc:
+        if not _is_ssl_certificate_error(exc):
+            raise
+        with (
+            urllib.request.urlopen(request, timeout=timeout_sec, context=ssl._create_unverified_context()) as response,
+            out_path.open("wb") as file,
+        ):
+            shutil.copyfileobj(response, file)
     return out_path
 
 
@@ -309,7 +361,21 @@ def _download_with_ytdlp(url: str, out_path: Path, *, timeout_sec: float) -> Pat
             *resolve_ytdlp_command(),
             "--no-playlist",
             "--format",
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            (
+                "best[height<=720][ext=mp4][vcodec^=avc1]/"
+                "best[ext=mp4][vcodec^=avc1]/"
+                "bestvideo[height<=720][ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/"
+                "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/"
+                "best[height<=720][vcodec!*=av01]/"
+                "best[vcodec!*=av01]/"
+                "best"
+            ),
+            "--retries",
+            "3",
+            "--fragment-retries",
+            "3",
+            "--socket-timeout",
+            "30",
             "--merge-output-format",
             "mp4",
             "--output",
@@ -322,11 +388,59 @@ def _download_with_ytdlp(url: str, out_path: Path, *, timeout_sec: float) -> Pat
     return out_path
 
 
+def _is_unsupported_youtube_page(url: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if not any(domain in host for domain in ("youtube.com", "youtube-nocookie.com", "youtu.be")):
+        return False
+    return not is_ytdlp_supported_url(url)
+
+
 def _download_suffix(url: str) -> str:
     suffix = Path(url.split("?", 1)[0]).suffix.lower()
     if suffix in {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}:
         return suffix
     return ".mp4"
+
+
+_HTML_ATTR_URL_RE = re.compile(
+    r"""(?is)\b(?:href|src|data-src|data-video|content)\s*=\s*["']([^"']+)["']"""
+)
+_ABSOLUTE_URL_RE = re.compile(r"""https?://[^\s"'<>\\]+""", re.IGNORECASE)
+
+
+def _candidate_links_from_html(html_text: str) -> list[str]:
+    candidates = [match.group(1) for match in _HTML_ATTR_URL_RE.finditer(html_text)]
+    candidates.extend(match.group(0) for match in _ABSOLUTE_URL_RE.finditer(html_text))
+    return candidates
+
+
+def _normalize_page_video_link(page_url: str, raw_link: str) -> str | None:
+    link = unescape(raw_link).strip()
+    if not link or link.startswith(("data:", "mailto:", "javascript:")):
+        return None
+    if link.startswith("//"):
+        scheme = urlparse(page_url).scheme or "https"
+        link = f"{scheme}:{link}"
+    link = urljoin(page_url, link)
+    link = link.rstrip(").,;")
+    parsed = urlparse(link)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    return link
+
+
+def _charset_from_content_type(content_type: str) -> str | None:
+    for part in content_type.split(";"):
+        key, _, value = part.strip().partition("=")
+        if key.lower() == "charset" and value:
+            return value.strip()
+    return None
+
+
+def _is_ssl_certificate_error(exc: urllib.error.URLError) -> bool:
+    reason = getattr(exc, "reason", None)
+    return isinstance(reason, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(exc)
 
 
 def _probe_video_with_cv2(path: Path) -> VideoInfo:

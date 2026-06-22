@@ -19,6 +19,13 @@ CATEGORY_ACTIONS: tuple[tuple[str, str, str], ...] = (
     ("3", "cloth", "cloth"),
 )
 
+SPLIT_ACTIONS: tuple[tuple[str, str, str], ...] = (
+    ("4", "train", "train"),
+    ("5", "test", "test"),
+    ("6", "train-tmp", "train-tmp"),
+    ("7", "test-tmp", "test-tmp"),
+)
+
 REJECT_REASONS: tuple[tuple[str, str, str], ...] = (
     ("r", "Reject: not suitable", "not suitable for Genesis-feasible case generation"),
     ("m", "Reject: precision mesh", "requires precise mesh geometry or exact scanned/model-specific assets"),
@@ -29,9 +36,11 @@ REJECT_REASONS: tuple[tuple[str, str, str], ...] = (
 
 ACTION_HELP: tuple[tuple[str, str], ...] = (
     ("a", "Accept and mark reviewed"),
-    ("e", "Edit prompt in $EDITOR"),
+    ("e", "Edit prompt"),
     ("g", "Choose category label"),
+    ("l", "Choose dataset split"),
     *tuple((key, f"Tag: {label}") for key, label, _category in CATEGORY_ACTIONS),
+    *tuple((key, f"Split: {label}") for key, label, _split in SPLIT_ACTIONS),
     *tuple((key, label) for key, label, _reason in REJECT_REASONS),
     ("c", "Reject with custom reason"),
     ("d", "Exclude duplicate, no negative memory"),
@@ -257,6 +266,11 @@ def _review_loop(
             store.set_clip_category(clip_id, category=category, reason="human category label")
             status_message = f"Tagged {clip_id} as {category}. Press n/right for next."
             continue
+        split = _split_for_key(key)
+        if split is not None:
+            store.set_clip_split(clip_id, split=split, reason="human split label")
+            status_message = f"Tagged {clip_id} as {split}. Press n/right for next."
+            continue
         if key in {"g", "G"}:
             category = _choose_category(stdscr, current=str(clip.get("category") or ""))
             if category is None:
@@ -265,6 +279,15 @@ def _review_loop(
             reason = _prompt_line(stdscr, "Category reason", default="human category label")
             store.set_clip_category(clip_id, category=category, reason=reason or "human category label")
             status_message = f"Tagged {clip_id} as {category}. Press n/right for next."
+            continue
+        if key in {"l", "L"}:
+            split = _choose_split(stdscr, current=str(clip.get("split") or ""))
+            if split is None:
+                status_message = "Split unchanged."
+                continue
+            reason = _prompt_line(stdscr, "Split reason", default="human split label")
+            store.set_clip_split(clip_id, split=split, reason=reason or "human split label")
+            status_message = f"Tagged {clip_id} as {split}. Press n/right for next."
             continue
 
         reject_reason = _reject_reason_for_key(key)
@@ -348,6 +371,14 @@ def _category_for_key(key: str) -> str | None:
     return None
 
 
+def _split_for_key(key: str) -> str | None:
+    key = key.lower()
+    for action_key, _label, split in SPLIT_ACTIONS:
+        if key == action_key:
+            return split
+    return None
+
+
 def _choose_category(stdscr: curses.window, *, current: str = "") -> str | None:
     height, width = stdscr.getmaxyx()
     lines = ["Choose category label:"]
@@ -371,6 +402,31 @@ def _choose_category(stdscr: curses.window, *, current: str = "") -> str | None:
         category = _category_for_key(key)
         if category is not None:
             return category
+
+
+def _choose_split(stdscr: curses.window, *, current: str = "") -> str | None:
+    height, width = stdscr.getmaxyx()
+    lines = ["Choose dataset split:"]
+    lines.extend(f"{key}  {label}" for key, label, _split in SPLIT_ACTIONS)
+    lines.append("Esc/q  cancel")
+    if current:
+        lines.insert(1, f"Current: {current}")
+    box_width = min(max(len(line) for line in lines) + 4, max(20, width - 2))
+    box_height = min(len(lines) + 2, max(4, height - 2))
+    start_y = max(0, (height - box_height) // 2)
+    start_x = max(0, (width - box_width) // 2)
+    for offset in range(box_height):
+        _addstr(stdscr, start_y + offset, start_x, " " * box_width, curses.A_REVERSE)
+    for offset, line in enumerate(lines[: box_height - 1], start=1):
+        _addstr(stdscr, start_y + offset, start_x + 2, line, curses.A_REVERSE)
+    stdscr.refresh()
+    while True:
+        key = _read_key(stdscr)
+        if key in {"q", "Q", "\x1b"}:
+            return None
+        split = _split_for_key(key)
+        if split is not None:
+            return split
 
 
 def _draw_clip(
@@ -406,6 +462,8 @@ def _draw_clip(
         ("case_id", clip.get("case_id")),
         ("status", clip.get("status")),
         ("category", clip.get("category") or "(unset)"),
+        ("split", clip.get("split") or "(unset)"),
+        ("trained", _trained_status(clip)),
         ("source", clip.get("source_url") or clip.get("source_video_id")),
         ("time", _format_time_range(clip)),
         ("clip", clip.get("clip_uri") or clip.get("clip_path")),
@@ -419,13 +477,13 @@ def _draw_clip(
         y += 1
 
     y += 1
+    action_columns = 2 if width >= 88 else 1
+    action_rows = (len(ACTION_HELP) + action_columns - 1) // action_columns
+    reserved = action_rows + 5
+    prompt_height = max(3, height - y - reserved)
     if y < height - 2:
         _addstr(stdscr, y, 0, "case_id|prompt:", curses.A_BOLD)
         y += 1
-    action_columns = 2 if width >= 88 else 1
-    action_rows = (len(ACTION_HELP) + action_columns - 1) // action_columns
-    reserved = action_rows + 4
-    prompt_height = max(3, height - y - reserved)
     for line in _wrap_text(case_line(clip), max(20, width - 2))[:prompt_height]:
         _addstr(stdscr, y, 0, line)
         y += 1
@@ -633,6 +691,14 @@ def _format_time_range(clip: dict[str, Any]) -> str:
             return f"{start:.2f}s-{end:.2f}s ({duration:.2f}s)"
         return f"{start:.2f}s-{end:.2f}s"
     return ""
+
+
+def _trained_status(clip: dict[str, Any]) -> str:
+    if clip.get("split") != "train":
+        return "(n/a)"
+    if clip.get("trained") is True:
+        return str(clip.get("trained_at") or "yes")
+    return "no"
 
 
 def _wrap_text(text: str, width: int) -> list[str]:

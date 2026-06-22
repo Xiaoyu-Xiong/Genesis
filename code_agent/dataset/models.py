@@ -66,6 +66,7 @@ class SourceCandidate:
     video_url: str
     title: str = ""
     project_url: str | None = None
+    paper_url: str | None = None
     paper_title: str | None = None
     venue: str | None = None
     source_url: str | None = None
@@ -84,6 +85,7 @@ class SourceCandidate:
             video_url=video_url,
             title=_clean_str(data.get("title")) or fallback_id,
             project_url=_clean_optional_str(data.get("project_url")),
+            paper_url=_clean_optional_str(data.get("paper_url")),
             paper_title=_clean_optional_str(data.get("paper_title") or data.get("paper")),
             venue=_clean_optional_str(data.get("venue")),
             source_url=_clean_optional_str(data.get("source_url")),
@@ -99,6 +101,7 @@ class SourceCandidate:
             "video_url": self.video_url,
             "title": self.title,
             "project_url": self.project_url,
+            "paper_url": self.paper_url,
             "paper_title": self.paper_title,
             "venue": self.venue,
             "source_url": self.source_url,

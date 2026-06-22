@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "id": "critic_visual_readability_guideline",
+  "title": "Critic should notice visual readability and aesthetics",
+  "summary": "Critic should treat visual readability as a soft repair target alongside semantics and physics, including subject size, contrast, occlusion, color separation, and legible motion.",
+  "scopes": ["planner", "critic", "rendering", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "critic",
+    "visual_readability",
+    "aesthetics",
+    "render",
+    "camera",
+    "contrast",
+    "occlusion",
+    "color"
+  ],
+  "failure_tags": [
+    "hard_to_review",
+    "tiny_objects",
+    "low_contrast",
+    "occluded",
+    "muddy_colors",
+    "unreadable_motion",
+    "ugly_render"
+  ],
+  "guidance": [
+    "Critic should inspect not only semantic and physics correctness, but also whether the video is visually readable and easy to review.",
+    "Treat subject size, ground/background contrast, viewing angle, occlusion, color separation, lighting, and one-glance motion legibility as soft quality goals.",
+    "Visual readability is not normally a hard pass/fail condition by itself, but critic repair advice should push the result toward clearer, more polished, and easier-to-review output when semantics are otherwise close."
+  ],
+  "restrictions": [
+    "Do not let numerical metrics alone override visibly confusing, tiny, occluded, or low-contrast evidence.",
+    "Do not recommend purely cosmetic changes that would break physical semantics or hide failure evidence."
+  ],
+  "checks": [
+    "Review sampled frames and video, not only metrics and event logs.",
+    "When proposing repair, separate hard correctness failures from soft visual-readability improvements."
+  ],
+  "dispatch_hints": [
+    "Send to critic by default when render artifacts exist.",
+    "Send to rendering when critic evidence points to readability or aesthetic repair.",
+    "Send to opt only when visual-readability variables are intentionally being tuned."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Encourage Critic to improve readability and review quality without turning aesthetics into a hard gate."
+  }
+}

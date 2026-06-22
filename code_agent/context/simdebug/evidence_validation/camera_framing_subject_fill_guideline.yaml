@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "camera_framing_subject_fill_guideline",
+  "title": "Frame dynamic subjects so they fill most of the render",
+  "summary": "Rendering should choose camera target, distance, and FOV from the main dynamic objects across the episode so the requested behavior is large and centered enough to inspect.",
+  "scopes": ["planner", "rendering", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "camera",
+    "render",
+    "framing",
+    "bbox",
+    "fov",
+    "lookat",
+    "visual_readability"
+  ],
+  "failure_tags": [
+    "tiny_objects",
+    "corner_framing",
+    "bad_camera_target",
+    "overwide_fov",
+    "unreadable_video",
+    "object_leaves_frame"
+  ],
+  "guidance": [
+    "When generating or repairing rendering, estimate the main dynamic objects' initial, mid-run, and final bounding boxes, then choose camera target, distance, and FOV so the main behavior occupies about 55%-80% of the image.",
+    "Do not let the main subjects shrink into a small corner or a tiny central region.",
+    "For objects with large travel, prefer a better camera center, elevated oblique view, and moderate distance over blindly looking at the world origin.",
+    "Use a slightly wider view only when the action would otherwise leave the frame, and keep the behavior readable rather than merely visible."
+  ],
+  "restrictions": [
+    "Do not accept a physically correct render if the requested contact, deformation, motion, or interaction cannot be judged because the subjects are too small.",
+    "Do not optimize camera framing by cropping away necessary start, impact, or final-settle context."
+  ],
+  "checks": [
+    "Inspect sampled frames or contact sheets for subject fill ratio, centering, and whether the main action remains in frame.",
+    "Check render_stats.json records camera position, lookat, FOV, and resolution when available."
+  ],
+  "dispatch_hints": [
+    "Send to rendering for camera setup and repair.",
+    "Send to critic when a result is semantically plausible but visually too small or off-center.",
+    "Send to opt only if camera variables are explicitly part of a visual-readability repair."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Make rendered evidence fill the frame enough for human review."
+  }
+}

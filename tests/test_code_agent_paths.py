@@ -14,7 +14,7 @@ from code_agent.assets.mesh.models import MeshGenesisFEMImportResult
 from code_agent.assets.mesh.request_adapter import request_size
 from code_agent.assets.builtin_guard import builtin_asset_violations
 from code_agent.assets.xml.validation import _validate_mesh_asset_paths, validate_xml_asset
-from code_agent.configs import deformable_config_dict
+from code_agent.configs import CONFIGS, deformable_config_dict, runtime_defaults_dict
 from code_agent.opt import agent as opt_agent
 from code_agent.opt.contracts import OptContractError, load_opt_contracts
 from code_agent.opt.objective import evaluate_objective
@@ -23,6 +23,36 @@ from code_agent.opt.types import OptAgentRequest
 from code_agent.planner.session import PlannerSession, PlannerSessionConfig
 from code_agent.utils import codex
 from code_agent.utils.integrator import write_main
+from code_agent.utils.timing import resolve_timing
+
+
+def _codex_test_result(
+    request: codex.CodexExecRequest,
+    *,
+    success: bool,
+    error_type: str | None = None,
+    error_message: str | None = None,
+) -> codex.CodexExecResult:
+    now = time.time()
+    return codex.CodexExecResult(
+        role=request.role,
+        success=success,
+        exit_code=0 if success else 1,
+        duration_sec=0.01,
+        command=["codex"],
+        cwd=str(request.cwd),
+        sandbox=request.sandbox,
+        output_jsonl_path=str(request.output_jsonl_path),
+        final_message_path=str(request.final_message_path),
+        output_schema_path=str(request.output_schema_path) if request.output_schema_path else None,
+        codex_version="codex-test",
+        error_type=error_type,
+        error_message=error_message,
+        stderr_path=str(request.output_jsonl_path) + ".stderr",
+        codex_account_name=request.codex_account_name,
+        started_at_unix=now,
+        ended_at_unix=now + 0.01,
+    )
 
 
 def test_run_codex_exec_resolves_relative_io_paths_against_repo_root(tmp_path, monkeypatch):
@@ -52,6 +82,100 @@ def test_run_codex_exec_resolves_relative_io_paths_against_repo_root(tmp_path, m
     assert expected_jsonl.is_file()
     assert expected_final.is_file()
     assert not (polluted_cwd / "logs" / "codex_test.jsonl").exists()
+
+
+def test_run_codex_exec_rotates_accounts_on_usage_limit(tmp_path, monkeypatch):
+    codex._reset_codex_account_state_for_tests()
+    monkeypatch.setenv(
+        "CODE_AGENT_CODEX_ACCOUNTS",
+        f"first={tmp_path / 'codex-first'};second={tmp_path / 'codex-second'}",
+    )
+    calls: list[str | None] = []
+
+    def fake_run_once(request: codex.CodexExecRequest) -> codex.CodexExecResult:
+        calls.append(request.codex_account_name)
+        if request.codex_account_name == "first":
+            return _codex_test_result(
+                request,
+                success=False,
+                error_type="codex_usage_limit",
+                error_message="usage limit; try again later",
+            )
+        return _codex_test_result(request, success=True)
+
+    monkeypatch.setattr(codex, "_run_codex_exec_request_once", fake_run_once)
+
+    result = codex.run_codex_exec(
+        codex.CodexExecRequest(
+            role="planner",
+            prompt="test",
+            cwd=tmp_path,
+            output_jsonl_path=tmp_path / "logs" / "planner.jsonl",
+            final_message_path=tmp_path / "logs" / "planner.final.txt",
+        )
+    )
+
+    assert result.success is True
+    assert result.codex_account_name == "second"
+    assert calls == ["first", "second"]
+    quota_log = tmp_path / "logs" / "planner.jsonl.quota.jsonl"
+    assert "account_usage_limited" in quota_log.read_text(encoding="utf-8")
+
+
+def test_run_codex_exec_waits_until_any_account_quota_recovers(tmp_path, monkeypatch):
+    codex._reset_codex_account_state_for_tests()
+    monkeypatch.setenv(
+        "CODE_AGENT_CODEX_ACCOUNTS",
+        f"first={tmp_path / 'codex-first'};second={tmp_path / 'codex-second'}",
+    )
+    monkeypatch.setenv("CODE_AGENT_CODEX_QUOTA_PROBE_INITIAL_DELAY_SEC", "0")
+    monkeypatch.setenv("CODE_AGENT_CODEX_QUOTA_PROBE_INTERVAL_SEC", "0")
+    recovered_accounts: set[str] = set()
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_run_once(request: codex.CodexExecRequest) -> codex.CodexExecResult:
+        calls.append((request.role, request.codex_account_name))
+        account = str(request.codex_account_name)
+        if request.role.startswith("quota_probe_"):
+            if account == "second":
+                recovered_accounts.add(account)
+                return _codex_test_result(request, success=True)
+            return _codex_test_result(
+                request,
+                success=False,
+                error_type="codex_usage_limit",
+                error_message="usage limit; try again later",
+            )
+        if account in recovered_accounts:
+            return _codex_test_result(request, success=True)
+        return _codex_test_result(
+            request,
+            success=False,
+            error_type="codex_usage_limit",
+            error_message="usage limit; try again later",
+        )
+
+    monkeypatch.setattr(codex, "_run_codex_exec_request_once", fake_run_once)
+
+    result = codex.run_codex_exec(
+        codex.CodexExecRequest(
+            role="worker",
+            prompt="test",
+            cwd=tmp_path,
+            output_jsonl_path=tmp_path / "logs" / "worker.jsonl",
+            final_message_path=tmp_path / "logs" / "worker.final.txt",
+        )
+    )
+
+    assert result.success is True
+    assert result.codex_account_name == "second"
+    assert ("quota_probe_first", "first") in calls
+    assert ("quota_probe_second", "second") in calls
+    assert calls[-1] == ("worker", "second")
+    quota_log = tmp_path / "logs" / "worker.jsonl.quota.jsonl"
+    text = quota_log.read_text(encoding="utf-8")
+    assert "quota_pause_started" in text
+    assert "quota_recovered" in text
 
 
 def test_codex_command_hides_genesis_builtin_assets(tmp_path):
@@ -869,9 +993,100 @@ def test_planner_schemas_accept_cloth_target_edge_length(tmp_path):
     assert not session.validate_json_schema(action, Path("code_agent/specs/planner_action.schema.json"))
 
 
-def test_deformable_config_does_not_override_fem_friction_mu():
-    cfg = deformable_config_dict(deformable_enabled=True, ipc_enabled=True)
+def test_planner_output_physics_plan_updates_deformable_contract(tmp_path):
+    session = PlannerSession(
+        PlannerSessionConfig(
+            case_id="case",
+            task="soft cloth drapes over a rigid bar",
+            case_dir=tmp_path / "case",
+            backend="gpu",
+            timeout_sec=1.0,
+            render=False,
+            repair_rounds=0,
+        )
+    )
+    session._ensure_dirs()
+    planner_output = _planner_output_with_asset_requests([])
+    planner_output["physics_plan"] = {
+        "mode": "fem_ipc",
+        "deformable_enabled": True,
+        "deformable_kind": "cloth",
+        "ipc_enabled": False,
+        "rationale": "cloth requires FEM+IPC",
+    }
+    planner_output["execution_plan"]["sim_dt"] = 0.005
+    planner_output["execution_plan"]["render_fps"] = 20
 
+    accepted = session.accept_planner_output(planner_output)
+
+    assert accepted["ok"] is True
+    assert session.deformable_config["enabled"] is True
+    assert session.deformable_config["ipc_enabled"] is True
+    written_cfg = json.loads(session.deformable_config_path.read_text(encoding="utf-8"))
+    written_plan = json.loads((session.contracts_dir / "planner_output.json").read_text(encoding="utf-8"))
+    assert written_cfg["enabled"] is True
+    assert written_cfg["ipc_enabled"] is True
+    assert written_plan["physics_plan"]["ipc_enabled"] is True
+
+
+def test_resolve_timing_uses_planner_runtime_fields_and_mode_defaults():
+    planner_output = _planner_output_with_asset_requests([])
+    planner_output["physics_plan"] = {
+        "mode": "rigid_ipc",
+        "deformable_enabled": False,
+        "deformable_kind": "none",
+        "ipc_enabled": True,
+        "rationale": "dense rigid contact",
+    }
+    planner_output["execution_plan"].update(
+        {
+            "duration_sec": 2.0,
+            "sim_dt": 0.0025,
+            "sim_substeps": 2,
+            "render_every_n_steps": 3,
+            "render_fps": 30,
+            "render_res": [320, 240],
+        }
+    )
+
+    timing = resolve_timing(planner_output=planner_output)
+
+    assert timing.sim_dt == 0.0025
+    assert timing.steps == 800
+    assert timing.sim_substeps == 2
+    assert timing.render_every_n_steps == 3
+    assert timing.render_fps == 30
+    assert timing.render_res == (320, 240)
+    assert timing.target_video_frames == 60
+
+
+def test_resolve_timing_uses_ipc_defaults_when_planner_omits_optional_runtime_values():
+    planner_output = _planner_output_with_asset_requests([])
+    planner_output["physics_plan"] = {
+        "mode": "rigid_ipc",
+        "deformable_enabled": False,
+        "deformable_kind": "none",
+        "ipc_enabled": True,
+        "rationale": "dense rigid contact",
+    }
+    for key in ("sim_dt", "sim_substeps", "render_every_n_steps", "render_res", "render_fps"):
+        planner_output["execution_plan"].pop(key)
+
+    timing = resolve_timing(planner_output=planner_output)
+    ipc_defaults = runtime_defaults_dict(ipc_enabled=True)
+
+    assert timing.sim_dt == ipc_defaults["sim_dt"]
+    assert timing.sim_substeps == ipc_defaults["sim_substeps"]
+    assert timing.render_every_n_steps == ipc_defaults["render_every_n_steps"]
+    assert timing.render_fps == ipc_defaults["render_fps"]
+    assert timing.render_res == ipc_defaults["render_res"]
+
+
+def test_deformable_config_does_not_override_fem_friction_mu():
+    cfg = deformable_config_dict(physics_mode="fem_ipc")
+
+    assert not hasattr(CONFIGS.deformable, "enabled")
+    assert not hasattr(CONFIGS.ipc, "enabled")
     assert "fem_friction_mu" not in cfg
     assert "friction" in cfg
     assert cfg["fem_cloth_enabled"] is True
@@ -1148,6 +1363,13 @@ def _planner_output_with_asset_requests(asset_requests: list[dict[str, object]])
             "failure_criteria": ["fail"],
             "assumptions": [],
         },
+        "physics_plan": {
+            "mode": "rigid",
+            "deformable_enabled": False,
+            "deformable_kind": "none",
+            "ipc_enabled": False,
+            "rationale": "test",
+        },
         "scene_plan": {
             "simulation_strategy": "test",
             "physics_risks": [],
@@ -1180,8 +1402,12 @@ def _planner_output_with_asset_requests(asset_requests: list[dict[str, object]])
             "backend": "gpu",
             "duration_sec": 1.0,
             "step_budget": 1,
+            "sim_dt": 0.01,
+            "sim_substeps": 1,
+            "render_every_n_steps": 1,
             "render_fps": 1,
             "render_budget": 1,
+            "render_res": [640, 480],
             "notes": [],
         },
         "risk_register": [],

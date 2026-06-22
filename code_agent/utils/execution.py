@@ -57,6 +57,10 @@ def run_generated_simulation(
     timeout_sec: float,
     steps: int,
     render_fps: int,
+    sim_dt: float,
+    sim_substeps: int,
+    render_every_n_steps: int,
+    render_res: tuple[int, int],
     render: bool = True,
     duration_sec: float | None = None,
     target_video_frames: int | None = None,
@@ -80,6 +84,15 @@ def run_generated_simulation(
         str(int(steps)),
         "--fps",
         str(int(render_fps)),
+        "--sim-dt",
+        str(float(sim_dt)),
+        "--sim-substeps",
+        str(int(sim_substeps)),
+        "--render-every-n-steps",
+        str(int(render_every_n_steps)),
+        "--render-res",
+        str(int(render_res[0])),
+        str(int(render_res[1])),
     ]
     if duration_sec is not None:
         extra_args.extend(("--duration-sec", str(float(duration_sec))))

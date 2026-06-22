@@ -13,6 +13,10 @@ def write_main(
     task: str,
     default_steps: int,
     default_render_fps: int,
+    default_sim_dt: float | None = None,
+    default_sim_substeps: int | None = None,
+    default_render_every_n_steps: int | None = None,
+    default_render_res: tuple[int, int] | None = None,
     default_duration_sec: float | None,
     default_target_video_frames: int | None,
     deformable_cfg: dict[str, object] | None = None,
@@ -23,10 +27,14 @@ def write_main(
     src_dir.mkdir(parents=True, exist_ok=True)
     main_py = src_dir / "main.py"
     default_backend = CONFIGS.harness.default_backend
-    default_sim_dt = CONFIGS.runtime.sim_dt
-    default_sim_substeps = CONFIGS.runtime.sim_substeps
-    default_render_every_n_steps = CONFIGS.runtime.render_every_n_steps
-    default_render_res = CONFIGS.runtime.render_res
+    resolved_sim_dt = CONFIGS.runtime.sim_dt if default_sim_dt is None else float(default_sim_dt)
+    resolved_sim_substeps = CONFIGS.runtime.sim_substeps if default_sim_substeps is None else int(default_sim_substeps)
+    resolved_render_every_n_steps = (
+        CONFIGS.runtime.render_every_n_steps
+        if default_render_every_n_steps is None
+        else int(default_render_every_n_steps)
+    )
+    resolved_render_res = CONFIGS.runtime.render_res if default_render_res is None else tuple(default_render_res)
     default_deformable_cfg = dict(deformable_cfg or deformable_config_dict())
     main_py.write_text(
         textwrap.dedent(
@@ -82,10 +90,10 @@ def write_main(
                 parser.add_argument("--fps", "--render-fps", type=int, default={int(default_render_fps)!r})
                 parser.add_argument("--duration-sec", type=float, default={default_duration_sec!r})
                 parser.add_argument("--target-video-frames", type=int, default={default_target_video_frames!r})
-                parser.add_argument("--sim-dt", type=float, default={float(default_sim_dt)!r})
-                parser.add_argument("--sim-substeps", type=int, default={int(default_sim_substeps)!r})
-                parser.add_argument("--render-every-n-steps", type=int, default={int(default_render_every_n_steps)!r})
-                parser.add_argument("--render-res", type=int, nargs=2, default={list(default_render_res)!r})
+                parser.add_argument("--sim-dt", type=float, default={float(resolved_sim_dt)!r})
+                parser.add_argument("--sim-substeps", type=int, default={int(resolved_sim_substeps)!r})
+                parser.add_argument("--render-every-n-steps", type=int, default={int(resolved_render_every_n_steps)!r})
+                parser.add_argument("--render-res", type=int, nargs=2, default={list(resolved_render_res)!r})
                 parser.add_argument("--deformable-config", type=Path, default=None)
                 parser.add_argument("--render", action="store_true", default=True)
                 parser.add_argument("--no-render", action="store_false", dest="render")

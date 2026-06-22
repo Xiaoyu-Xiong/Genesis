@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "id": "ipc_contact_coupling_tuning_guideline",
+  "title": "Tune IPC contact resistance and rigid coupling strength within config bounds",
+  "summary": "IPC contact hardness and rigid-soft coupling tightness may be tuned from deformable_cfg bounds when evidence shows contact sinking, loose clamps, laggy driven rigid bodies, or overly stiff unstable contact.",
+  "scopes": ["planner", "scene", "body", "critic", "opt"],
+  "physics_modes": ["rigid_ipc", "fem_ipc"],
+  "task_tags": [
+    "ipc",
+    "contact_resistance",
+    "constraint_strength",
+    "coupling",
+    "rigid_soft",
+    "clamp",
+    "contact",
+    "stiffness",
+    "opt"
+  ],
+  "failure_tags": [
+    "contact_sinking",
+    "soft_contact",
+    "loose_clamp",
+    "laggy_coupling",
+    "rigid_soft_slip",
+    "overstiff_contact",
+    "jitter",
+    "nan",
+    "unstable_ipc"
+  ],
+  "guidance": [
+    "Treat ipc_contact_resistance, ipc_constraint_strength_translation, and ipc_constraint_strength_rotation as agent-tunable IPC parameters with config-provided defaults and bounds in deformable_cfg.",
+    "Use ipc_contact_resistance_default=1e7 with range [3e6, 1e8]. This parameter controls IPC contact normal resistance/stiffness, not restitution. Increasing it makes contact harder, reduces sinking and visible overlap, and can improve support/contact crispness; excessive values make the system stiffer and may cause jitter, slow convergence, or NaN unless timing/solver quality is also adequate. Decreasing it makes contact softer and more forgiving but can permit visible sinking, mushy support, weak impact response, or apparent penetration.",
+    "Use ipc_constraint_strength_translation_default=30 with range [10, 100]. This controls translational soft-transform coupling between Genesis-driven rigid bodies and IPC ABD objects. Increasing it makes driven rigid bodies, clamps, and tools follow translation targets more tightly in IPC and reduces lag/slip; excessive values can inject stiff coupling forces, jitter, ejection, or instability. Decreasing it softens coupling and can improve stability but may make clamps/tools feel loose or delayed.",
+    "Use ipc_constraint_strength_rotation_default=30 with range [10, 100]. This controls rotational soft-transform coupling. Increase it for twisting clamps, rotating grippers, paddles, rollers, and articulated links whose IPC contact rotation lags or fails to drive soft bodies. Too high can create torque spikes, jitter, or unstable twist contact; too low can make rotations fail to transfer visibly.",
+    "Prefer conservative sweeps: contact_resistance 1e7 -> 3e7 -> 1e8 for sinking contact, or 1e7 -> 3e6 for over-stiff instability; constraint strengths 30 -> 50 -> 100 for loose clamp/coupling, or 30 -> 10 for unstable coupling.",
+    "When Opt tunes these parameters, use log scale for ipc_contact_resistance and linear or log scale for the two positive strength values; record requested and effective values in metrics or reports."
+  ],
+  "restrictions": [
+    "Do not change FEM E, nu, density, cloth thickness, friction, action velocity, or camera choices as a substitute for tuning IPC contact/coupling response.",
+    "Do not pass *_default, *_min, or *_max metadata fields to gs.options.IPCCouplerOptions; only pass the effective values ipc_contact_resistance, ipc_constraint_strength_translation, and ipc_constraint_strength_rotation.",
+    "Do not raise coupling strength to hide a wrong coupling mode, disabled collision, missing coupled links, or bad initial overlap; repair ownership and geometry first."
+  ],
+  "checks": [
+    "Check whether failure evidence is contact softness/sinking, loose rigid-soft coupling, rotational lag, or over-stiff instability before choosing the tuning direction.",
+    "Check generated scene.py maps only effective IPC option values into IPCCouplerOptions.",
+    "Check reports or metrics include the effective values if these fields were tuned."
+  ],
+  "dispatch_hints": [
+    "Send to Planner and Opt when critic evidence suggests bounded scalar tuning of IPC contact or coupling.",
+    "Send to scene/body when writing or repairing IPC option mapping and rigid coupling behavior.",
+    "Send to critic when diagnosing whether a failure is structural or parameter-limited."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Expose IPC contact resistance and transform-coupling strengths as bounded agent-tunable parameters."
+  }
+}

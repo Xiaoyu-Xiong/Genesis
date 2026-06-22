@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "id": "ipc_stiffness_relaxation_guardrail",
+  "title": "Relax IPC stiffness only when it preserves the requested physical meaning",
+  "summary": "Lower IPC stiffness/contact/coupling values can improve stability only if the task does not require stiff support, hard clamping, strong constraints, or shape preservation.",
+  "scopes": ["planner", "scene", "body", "critic", "opt"],
+  "physics_modes": ["rigid_ipc", "fem_ipc"],
+  "task_tags": [
+    "ipc",
+    "stiffness",
+    "contact",
+    "coupling",
+    "constraint",
+    "stability",
+    "guardrail"
+  ],
+  "failure_tags": [
+    "overstiff_ipc",
+    "jitter",
+    "nan",
+    "unstable_contact",
+    "semantic_shortcut",
+    "weak_clamp",
+    "softened_wrongly"
+  ],
+  "guidance": [
+    "Relax IPC stiffness, contact resistance, or coupling strength only when the requested visual behavior and physical semantics remain intact.",
+    "If the task asks for stiff support, hard clamps, rigid shape preservation, strong endpoint constraints, or precise rigid-soft transfer, do not solve the failure by weakening those requirements.",
+    "When relaxation is appropriate, prefer small bounded decreases and re-check the target behavior rather than jumping to the minimum values.",
+    "If lowering stiffness removes the required effect, route repair to geometry, coupling mode, clamp design, timing, solver quality, or asset topology instead."
+  ],
+  "restrictions": [
+    "Do not relax FEM E/nu, IPC contact resistance, or transform-coupling strength just to make an impossible or badly staged setup pass.",
+    "Do not call a result successful if relaxed settings avoid instability by eliminating the visible contact, clamp, twist, support, or deformation requested by the prompt."
+  ],
+  "checks": [
+    "Compare the relaxed result against the original prompt: is the required stiffness/contact/constraint still visible?",
+    "Check whether a structural repair would preserve semantics better than lowering stiffness."
+  ],
+  "dispatch_hints": [
+    "Send to Planner, Critic, and Opt when considering a stability fix that weakens IPC contact or coupling.",
+    "Send to body/scene when repair instructions mention lowering IPC stiffness-like parameters."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Prevent stability repairs from weakening the core physical behavior requested by the prompt."
+  }
+}

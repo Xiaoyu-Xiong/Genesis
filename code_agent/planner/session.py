@@ -38,8 +38,6 @@ class PlannerSessionConfig:
     steps: int | None = None
     duration_sec: float | None = None
     render_fps: int | None = None
-    deformable_enabled: bool = False
-    ipc_enabled: bool = False
     opt_enabled: bool = CONFIGS.opt.enabled
     max_planner_turns: int | None = None
 
@@ -60,10 +58,7 @@ class PlannerSession:
         self.state_path = self.reports_dir / "episode_state.json"
         self.summary_path = self.case_dir / "summary.json"
         self.timing: TimingPlan | None = None
-        self.deformable_config = deformable_config_dict(
-            deformable_enabled=config.deformable_enabled,
-            ipc_enabled=config.ipc_enabled,
-        )
+        self.deformable_config = deformable_config_dict()
         max_turns = config.max_planner_turns or max(12, 7 + config.repair_rounds * 5)
         self.state: dict[str, Any] = {
             "schema_version": 1,
@@ -74,8 +69,9 @@ class PlannerSession:
             "planner_output_path": None,
             "timing": None,
             "capabilities": {
-                "deformable_enabled": config.deformable_enabled,
-                "ipc_enabled": config.ipc_enabled,
+                "physics_selection": "planner_decides",
+                "deformable_enabled": bool(self.deformable_config["enabled"]),
+                "ipc_enabled": bool(self.deformable_config["ipc_enabled"]),
                 "deformable_scope": "FEM volumetric and FEM.Cloth thin-shell when enabled; MPM/PBD/SPH remain out of scope.",
                 "ipc_scope": "IPC may be enabled for rigid/articulated contact; deformable forces IPC on.",
                 "deformable_config_path": str(self.deformable_config_path),
@@ -165,6 +161,73 @@ class PlannerSession:
     def write_deformable_config_contract(self) -> None:
         dump_json(self.deformable_config, self.deformable_config_path)
 
+    def resolve_planner_physics_plan(self, planner_output: dict[str, Any]) -> dict[str, Any]:
+        raw_plan = planner_output.get("physics_plan")
+        if not isinstance(raw_plan, dict):
+            return {"ok": False, "errors": ["physics_plan must be an object."]}
+
+        mode = str(raw_plan.get("mode") or "")
+        if mode == "fem_ipc":
+            deformable_enabled = True
+            ipc_enabled = True
+            default_kind = "soft_body"
+        elif mode == "rigid_ipc":
+            deformable_enabled = False
+            ipc_enabled = True
+            default_kind = "none"
+        elif mode == "rigid":
+            deformable_enabled = False
+            ipc_enabled = False
+            default_kind = "none"
+        else:
+            return {"ok": False, "errors": [f"Unsupported physics_plan.mode: {mode!r}."]}
+
+        errors: list[str] = []
+        if bool(raw_plan.get("deformable_enabled")) != deformable_enabled:
+            errors.append(
+                "physics_plan.deformable_enabled must match mode "
+                f"{mode!r}: expected {deformable_enabled}."
+            )
+        if not deformable_enabled and bool(raw_plan.get("ipc_enabled")) != ipc_enabled:
+            errors.append(f"physics_plan.ipc_enabled must match mode {mode!r}: expected {ipc_enabled}.")
+
+        if deformable_enabled:
+            ipc_enabled = True
+
+        deformable_kind = str(raw_plan.get("deformable_kind") or default_kind)
+        if not deformable_enabled:
+            deformable_kind = "none"
+        elif deformable_kind == "none":
+            errors.append("physics_plan.deformable_kind must not be none when deformable_enabled is true.")
+
+        if errors:
+            return {"ok": False, "errors": errors}
+
+        physics_plan = {
+            "mode": mode,
+            "deformable_enabled": deformable_enabled,
+            "deformable_kind": deformable_kind,
+            "ipc_enabled": ipc_enabled,
+            "rationale": str(raw_plan.get("rationale") or "Planner selected physics mode for this case."),
+        }
+        return {"ok": True, "physics_plan": physics_plan}
+
+    def _sync_capability_state(self, physics_plan: dict[str, Any]) -> None:
+        capabilities = self.state.setdefault("capabilities", {})
+        if not isinstance(capabilities, dict):
+            capabilities = {}
+            self.state["capabilities"] = capabilities
+        capabilities.update(
+            {
+                "physics_selection": "planner_selected",
+                "physics_mode": physics_plan.get("mode"),
+                "deformable_kind": physics_plan.get("deformable_kind"),
+                "deformable_enabled": bool(physics_plan.get("deformable_enabled")),
+                "ipc_enabled": bool(physics_plan.get("ipc_enabled")),
+                "deformable_config_path": str(self.deformable_config_path),
+            }
+        )
+
     def accept_planner_output(self, planner_output: dict[str, Any], *, rationale: str | None = None) -> dict[str, Any]:
         errors = self.validate_json_schema(planner_output, Path("code_agent/specs/planner_output.schema.json"))
         if errors:
@@ -182,6 +245,20 @@ class PlannerSession:
                 "message": "planner_output references forbidden Genesis built-in assets.",
                 "errors": asset_violations,
             }
+        resolved_physics = self.resolve_planner_physics_plan(planner_output)
+        if not resolved_physics.get("ok"):
+            return {
+                "ok": False,
+                "status": "invalid_physics_plan",
+                "message": "planner_output physics_plan is inconsistent with physics mode rules.",
+                "errors": resolved_physics.get("errors", []),
+            }
+        planner_output = dict(planner_output)
+        planner_output["physics_plan"] = resolved_physics["physics_plan"]
+        self.deformable_config = deformable_config_dict(
+            physics_mode=str(resolved_physics["physics_plan"]["mode"]),
+        )
+        self._sync_capability_state(resolved_physics["physics_plan"])
 
         planner_output_path = self.contracts_dir / "planner_output.json"
         dump_json(planner_output, planner_output_path)
@@ -317,8 +394,9 @@ class PlannerSession:
             "dispatch_history_path": str(self.dispatch_history_path),
             "stop_reason": self.state.get("stop_reason"),
             "blocked_reason": self.state.get("blocked_reason"),
-            "deformable_enabled": self.config.deformable_enabled,
-            "ipc_enabled": self.config.ipc_enabled,
+            "physics_mode": self.state.get("capabilities", {}).get("physics_mode"),
+            "deformable_enabled": bool(self.deformable_config.get("enabled")),
+            "ipc_enabled": bool(self.deformable_config.get("ipc_enabled")),
             "opt_enabled": self.config.opt_enabled,
             "deformable_config_path": str(self.deformable_config_path),
             "opt": self.state.get("opt"),
@@ -500,8 +578,9 @@ class PlannerSession:
             "turn": self.state.get("turn_index") if turn is None else turn,
             "target_role": role,
             "dispatch_reason": dispatch_reason,
-            "deformable_enabled": self.config.deformable_enabled,
-            "ipc_enabled": self.config.ipc_enabled,
+            "physics_modes": list(self.simdebug_physics_modes()),
+            "deformable_enabled": bool(self.deformable_config.get("enabled")),
+            "ipc_enabled": bool(self.deformable_config.get("ipc_enabled")),
             "deformable_config": self.deformable_config,
             "planner_state": self.state,
         }
@@ -543,6 +622,17 @@ class PlannerSession:
             dump_json(self.json_safe(dispatch), self.reports_dir / "simdebug_card_dispatch.json")
         self.append_jsonl(self.reports_dir / "simdebug_card_dispatch.jsonl", dispatch)
         return format_simdebug_cards_for_prompt(selection)
+
+    def simdebug_physics_modes(self) -> tuple[str, ...]:
+        capabilities = self.state.get("capabilities")
+        if isinstance(capabilities, dict) and capabilities.get("physics_selection") == "planner_selected":
+            if bool(self.deformable_config.get("enabled")):
+                return ("fem_ipc",)
+            if bool(self.deformable_config.get("ipc_enabled")):
+                return ("rigid_ipc",)
+            return ("rigid",)
+
+        return ("rigid", "rigid_ipc", "fem_ipc")
 
     def simdebug_card_ids_from_action(self, action: dict[str, Any], target_role: str) -> tuple[str, ...] | None:
         if not self.simdebug_cards_enabled():
@@ -628,6 +718,8 @@ class PlannerSession:
         context = self.load_json(context_json) or {}
         docs_dir = context.get("docs_dir")
         catalog_path = context.get("catalog_path")
+        capabilities = self.state.get("capabilities") if isinstance(self.state.get("capabilities"), dict) else {}
+        physics_selection = str(capabilities.get("physics_selection") or "planner_decides")
         return "\n".join(
             [
                 "Genesis official-doc and local-source context is available on disk for on-demand reading.",
@@ -636,8 +728,10 @@ class PlannerSession:
                 f"- Machine-readable context JSON: {context_json}",
                 f"- Cached official docs directory: {docs_dir or '<see context JSON>'}",
                 f"- Selected official-doc catalog: {catalog_path or '<see context JSON>'}",
-                f"- FEM deformable generation enabled: {self.config.deformable_enabled}.",
-                f"- IPC contact/coupling enabled: {self.config.ipc_enabled}.",
+                f"- Physics selection status: {physics_selection}.",
+                f"- Current FEM deformable generation enabled: {bool(self.deformable_config.get('enabled'))}.",
+                f"- Current IPC contact/coupling enabled: {bool(self.deformable_config.get('ipc_enabled'))}.",
+                f"- Allowed SimDebug physics modes for this turn: {', '.join(self.simdebug_physics_modes())}.",
                 f"- Effective FEM/IPC config: {self.deformable_config_path}",
                 "- Active non-rigid scope when FEM is enabled: FEM+IPC only, including FEM.Cloth thin-shell cloth.",
                 "- PBD cloth remains out of scope; use ready cloth_mesh assets plus gs.materials.FEM.Cloth for cloth.",

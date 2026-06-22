@@ -23,16 +23,23 @@ def planner_fem_ipc_capability_section(
     *,
     deformable_enabled: bool,
     ipc_enabled: bool,
+    physics_modes: tuple[str, ...],
     deformable_config_path: object,
     deformable_config_text: str,
 ) -> str:
     return f"""
-FEM/IPC capability:
-- FEM deformable enabled: {deformable_enabled}
-- IPC contact/coupling enabled: {ipc_enabled} (forced on whenever FEM deformable is enabled)
+Physics mode capability:
+- Current FEM deformable enabled: {deformable_enabled}
+- Current IPC contact/coupling enabled: {ipc_enabled} (forced on whenever FEM deformable is enabled)
+- Planner may choose among these physics modes this turn: {", ".join(physics_modes)}
 - Effective config contract: {deformable_config_path}
 - Effective config values:
 {deformable_config_text}
+- On the first write_plan, choose `planner_output.physics_plan` for this case:
+  `rigid` for ordinary rigid scenes, `rigid_ipc` only for rigid/articulated scenes whose contact is too delicate,
+  dense, interlocking, or extreme for normal rigid contact, and `fem_ipc` for soft-body, elastic, jelly, deformable
+  body, or FEM.Cloth behavior. If any deformable body or cloth is needed, set deformable_enabled=true and
+  ipc_enabled=true. In rigid mode, leave IPC off unless the task truly needs rigid IPC.
 - Use the Planner-dispatched SimDebug cards for FEM/IPC scope decisions, material policy, IPC config mapping,
   coupling-mode selection, adaptive contact-distance handling, and IPC failure diagnosis.
 """.strip()
@@ -40,20 +47,18 @@ FEM/IPC capability:
 
 def planner_available_actions_section(
     *,
-    sim_dt: float,
-    sim_substeps: int,
-    render_every_n_steps: int,
-    render_fps: int,
-    render_res: tuple[int, int],
+    non_ipc_defaults: dict[str, object],
+    ipc_defaults: dict[str, object],
     opt_enabled: bool,
 ) -> str:
     return f"""
 Available actions:
 - write_plan: create planner_output for this case. Include a complete `planner_output` object matching
-  planner_output.schema.json. Infer duration from the task yourself. Use sim_dt={sim_dt},
-  sim_substeps={sim_substeps}, render_fps={render_fps}, render_every_n_steps={render_every_n_steps}, and
-  render_res={render_res} unless the task explicitly requires different values. Use mode local_gpu and backend gpu by
-  default.
+  planner_output.schema.json. Infer the physics mode and timing from the task yourself. Use the non-IPC defaults
+  {non_ipc_defaults} for `rigid`; use the IPC defaults {ipc_defaults} for `rigid_ipc` and `fem_ipc`, unless the task
+  justifies different values. Put the chosen values explicitly in `execution_plan.sim_dt`,
+  `execution_plan.sim_substeps`, `execution_plan.render_every_n_steps`, `execution_plan.render_fps`, and
+  `execution_plan.render_res`. Use mode local_gpu and backend gpu by default.
   Make the plan detailed enough that each worker can implement without guessing: describe desired layout, entity
   identities, physical roles, timing, camera/render expectations, asset needs, success criteria, likely failure modes,
   and per-module validation expectations.

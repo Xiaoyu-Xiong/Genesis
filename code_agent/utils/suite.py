@@ -58,7 +58,10 @@ def _extract_layout_directive(task: str, *, base_dir: Path) -> tuple[str, Path |
     return cleaned_task, layout_path
 
 
-def _write_case_inputs(case_dir: Path, case: Case, *, deformable_enabled: bool, ipc_enabled: bool) -> None:
+def _write_case_inputs(
+    case_dir: Path,
+    case: Case,
+) -> None:
     inputs = case_dir / "inputs"
     inputs.mkdir(parents=True, exist_ok=True)
     (inputs / "user_prompt.md").write_text(case.task + "\n", encoding="utf-8")
@@ -101,24 +104,11 @@ def _write_case_inputs(case_dir: Path, case: Case, *, deformable_enabled: bool, 
             ),
             encoding="utf-8",
         )
-    if deformable_enabled:
-        capability_line = (
-            "FEM deformable generation is ENABLED for this case, and IPC contact is forced ON. Use only FEM+IPC for "
-            "non-rigid behavior, including FEM.Cloth thin-shell cloth when requested; MPM, PBD, SPH, and other "
-            "non-rigid families remain out of scope."
-        )
-    elif ipc_enabled:
-        capability_line = (
-            "FEM deformable generation is DISABLED for this case, but IPC rigid/articulated contact is ENABLED. "
-            "For rigid contact-heavy scenes, Planner should tell workers to use IPC for contact while keeping bodies "
-            "rigid or articulated."
-        )
-    else:
-        capability_line = (
-            "FEM deformable generation and IPC contact are DISABLED for this case. If the task fundamentally requires "
-            "soft-body or deformation behavior, Planner should stop as inconclusive instead of approximating it with "
-            "rigid bodies."
-        )
+    capability_line = (
+        "Planner must choose the physics mode for this case. Use ordinary rigid mode with IPC off for normal rigid "
+        "examples; use rigid IPC only for extreme/delicate/interlocking rigid contact; use FEM+IPC for any "
+        "soft-body, deformable body, or FEM.Cloth cloth behavior. Deformable always forces IPC on."
+    )
     (inputs / "capabilities.md").write_text(
         "Genesis local GPU code generation for rigid, articulated, mesh, texture, rendering, critic, and repair "
         f"workflows. {capability_line} Planner controls worker dispatch, execution, critic, and repair actions.\n",
@@ -139,8 +129,6 @@ def run_suite(
     steps: int | None = None,
     duration_sec: float | None = None,
     render_fps: int | None = None,
-    deformable_enabled: bool | None = None,
-    ipc_enabled: bool | None = None,
     opt_enabled: bool | None = None,
 ) -> dict[str, object]:
     tasks_file = tasks_file.resolve()
@@ -150,12 +138,6 @@ def run_suite(
     if max_cases is not None:
         cases = cases[:max_cases]
 
-    effective_deformable_enabled = (
-        CONFIGS.deformable.enabled if deformable_enabled is None else bool(deformable_enabled)
-    )
-    effective_ipc_enabled = effective_deformable_enabled or (
-        CONFIGS.ipc.enabled if ipc_enabled is None else bool(ipc_enabled)
-    )
     effective_opt_enabled = CONFIGS.opt.enabled if opt_enabled is None else bool(opt_enabled)
     genesis_context = build_genesis_context_pack(out_dir)
     max_workers = _resolve_max_parallel_cases(num_cases=len(cases), max_parallel_cases=max_parallel_cases)
@@ -170,8 +152,7 @@ def run_suite(
         "steps": steps,
         "duration_sec": duration_sec,
         "render_fps": render_fps,
-        "deformable_enabled": effective_deformable_enabled,
-        "ipc_enabled": effective_ipc_enabled,
+        "physics_selection": "planner_decides",
         "opt_enabled": effective_opt_enabled,
         "max_parallel_cases": max_workers,
         "genesis_execution_lock": {
@@ -203,8 +184,6 @@ def run_suite(
                 steps=steps,
                 duration_sec=duration_sec,
                 render_fps=render_fps,
-                deformable_enabled=effective_deformable_enabled,
-                ipc_enabled=effective_ipc_enabled,
                 opt_enabled=effective_opt_enabled,
             ): index
             for index, case in enumerate(cases)
@@ -255,13 +234,11 @@ def _run_case(
     steps: int | None,
     duration_sec: float | None,
     render_fps: int | None,
-    deformable_enabled: bool,
-    ipc_enabled: bool,
     opt_enabled: bool,
 ) -> dict[str, Any]:
     case_dir = out_dir / case.case_id
     case_dir.mkdir(parents=True, exist_ok=True)
-    _write_case_inputs(case_dir, case, deformable_enabled=deformable_enabled, ipc_enabled=ipc_enabled)
+    _write_case_inputs(case_dir, case)
     install_genesis_context_pack(case_dir, genesis_context)
     session = PlannerSession(
         PlannerSessionConfig(
@@ -275,8 +252,6 @@ def _run_case(
             steps=steps,
             duration_sec=duration_sec,
             render_fps=render_fps,
-            deformable_enabled=deformable_enabled,
-            ipc_enabled=ipc_enabled,
             opt_enabled=opt_enabled,
         )
     )

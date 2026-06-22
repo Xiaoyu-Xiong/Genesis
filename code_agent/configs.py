@@ -25,6 +25,12 @@ class CodexConfigs:
     worker_timeout_sec: float = 1500.0
     critic_timeout_sec: float = 1500.0
     opt_timeout_sec: float = 3600.0
+    quota_auto_wait: bool = True
+    quota_probe_interval_sec: float = 300.0
+    quota_probe_initial_delay_sec: float = 300.0
+    quota_probe_timeout_sec: float = 120.0
+    quota_probe_prompt: str = "Reply exactly READY."
+    quota_probe_model: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -76,17 +82,21 @@ class RuntimeConfigs:
     """Genesis runtime defaults for generated simulations."""
 
     sim_dt: float = 0.01
-    sim_substeps: int = 1
+    sim_substeps: int = 10
     render_every_n_steps: int = 4
     render_fps: int = 25
     render_res: tuple[int, int] = (640, 480)
+    ipc_sim_dt: float = 0.01
+    ipc_sim_substeps: int = 1
+    ipc_render_every_n_steps: int = 4
+    ipc_render_fps: int = 25
+    ipc_render_res: tuple[int, int] = (640, 480)
 
 
 @dataclass(slots=True, frozen=True)
 class DeformableConfigs:
     """FEM deformable defaults for generated simulations."""
 
-    enabled: bool = True
     friction: float = 0.3
     tet_resolution: int = 2
     genesis_precision: str = "32"
@@ -129,7 +139,6 @@ class DeformableConfigs:
 class IPCConfigs:
     """IPC contact/coupling defaults for generated simulations."""
 
-    enabled: bool = True
     ipc_newton_max_iterations: int | None = None
     ipc_newton_min_iterations: int | None = 2
     ipc_newton_tolerance: float | None = None
@@ -146,7 +155,9 @@ class IPCConfigs:
     ipc_contact_d_hat: float = 0.01
     ipc_contact_d_hat_adaptive: bool = True
     ipc_contact_friction_enable: bool = True
-    ipc_contact_resistance: float = 3e6
+    ipc_contact_resistance_default: float = 1e7
+    ipc_contact_resistance_min: float = 3e6
+    ipc_contact_resistance_max: float = 1e8
     ipc_contact_eps_velocity: float = 0.01
     ipc_contact_constitution: Literal["ipc", "al-ipc"] = "ipc"
     ipc_collision_detection_method: Literal["info_stackless_bvh", "stackless_bvh", "linear_bvh"] | None = (
@@ -154,8 +165,12 @@ class IPCConfigs:
     )
     ipc_cfl_enable: bool | None = True
     ipc_sanity_check_enable: bool | None = True
-    ipc_constraint_strength_translation: float = 10
-    ipc_constraint_strength_rotation: float = 10
+    ipc_constraint_strength_translation_default: float = 30
+    ipc_constraint_strength_translation_min: float = 10
+    ipc_constraint_strength_translation_max: float = 100
+    ipc_constraint_strength_rotation_default: float = 30
+    ipc_constraint_strength_rotation_min: float = 10
+    ipc_constraint_strength_rotation_max: float = 100
     ipc_enable_rigid_ground_contact: bool = False
     ipc_enable_rigid_rigid_contact: bool = True
     ipc_two_way_coupling: bool = True
@@ -271,25 +286,48 @@ CONFIGS = Configs(
 
 def deformable_config_dict(
     *,
-    enabled: bool | None = None,
-    deformable_enabled: bool | None = None,
-    ipc_enabled: bool | None = None,
+    physics_mode: Literal["rigid", "rigid_ipc", "fem_ipc"] = "rigid",
 ) -> dict[str, object]:
-    """Return the effective FEM/IPC config exposed to Planner and generated code."""
+    """Return the Planner-selected FEM/IPC config exposed to generated code."""
 
-    if deformable_enabled is not None and enabled is not None and bool(deformable_enabled) != bool(enabled):
-        raise ValueError("enabled and deformable_enabled disagree")
-    if deformable_enabled is None:
-        deformable_enabled = enabled
+    if physics_mode == "fem_ipc":
+        effective_deformable_enabled = True
+        effective_ipc_enabled = True
+    elif physics_mode == "rigid_ipc":
+        effective_deformable_enabled = False
+        effective_ipc_enabled = True
+    elif physics_mode == "rigid":
+        effective_deformable_enabled = False
+        effective_ipc_enabled = False
+    else:
+        raise ValueError(f"Unsupported physics_mode: {physics_mode!r}")
 
     data = asdict(CONFIGS.deformable)
-    effective_deformable_enabled = (
-        CONFIGS.deformable.enabled if deformable_enabled is None else bool(deformable_enabled)
-    )
-    requested_ipc_enabled = CONFIGS.ipc.enabled if ipc_enabled is None else bool(ipc_enabled)
-    effective_ipc_enabled = bool(effective_deformable_enabled or requested_ipc_enabled)
-
     data["enabled"] = effective_deformable_enabled
-    data.update({key: value for key, value in asdict(CONFIGS.ipc).items() if key != "enabled"})
+    data.update(asdict(CONFIGS.ipc))
+    data["ipc_contact_resistance"] = data["ipc_contact_resistance_default"]
+    data["ipc_constraint_strength_translation"] = data["ipc_constraint_strength_translation_default"]
+    data["ipc_constraint_strength_rotation"] = data["ipc_constraint_strength_rotation_default"]
     data["ipc_enabled"] = effective_ipc_enabled
     return data
+
+
+def runtime_defaults_dict(*, ipc_enabled: bool) -> dict[str, object]:
+    """Return mode-specific runtime defaults exposed to Planner and generated code."""
+
+    runtime = CONFIGS.runtime
+    if ipc_enabled:
+        return {
+            "sim_dt": runtime.ipc_sim_dt,
+            "sim_substeps": runtime.ipc_sim_substeps,
+            "render_every_n_steps": runtime.ipc_render_every_n_steps,
+            "render_fps": runtime.ipc_render_fps,
+            "render_res": runtime.ipc_render_res,
+        }
+    return {
+        "sim_dt": runtime.sim_dt,
+        "sim_substeps": runtime.sim_substeps,
+        "render_every_n_steps": runtime.render_every_n_steps,
+        "render_fps": runtime.render_fps,
+        "render_res": runtime.render_res,
+    }

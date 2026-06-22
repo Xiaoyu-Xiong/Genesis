@@ -3,7 +3,7 @@
   "library": "simdebug",
   "description": "Planner-selected human debugging experience cards for Genesis simulation generation.",
   "library_dir": "code_agent/context/simdebug",
-  "card_count": 39,
+  "card_count": 47,
   "cards": [
     {
       "schema_version": 1,
@@ -718,6 +718,73 @@
     },
     {
       "schema_version": 1,
+      "id": "ipc_contact_coupling_tuning_guideline",
+      "title": "Tune IPC contact resistance and rigid coupling strength within config bounds",
+      "summary": "IPC contact hardness and rigid-soft coupling tightness may be tuned from deformable_cfg bounds when evidence shows contact sinking, loose clamps, laggy driven rigid bodies, or overly stiff unstable contact.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "rigid_ipc",
+        "fem_ipc"
+      ],
+      "task_tags": [
+        "ipc",
+        "contact_resistance",
+        "constraint_strength",
+        "coupling",
+        "rigid_soft",
+        "clamp",
+        "contact",
+        "stiffness",
+        "opt"
+      ],
+      "failure_tags": [
+        "contact_sinking",
+        "soft_contact",
+        "loose_clamp",
+        "laggy_coupling",
+        "rigid_soft_slip",
+        "overstiff_contact",
+        "jitter",
+        "nan",
+        "unstable_ipc"
+      ],
+      "guidance": [
+        "Treat ipc_contact_resistance, ipc_constraint_strength_translation, and ipc_constraint_strength_rotation as agent-tunable IPC parameters with config-provided defaults and bounds in deformable_cfg.",
+        "Use ipc_contact_resistance_default=1e7 with range [3e6, 1e8]. This parameter controls IPC contact normal resistance/stiffness, not restitution. Increasing it makes contact harder, reduces sinking and visible overlap, and can improve support/contact crispness; excessive values make the system stiffer and may cause jitter, slow convergence, or NaN unless timing/solver quality is also adequate. Decreasing it makes contact softer and more forgiving but can permit visible sinking, mushy support, weak impact response, or apparent penetration.",
+        "Use ipc_constraint_strength_translation_default=30 with range [10, 100]. This controls translational soft-transform coupling between Genesis-driven rigid bodies and IPC ABD objects. Increasing it makes driven rigid bodies, clamps, and tools follow translation targets more tightly in IPC and reduces lag/slip; excessive values can inject stiff coupling forces, jitter, ejection, or instability. Decreasing it softens coupling and can improve stability but may make clamps/tools feel loose or delayed.",
+        "Use ipc_constraint_strength_rotation_default=30 with range [10, 100]. This controls rotational soft-transform coupling. Increase it for twisting clamps, rotating grippers, paddles, rollers, and articulated links whose IPC contact rotation lags or fails to drive soft bodies. Too high can create torque spikes, jitter, or unstable twist contact; too low can make rotations fail to transfer visibly.",
+        "Prefer conservative sweeps: contact_resistance 1e7 -> 3e7 -> 1e8 for sinking contact, or 1e7 -> 3e6 for over-stiff instability; constraint strengths 30 -> 50 -> 100 for loose clamp/coupling, or 30 -> 10 for unstable coupling.",
+        "When Opt tunes these parameters, use log scale for ipc_contact_resistance and linear or log scale for the two positive strength values; record requested and effective values in metrics or reports."
+      ],
+      "restrictions": [
+        "Do not change FEM E, nu, density, cloth thickness, friction, action velocity, or camera choices as a substitute for tuning IPC contact/coupling response.",
+        "Do not pass *_default, *_min, or *_max metadata fields to gs.options.IPCCouplerOptions; only pass the effective values ipc_contact_resistance, ipc_constraint_strength_translation, and ipc_constraint_strength_rotation.",
+        "Do not raise coupling strength to hide a wrong coupling mode, disabled collision, missing coupled links, or bad initial overlap; repair ownership and geometry first."
+      ],
+      "checks": [
+        "Check whether failure evidence is contact softness/sinking, loose rigid-soft coupling, rotational lag, or over-stiff instability before choosing the tuning direction.",
+        "Check generated scene.py maps only effective IPC option values into IPCCouplerOptions.",
+        "Check reports or metrics include the effective values if these fields were tuned."
+      ],
+      "dispatch_hints": [
+        "Send to Planner and Opt when critic evidence suggests bounded scalar tuning of IPC contact or coupling.",
+        "Send to scene/body when writing or repairing IPC option mapping and rigid coupling behavior.",
+        "Send to critic when diagnosing whether a failure is structural or parameter-limited."
+      ],
+      "provenance": {
+        "source": "new_simdebug_card",
+        "motivation": "Expose IPC contact resistance and transform-coupling strengths as bounded agent-tunable parameters."
+      },
+      "source_path": "code_agent/context/simdebug/contact_collision/ipc_contact_coupling_tuning_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
       "id": "ipc_runtime_config_mapping_guideline",
       "title": "IPC scene options should map deformable_cfg values exactly and leave adaptive d_hat to the entrypoint",
       "summary": "Generated IPC scenes should construct IPCCouplerOptions from deformable_cfg with the correct prefix stripping, rigid-contact flags, and adaptive contact distance handling.",
@@ -751,7 +818,8 @@
       "guidance": [
         "If deformable_cfg.ipc_enabled is true for a rigid/articulated scene, route contact through IPC by constructing gs.Scene with gs.options.IPCCouplerOptions.",
         "Map IPC values from deformable_cfg by stripping the ipc_ config prefix before passing Genesis option names, such as ipc_contact_d_hat to contact_d_hat and ipc_constraint_strength_translation to constraint_strength_translation.",
-        "Map supported IPC option families including ipc_newton_*, ipc_n_linesearch_iterations, ipc_linesearch_report_energy, ipc_linear_system_*, ipc_contact_*, ipc_collision_detection_method, ipc_cfl_enable, ipc_sanity_check_enable, ipc_constraint_strength_translation, ipc_constraint_strength_rotation, ipc_enable_rigid_ground_contact, ipc_enable_rigid_rigid_contact, ipc_two_way_coupling, ipc_enable_rigid_dofs_sync, and ipc_free_base_driven_by_ipc.",
+        "Map only actual Genesis IPCCouplerOptions fields, including ipc_newton_*, ipc_n_linesearch_iterations, ipc_linesearch_report_energy, ipc_linear_system_*, ipc_contact_enable, ipc_contact_d_hat, ipc_contact_friction_enable, ipc_contact_resistance, ipc_contact_eps_velocity, ipc_contact_constitution, ipc_collision_detection_method, ipc_cfl_enable, ipc_sanity_check_enable, ipc_constraint_strength_translation, ipc_constraint_strength_rotation, ipc_enable_rigid_ground_contact, ipc_enable_rigid_rigid_contact, ipc_two_way_coupling, ipc_enable_rigid_dofs_sync, and ipc_free_base_driven_by_ipc.",
+        "Do not pass deformable_cfg range metadata keys ending in _default, _min, or _max to gs.options.IPCCouplerOptions; those keys are available to Planner/Opt as tuning bounds only.",
         "Do not pass ipc_contact_d_hat_adaptive to Genesis; it is a code-agent runtime switch and the generated entrypoint resolves it into ipc_contact_d_hat before create_scene.",
         "When ipc_contact_d_hat_adaptive is true, the entrypoint computes clamp(min(0.2 * median_mesh_edge_or_bbox_feature), 1e-5 * max_bbox_diag, 2e-3 * max_bbox_diag) over generated meshes, user/repo meshes, primitive-derived meshes, collision-enabled XML primitive geoms, direct primitive morphs, bbox-only primitive/XML/URDF manifest entries, and planner_output asset_requests as fallback.",
         "For rigid IPC scenes, set enable_rigid_rigid_contact from deformable_cfg.ipc_enable_rigid_rigid_contact. Keep it true when rigid bodies should collide with each other through IPC; keep it false when IPC should only handle rigid-soft contact or selected articulated contacts and Genesis's rigid solver should avoid delegated pairs.",
@@ -773,6 +841,124 @@
         ]
       },
       "source_path": "code_agent/context/simdebug/contact_collision/ipc_runtime_config_mapping_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "ipc_stiffness_relaxation_guardrail",
+      "title": "Relax IPC stiffness only when it preserves the requested physical meaning",
+      "summary": "Lower IPC stiffness/contact/coupling values can improve stability only if the task does not require stiff support, hard clamping, strong constraints, or shape preservation.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "rigid_ipc",
+        "fem_ipc"
+      ],
+      "task_tags": [
+        "ipc",
+        "stiffness",
+        "contact",
+        "coupling",
+        "constraint",
+        "stability",
+        "guardrail"
+      ],
+      "failure_tags": [
+        "overstiff_ipc",
+        "jitter",
+        "nan",
+        "unstable_contact",
+        "semantic_shortcut",
+        "weak_clamp",
+        "softened_wrongly"
+      ],
+      "guidance": [
+        "Relax IPC stiffness, contact resistance, or coupling strength only when the requested visual behavior and physical semantics remain intact.",
+        "If the task asks for stiff support, hard clamps, rigid shape preservation, strong endpoint constraints, or precise rigid-soft transfer, do not solve the failure by weakening those requirements.",
+        "When relaxation is appropriate, prefer small bounded decreases and re-check the target behavior rather than jumping to the minimum values.",
+        "If lowering stiffness removes the required effect, route repair to geometry, coupling mode, clamp design, timing, solver quality, or asset topology instead."
+      ],
+      "restrictions": [
+        "Do not relax FEM E/nu, IPC contact resistance, or transform-coupling strength just to make an impossible or badly staged setup pass.",
+        "Do not call a result successful if relaxed settings avoid instability by eliminating the visible contact, clamp, twist, support, or deformation requested by the prompt."
+      ],
+      "checks": [
+        "Compare the relaxed result against the original prompt: is the required stiffness/contact/constraint still visible?",
+        "Check whether a structural repair would preserve semantics better than lowering stiffness."
+      ],
+      "dispatch_hints": [
+        "Send to Planner, Critic, and Opt when considering a stability fix that weakens IPC contact or coupling.",
+        "Send to body/scene when repair instructions mention lowering IPC stiffness-like parameters."
+      ],
+      "provenance": {
+        "source": "new_simdebug_card",
+        "motivation": "Prevent stability repairs from weakening the core physical behavior requested by the prompt."
+      },
+      "source_path": "code_agent/context/simdebug/contact_collision/ipc_stiffness_relaxation_guardrail.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "non_ipc_collision_elasticity_guideline",
+      "title": "Tune non-IPC rigid collision response through contact solver parameters only",
+      "summary": "For ordinary rigid Genesis contact, collision bounce/compliance should be adjusted through local contact solver parameters such as sol_params, not by changing task energy, friction, geometry, or unrelated global hyperparameters.",
+      "scopes": [
+        "planner",
+        "body",
+        "action",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "rigid"
+      ],
+      "task_tags": [
+        "rigid",
+        "collision",
+        "contact",
+        "elasticity",
+        "bounce",
+        "sol_params",
+        "solver_parameters"
+      ],
+      "failure_tags": [
+        "dead_collision",
+        "too_bouncy",
+        "mushy_contact",
+        "overdamped_contact",
+        "rigid_contact_jitter",
+        "contact_instability"
+      ],
+      "guidance": [
+        "Use ordinary rigid contact solver parameters when the requested behavior specifically needs a more or less elastic collision response in non-IPC rigid mode.",
+        "Genesis rigid contact sol_params are (timeconst, dampratio, dmin, dmax, width, mid, power). The internal note in genesis.utils.geom.default_solver_params states that timeconst controls velocity damping and dampratio controls spring stiffness, despite the name.",
+        "To make collision less dead while staying within contact-only tuning, reduce contact velocity damping by using a larger positive timeconst, and increase elastic restoring stiffness by using a smaller positive dampratio. Keep dampratio strictly positive.",
+        "To make collision less bouncy or reduce jitter, increase dampratio or use a shorter/more dissipative timeconst, while keeping timeconst above the solver safety minimum enforced by Genesis.",
+        "Prefer local per-geom set_sol_params for task-critical colliders instead of broad global changes; record any effective sol_params in metrics or reports when they were important."
+      ],
+      "restrictions": [
+        "Do not alter initial velocity, actuation strength, gravity, mass, shape, FEM/cloth material properties, or friction to satisfy this collision-elasticity card.",
+        "Do not change pre-specified runtime hyperparameters such as sim_dt, sim_substeps, solver iteration counts, or global rigid solver options under this card; route those as separate hyperparameter or execution-quality work.",
+        "Do not set dampratio to zero; Genesis forbids zero because it removes the elastic restoring force.",
+        "Do not use non-IPC sol_params advice for IPC scenes; IPC contact should use the IPC tuning card instead."
+      ],
+      "checks": [
+        "Check the case is in rigid physics mode rather than rigid_ipc or fem_ipc.",
+        "Check any sol_params change affects colliding geoms that actually participate in the requested contact.",
+        "Check the video for both semantic correctness and absence of excessive jitter/ejection after tuning."
+      ],
+      "dispatch_hints": [
+        "Send to body/action when local rigid contact response needs collision-only tuning.",
+        "Send to critic and opt when a rigid contact result is close but collision response is too dead, too soft, or too unstable."
+      ],
+      "provenance": {
+        "source": "new_simdebug_card",
+        "motivation": "Keep non-IPC collision elasticity fixes scoped to collision-contact parameters rather than unrelated task or hyperparameter changes."
+      },
+      "source_path": "code_agent/context/simdebug/contact_collision/non_ipc_collision_elasticity_guideline.yaml"
     },
     {
       "schema_version": 1,
@@ -1187,6 +1373,65 @@
     },
     {
       "schema_version": 1,
+      "id": "prompted_motion_legibility_guideline",
+      "title": "Make prompted motion visibly legible",
+      "summary": "Prompted displacements, rotations, compression, bending, collision, rebound, sliding, and wrapping should be plainly visible in the ordinary render unless the prompt imposes a subtle-motion constraint.",
+      "scopes": [
+        "planner",
+        "body",
+        "action",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "motion",
+        "actuation",
+        "visibility",
+        "legibility",
+        "collision",
+        "deformation",
+        "sliding",
+        "wrapping",
+        "twisting"
+      ],
+      "failure_tags": [
+        "motion_too_subtle",
+        "barely_moves",
+        "invisible_rotation",
+        "weak_collision",
+        "weak_deformation",
+        "unclear_action"
+      ],
+      "guidance": [
+        "Actions explicitly requested in the prompt should be obvious from a normal video: translation, rotation, compression, bending, collision, rebound, sliding, twisting, and wrapping should not remain only tiny numerical changes.",
+        "When the prompt does not require subtle or delicate motion, increase actuation stroke, speed difference, initial spacing, collision speed, or deformation amplitude enough that a viewer can directly see the behavior.",
+        "Use physical causes for larger motion: actuator targets, force schedules, release heights, initial clearances, and contact paths. Do not direct-write passive object states after initialization.",
+        "Critic should flag cases where the required action technically exists but is too small or too brief to judge."
+      ],
+      "restrictions": [
+        "Do not amplify motion by teleporting, pose-writing, disabling collision, scaling objects mid-run, or faking deformation.",
+        "Do not increase motion so much that it violates task constraints, leaves the camera frame, or destroys a required delicate/stable outcome."
+      ],
+      "checks": [
+        "Inspect the video at ordinary playback speed and confirm the prompted behavior is visible without reading metrics.",
+        "Check metrics for displacement/rotation/deformation magnitudes when available, but keep video legibility as the main evidence."
+      ],
+      "dispatch_hints": [
+        "Send to planner/action for tasks with explicit dynamic verbs.",
+        "Send to critic when a result is physically plausible but the requested behavior is hard to see.",
+        "Send to opt when remaining failure is a bounded amplitude, timing, or actuation-strength issue."
+      ],
+      "provenance": {
+        "source": "new_simdebug_card",
+        "motivation": "Make explicitly requested motion visible enough for dataset and debug-card review."
+      },
+      "source_path": "code_agent/context/simdebug/control_dynamics/prompted_motion_legibility_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
       "id": "release_retreat_clearance_guideline",
       "title": "Release before retreat and prove the object no longer follows the robot",
       "summary": "Placement and handoff controllers should separate release, support-transfer, vertical clearance, lateral retreat, and post-release observation so the robot does not drag or secretly support the passive task object.",
@@ -1254,6 +1499,63 @@
         "motivation": "Several precise-control runs failed because the robot retreated before stable release, dragging the final object or leaving it robot-supported."
       },
       "source_path": "code_agent/context/simdebug/control_dynamics/release_retreat_clearance_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "slow_motion_rendering_guideline",
+      "title": "Implement slow motion without lowering output FPS",
+      "summary": "Slow-motion requests should keep output FPS readable while slowing the physical action schedule and increasing captured temporal detail, rather than skipping more simulation steps per frame.",
+      "scopes": [
+        "planner",
+        "action",
+        "rendering",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "slow_motion",
+        "render_every_n_steps",
+        "fps",
+        "timing",
+        "action_schedule",
+        "sim_dt",
+        "frames"
+      ],
+      "failure_tags": [
+        "fast_forward_video",
+        "low_fps",
+        "choppy_motion",
+        "wrong_render_cadence",
+        "missed_impact",
+        "temporal_aliasing"
+      ],
+      "guidance": [
+        "In the current code_agent render semantics, render_every_n_steps means how many simulation steps are skipped between captured frames. Increasing it while keeping output FPS fixed makes physical time advance faster per video second, not slower.",
+        "For slow motion, keep output FPS fixed, slow the action schedule or velocities, and reduce render_every_n_steps or increase total captured frames so intermediate states are visible.",
+        "If slowing action and capturing more frames is still insufficient, reduce sim_dt and increase steps accordingly so the same physical behavior is resolved with more simulation samples.",
+        "Preserve requested duration semantics explicitly: distinguish physical behavior duration from output video playback speed in the plan and reports."
+      ],
+      "restrictions": [
+        "Do not create slow motion by lowering render_fps to a choppy value.",
+        "Do not increase render_every_n_steps as the primary slow-motion mechanism under the current renderer semantics.",
+        "Do not shorten or truncate the requested behavior to make it appear slower."
+      ],
+      "checks": [
+        "Check timing.json, render_stats.json, and action schedule values for FPS, render_every_n_steps, sim_dt, steps, and captured frame count.",
+        "Inspect the video around fast contacts or impacts for temporal aliasing."
+      ],
+      "dispatch_hints": [
+        "Send to planner/action/rendering whenever the prompt mentions slow motion or when fast contact is visually aliased.",
+        "Send to critic when playback speed, FPS, or render cadence makes the behavior hard to judge."
+      ],
+      "provenance": {
+        "source": "new_simdebug_card",
+        "motivation": "Correct the prior slow-motion guidance for render_every_n_steps semantics."
+      },
+      "source_path": "code_agent/context/simdebug/control_dynamics/slow_motion_rendering_guideline.yaml"
     },
     {
       "schema_version": 1,
@@ -1923,6 +2225,119 @@
     },
     {
       "schema_version": 1,
+      "id": "camera_framing_subject_fill_guideline",
+      "title": "Frame dynamic subjects so they fill most of the render",
+      "summary": "Rendering should choose camera target, distance, and FOV from the main dynamic objects across the episode so the requested behavior is large and centered enough to inspect.",
+      "scopes": [
+        "planner",
+        "rendering",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "camera",
+        "render",
+        "framing",
+        "bbox",
+        "fov",
+        "lookat",
+        "visual_readability"
+      ],
+      "failure_tags": [
+        "tiny_objects",
+        "corner_framing",
+        "bad_camera_target",
+        "overwide_fov",
+        "unreadable_video",
+        "object_leaves_frame"
+      ],
+      "guidance": [
+        "When generating or repairing rendering, estimate the main dynamic objects' initial, mid-run, and final bounding boxes, then choose camera target, distance, and FOV so the main behavior occupies about 55%-80% of the image.",
+        "Do not let the main subjects shrink into a small corner or a tiny central region.",
+        "For objects with large travel, prefer a better camera center, elevated oblique view, and moderate distance over blindly looking at the world origin.",
+        "Use a slightly wider view only when the action would otherwise leave the frame, and keep the behavior readable rather than merely visible."
+      ],
+      "restrictions": [
+        "Do not accept a physically correct render if the requested contact, deformation, motion, or interaction cannot be judged because the subjects are too small.",
+        "Do not optimize camera framing by cropping away necessary start, impact, or final-settle context."
+      ],
+      "checks": [
+        "Inspect sampled frames or contact sheets for subject fill ratio, centering, and whether the main action remains in frame.",
+        "Check render_stats.json records camera position, lookat, FOV, and resolution when available."
+      ],
+      "dispatch_hints": [
+        "Send to rendering for camera setup and repair.",
+        "Send to critic when a result is semantically plausible but visually too small or off-center.",
+        "Send to opt only if camera variables are explicitly part of a visual-readability repair."
+      ],
+      "provenance": {
+        "source": "new_simdebug_card",
+        "motivation": "Make rendered evidence fill the frame enough for human review."
+      },
+      "source_path": "code_agent/context/simdebug/evidence_validation/camera_framing_subject_fill_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "critic_visual_readability_guideline",
+      "title": "Critic should notice visual readability and aesthetics",
+      "summary": "Critic should treat visual readability as a soft repair target alongside semantics and physics, including subject size, contrast, occlusion, color separation, and legible motion.",
+      "scopes": [
+        "planner",
+        "critic",
+        "rendering",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "critic",
+        "visual_readability",
+        "aesthetics",
+        "render",
+        "camera",
+        "contrast",
+        "occlusion",
+        "color"
+      ],
+      "failure_tags": [
+        "hard_to_review",
+        "tiny_objects",
+        "low_contrast",
+        "occluded",
+        "muddy_colors",
+        "unreadable_motion",
+        "ugly_render"
+      ],
+      "guidance": [
+        "Critic should inspect not only semantic and physics correctness, but also whether the video is visually readable and easy to review.",
+        "Treat subject size, ground/background contrast, viewing angle, occlusion, color separation, lighting, and one-glance motion legibility as soft quality goals.",
+        "Visual readability is not normally a hard pass/fail condition by itself, but critic repair advice should push the result toward clearer, more polished, and easier-to-review output when semantics are otherwise close."
+      ],
+      "restrictions": [
+        "Do not let numerical metrics alone override visibly confusing, tiny, occluded, or low-contrast evidence.",
+        "Do not recommend purely cosmetic changes that would break physical semantics or hide failure evidence."
+      ],
+      "checks": [
+        "Review sampled frames and video, not only metrics and event logs.",
+        "When proposing repair, separate hard correctness failures from soft visual-readability improvements."
+      ],
+      "dispatch_hints": [
+        "Send to critic by default when render artifacts exist.",
+        "Send to rendering when critic evidence points to readability or aesthetic repair.",
+        "Send to opt only when visual-readability variables are intentionally being tuned."
+      ],
+      "provenance": {
+        "source": "new_simdebug_card",
+        "motivation": "Encourage Critic to improve readability and review quality without turning aesthetics into a hard gate."
+      },
+      "source_path": "code_agent/context/simdebug/evidence_validation/critic_visual_readability_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
       "id": "fresh_artifact_consistency_guideline",
       "title": "Critic evidence must come from the latest completed execution",
       "summary": "Planner and Critic should reject stale metrics, videos, render stats, and summaries left from earlier runs when the latest execution failed, timed out, or produced only partial artifacts.",
@@ -1989,6 +2404,58 @@
         "motivation": "Several cases retained old metrics or videos after later failed executions, making Critic evidence inconsistent with the latest run."
       },
       "source_path": "code_agent/context/simdebug/evidence_validation/fresh_artifact_consistency_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "non_white_ground_on_white_background_guideline",
+      "title": "Use a subtly tinted ground on white backgrounds",
+      "summary": "When the background is pure white and a ground plane is present, use a light non-white ground color unless the prompt explicitly requests white ground.",
+      "scopes": [
+        "planner",
+        "scene",
+        "rendering",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "ground",
+        "background",
+        "white_background",
+        "render",
+        "contrast",
+        "shadow"
+      ],
+      "failure_tags": [
+        "ground_blends_into_background",
+        "low_contrast_ground",
+        "floating_objects",
+        "unreadable_floor",
+        "pure_white_ground"
+      ],
+      "guidance": [
+        "If the render uses a pure white background and includes a ground/floor, do not make the ground pure white unless the prompt explicitly requires white ground.",
+        "Use a low-saturation light color such as light gray, pale blue-gray, or pale warm gray so the horizon, contact shadows, and support surface remain visible.",
+        "Keep the ground subtle enough that it does not distract from task objects, but distinct enough to separate from the sky/background."
+      ],
+      "restrictions": [
+        "Do not override a prompt that explicitly asks for a white floor or a specific ground material.",
+        "Do not use dark or saturated floors when the task only needs a neutral evidence render."
+      ],
+      "checks": [
+        "Inspect sampled frames for a visible floor boundary, contact shadow, or surface cue.",
+        "Check scene/rendering code for a non-white floor material when background_color is white."
+      ],
+      "dispatch_hints": [
+        "Send to scene/rendering when floor material or background color is chosen.",
+        "Send to critic when objects appear to float or the ground plane is hard to distinguish."
+      ],
+      "provenance": {
+        "source": "new_simdebug_card",
+        "motivation": "Avoid invisible pure-white floors on white evidence backgrounds."
+      },
+      "source_path": "code_agent/context/simdebug/evidence_validation/non_white_ground_on_white_background_guideline.yaml"
     },
     {
       "schema_version": 1,

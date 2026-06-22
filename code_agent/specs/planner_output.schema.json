@@ -5,6 +5,7 @@
   "type": "object",
   "required": [
     "scene_brief",
+    "physics_plan",
     "scene_plan",
     "asset_requests",
     "module_contracts",
@@ -30,6 +31,18 @@
         "success_criteria": { "type": "array", "items": { "type": "string" } },
         "failure_criteria": { "type": "array", "items": { "type": "string" } },
         "assumptions": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "physics_plan": {
+      "type": "object",
+      "required": ["mode", "deformable_enabled", "deformable_kind", "ipc_enabled", "rationale"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["rigid", "rigid_ipc", "fem_ipc"] },
+        "deformable_enabled": { "type": "boolean" },
+        "deformable_kind": { "type": "string", "enum": ["none", "soft_body", "cloth", "soft_body_and_cloth"] },
+        "ipc_enabled": { "type": "boolean" },
+        "rationale": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     },
@@ -130,14 +143,35 @@
     },
     "execution_plan": {
       "type": "object",
-      "required": ["mode", "backend", "duration_sec", "step_budget", "render_fps", "render_budget", "notes"],
+      "required": [
+        "mode",
+        "backend",
+        "duration_sec",
+        "step_budget",
+        "sim_dt",
+        "sim_substeps",
+        "render_every_n_steps",
+        "render_fps",
+        "render_budget",
+        "render_res",
+        "notes"
+      ],
       "properties": {
         "mode": { "type": "string", "enum": ["local_gpu", "local_cpu", "skip"] },
         "backend": { "type": ["string", "null"], "enum": ["gpu", "cpu", null] },
         "duration_sec": { "type": "number", "exclusiveMinimum": 0 },
         "step_budget": { "type": "integer", "minimum": 0 },
+        "sim_dt": { "type": "number", "exclusiveMinimum": 0 },
+        "sim_substeps": { "type": "integer", "minimum": 1 },
+        "render_every_n_steps": { "type": "integer", "minimum": 1 },
         "render_fps": { "type": "integer", "minimum": 1 },
         "render_budget": { "type": "integer", "minimum": 0 },
+        "render_res": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 2,
+          "maxItems": 2
+        },
         "notes": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false

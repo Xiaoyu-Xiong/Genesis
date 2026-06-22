@@ -9,12 +9,13 @@ from code_agent.dataset.media import (
     cut_clip,
     describe_download,
     detect_scene_segments,
+    discover_video_urls_from_page,
     download_video,
     visual_signature,
 )
 from code_agent.dataset.models import BuildConfig, BuildSummary, SegmentCandidate, SimilaritySeed, SourceCandidate
 from code_agent.dataset.seeds import collect_similarity_seeds
-from code_agent.dataset.store import DatasetStore
+from code_agent.dataset.store import DatasetStore, infer_clip_category
 from code_agent.dataset.utils import (
     first_nonempty,
     is_probably_video_url,
@@ -30,6 +31,9 @@ def build_dataset(config: BuildConfig) -> BuildSummary:
     manifest = store.load()
     if _backfill_clip_visual_signatures(store, manifest):
         store.save(manifest)
+    split_summary = store.assign_train_test_splits(manifest)
+    if split_summary.get("changed"):
+        store.save(manifest)
     sources = _load_sources(config)
     similarity_seeds = collect_similarity_seeds(config, manifest)
     target = max(0, int(config.target_clips))
@@ -42,6 +46,7 @@ def build_dataset(config: BuildConfig) -> BuildSummary:
         similarity_seeds=len(similarity_seeds),
     )
     if summary.accepted_clips >= target:
+        store.assign_train_test_splits(manifest)
         store.save(manifest)
         return summary
 
@@ -71,6 +76,7 @@ def build_dataset(config: BuildConfig) -> BuildSummary:
         similarity_seeds=similarity_seeds,
         run_codex=config.run_codex,
     )
+    curated = _expand_project_page_candidates(curated)
     summary.candidates_seen = len(candidates)
     download_limit = config.max_downloads if config.max_downloads is not None else len(curated)
 
@@ -138,6 +144,7 @@ def build_dataset(config: BuildConfig) -> BuildSummary:
     summary.status = "complete" if summary.accepted_clips >= target else "partial"
     if not candidates:
         summary.status = "blocked_no_candidates"
+    store.assign_train_test_splits(manifest)
     store.save(manifest)
     return summary
 
@@ -200,6 +207,7 @@ def _materialize_segments(
                 continue
         case_id, prompt = agents.write_prompt(
             clip_record=clip_record,
+            source_record=source_record,
             manifest=manifest,
             clip_sheet=contact_sheet_path,
             logs_dir=logs_dir,
@@ -208,6 +216,8 @@ def _materialize_segments(
         )
         clip_record["case_id"] = case_id
         clip_record["prompt"] = prompt
+        clip_record["category"] = infer_clip_category(clip_record)
+        clip_record["category_source"] = "auto_prompt_heuristic"
         clip_record["status"] = "accepted"
         store.add_clip(manifest, clip_record)
         store.save(manifest)
@@ -255,6 +265,48 @@ def _dedupe_candidates(candidates: list[SourceCandidate]) -> list[SourceCandidat
     return deduped
 
 
+def _expand_project_page_candidates(candidates: list[SourceCandidate]) -> list[SourceCandidate]:
+    expanded: list[SourceCandidate] = []
+    for candidate in candidates:
+        if _is_downloadable_candidate(candidate):
+            expanded.append(candidate)
+            continue
+        resolved_urls = discover_video_urls_from_page(candidate.video_url)
+        if not resolved_urls:
+            expanded.append(candidate)
+            continue
+        for index, video_url in enumerate(resolved_urls, start=1):
+            expanded.append(
+                SourceCandidate(
+                    candidate_id=f"{candidate.candidate_id}_video_{index:02d}",
+                    video_url=video_url,
+                    title=(
+                        f"{candidate.title} video {index:02d}"
+                        if candidate.title and len(resolved_urls) > 1
+                        else candidate.title
+                    ),
+                    project_url=candidate.project_url or candidate.video_url,
+                    paper_url=candidate.paper_url,
+                    paper_title=candidate.paper_title,
+                    venue=candidate.venue,
+                    source_url=candidate.source_url or candidate.video_url,
+                    license_notes=candidate.license_notes,
+                    source_policy_notes=candidate.source_policy_notes,
+                    notes=first_nonempty(
+                        candidate.notes,
+                        f"Resolved from project page {candidate.video_url}",
+                    ),
+                    confidence=candidate.confidence,
+                )
+            )
+    return _dedupe_candidates(expanded)
+
+
+def _is_downloadable_candidate(candidate: SourceCandidate) -> bool:
+    local_path = Path(candidate.video_url).expanduser()
+    return local_path.exists() or is_probably_video_url(candidate.video_url) or is_ytdlp_supported_url(candidate.video_url)
+
+
 def _valid_segments(segments: list[SegmentCandidate], *, duration: float) -> list[SegmentCandidate]:
     valid = []
     for segment in segments:
@@ -273,6 +325,16 @@ def _valid_segments(segments: list[SegmentCandidate], *, duration: float) -> lis
             )
         )
     return valid
+
+
+def _has_paper_search_context(source_record: dict[str, Any]) -> bool:
+    if source_record.get("paper_title"):
+        return True
+    for key in ("paper_url", "project_url", "source_url", "url"):
+        value = source_record.get(key)
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return True
+    return False
 
 
 def _backfill_clip_visual_signatures(store: DatasetStore, manifest: dict[str, Any]) -> bool:
@@ -349,6 +411,7 @@ def _source_record(store: DatasetStore, *, source_id: str, candidate: SourceCand
         "candidate_id": candidate.candidate_id,
         "url": candidate.video_url,
         "project_url": candidate.project_url,
+        "paper_url": candidate.paper_url,
         "paper_title": candidate.paper_title,
         "venue": candidate.venue,
         "source_url": candidate.source_url,

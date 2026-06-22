@@ -39,6 +39,10 @@ class OptAgentRequest:
     steps: int | None = None
     duration_sec: float | None = None
     render_fps: int | None = None
+    sim_dt: float | None = None
+    sim_substeps: int | None = None
+    render_every_n_steps: int | None = None
+    render_res: tuple[int, int] | None = None
     target_video_frames: int | None = None
     success_criteria: tuple[str, ...] = ()
     simdebug_card_context: str = ""

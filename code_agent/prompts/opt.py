@@ -43,11 +43,13 @@ Core protocol:
 - Use the existing runner whenever possible:
   `uv run --no-sync python -m code_agent.cli run-opt --case-dir {case_dir} --backend {request.backend}`.
   Add `--max-trials`, `--timeout-sec`, `--steps`, `--duration-sec`, and `--render-fps` only when useful or requested.
+  The runner reads `contracts/timing.json` for sim_dt, sim_substeps, render cadence, and render resolution.
 - If you need a separate generated-code run or baseline render, use the local execution wrapper so Genesis/IPC gets the
   repository CUDA environment and cross-process execution lock:
   `uv run --no-sync python -m code_agent.utils.local_execution {case_dir} --main-file src/main.py --output-dir
   {case_dir}/reports/opt_agent_baseline --backend {request.backend} -- --backend {request.backend} --out-dir
-  artifacts/opt_agent_baseline --render` plus requested timing flags.
+  artifacts/opt_agent_baseline --render` plus the timing flags from the Planner-to-Opt request or
+  `contracts/timing.json`.
 - After optimization, inspect `reports/opt_report.json`, `reports/verification_report.json`, best params, metrics, and
   videos before returning success-like statuses.
 

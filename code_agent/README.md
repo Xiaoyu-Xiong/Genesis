@@ -18,10 +18,8 @@ The active runtime is Planner-led:
 
 ## Physics Modes
 
-The suite exposes two switches:
-
-- `--enable-deformable` / `--disable-deformable`
-- `--enable-ipc` / `--disable-ipc`
+By default, Planner chooses the physics mode independently for each case and writes that choice to
+`planner_output.physics_plan`. There is no suite-level or config-level manual deformable/IPC switch.
 
 Supported modes:
 
@@ -32,6 +30,10 @@ Supported modes:
 Generated code receives the effective contract at `contracts/deformable_config.json` as `deformable_cfg`.
 That contract provides FEM material ranges/defaults for `E`, `nu`, and `rho`; FEM `friction_mu` is chosen explicitly by
 the generated body code per material rather than being overridden by a global config key.
+
+Planner also chooses runtime timing in `execution_plan`, including `sim_dt`, `sim_substeps`,
+`render_every_n_steps`, `render_fps`, and `render_res`. The framework exposes separate defaults for ordinary rigid
+non-IPC cases and IPC/FEM cases.
 
 ## Assets
 
@@ -60,24 +62,6 @@ uv run python -m code_agent.cli run-suite \
   --tasks-file code_agent/scripts/rigid_primitives/cases.txt \
   --out-dir code_agent/workspaces/suites/rigid_primitives/dev \
   --gpu --max-cases 1 --render
-```
-
-For rigid+IPC:
-
-```bash
-uv run python -m code_agent.cli run-suite \
-  --tasks-file code_agent/scripts/siggraph_paper_demos/cases.txt \
-  --out-dir code_agent/workspaces/suites/siggraph_paper_demos/dev \
-  --disable-deformable --enable-ipc --gpu --max-cases 1 --render
-```
-
-For FEM+IPC:
-
-```bash
-uv run python -m code_agent.cli run-suite \
-  --tasks-file code_agent/scripts/deformable_primitives/cases.txt \
-  --out-dir code_agent/workspaces/suites/deformable_primitives/dev \
-  --enable-deformable --gpu --max-cases 1 --render
 ```
 
 More details live in [docs](docs/README.md).

@@ -251,6 +251,13 @@ class _OptRunner:
         steps = _first_int(self.config.steps, execution.get("steps"), timing.get("steps"))
         duration_sec = _first_float(self.config.duration_sec, execution.get("duration_sec"), timing.get("duration_sec"))
         render_fps = _first_int(self.config.render_fps, execution.get("render_fps"), timing.get("render_fps"))
+        sim_dt = _first_float(execution.get("sim_dt"), timing.get("sim_dt"))
+        sim_substeps = _first_int(execution.get("sim_substeps"), timing.get("sim_substeps"))
+        render_every_n_steps = _first_int(
+            execution.get("render_every_n_steps"),
+            timing.get("render_every_n_steps"),
+        )
+        render_res = _first_render_res(execution.get("render_res"), timing.get("render_res"))
         target_video_frames = _first_int(None, timing.get("target_video_frames"))
         render_best = (
             self.config.render_best
@@ -280,6 +287,10 @@ class _OptRunner:
             steps=steps,
             duration_sec=duration_sec,
             render_fps=render_fps,
+            sim_dt=sim_dt,
+            sim_substeps=sim_substeps,
+            render_every_n_steps=render_every_n_steps,
+            render_res=render_res,
             target_video_frames=target_video_frames,
             render_best=render_best,
             baseline_trials=baseline_trials,
@@ -311,6 +322,14 @@ def _first_float(*values: Any) -> float | None:
         if value is None:
             continue
         return float(value)
+    return None
+
+
+def _first_render_res(*values: Any) -> tuple[int, int] | None:
+    for value in values:
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            continue
+        return (int(value[0]), int(value[1]))
     return None
 
 

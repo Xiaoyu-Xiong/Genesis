@@ -107,6 +107,14 @@ def _isolated_main_args(temp_case_dir: Path, artifacts_dir: Path, options: RunOp
         args.extend(("--steps", str(int(options.steps))))
     if options.render_fps is not None:
         args.extend(("--fps", str(int(options.render_fps))))
+    if options.sim_dt is not None:
+        args.extend(("--sim-dt", str(float(options.sim_dt))))
+    if options.sim_substeps is not None:
+        args.extend(("--sim-substeps", str(int(options.sim_substeps))))
+    if options.render_every_n_steps is not None:
+        args.extend(("--render-every-n-steps", str(int(options.render_every_n_steps))))
+    if options.render_res is not None:
+        args.extend(("--render-res", str(int(options.render_res[0])), str(int(options.render_res[1]))))
     if options.duration_sec is not None:
         args.extend(("--duration-sec", str(float(options.duration_sec))))
     deformable_config_path = temp_case_dir / "contracts" / "deformable_config.json"

@@ -64,14 +64,12 @@ Useful flags:
 - `--duration-sec N`, `--steps N`, `--render-fps N`
 - `--repair-rounds N`
 - `--timeout-sec N`
-- `--enable-deformable` / `--disable-deformable`
-- `--enable-ipc` / `--disable-ipc`
 
 Modes:
 
-- ordinary rigid: `--disable-deformable --disable-ipc`
-- rigid+IPC: `--disable-deformable --enable-ipc`
-- FEM+IPC: `--enable-deformable`
+- ordinary rigid: Planner writes `physics_plan.mode="rigid"`
+- rigid+IPC: Planner writes `physics_plan.mode="rigid_ipc"`
+- FEM+IPC: Planner writes `physics_plan.mode="fem_ipc"`
 
 Execution uses the repository uv environment. Long background WSL runs should use explicit `PATH` and
 `LD_LIBRARY_PATH` when launched through `systemd-run --user`; user services may not inherit interactive shell setup.

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "non_white_ground_on_white_background_guideline",
+  "title": "Use a subtly tinted ground on white backgrounds",
+  "summary": "When the background is pure white and a ground plane is present, use a light non-white ground color unless the prompt explicitly requests white ground.",
+  "scopes": ["planner", "scene", "rendering", "critic"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "ground",
+    "background",
+    "white_background",
+    "render",
+    "contrast",
+    "shadow"
+  ],
+  "failure_tags": [
+    "ground_blends_into_background",
+    "low_contrast_ground",
+    "floating_objects",
+    "unreadable_floor",
+    "pure_white_ground"
+  ],
+  "guidance": [
+    "If the render uses a pure white background and includes a ground/floor, do not make the ground pure white unless the prompt explicitly requires white ground.",
+    "Use a low-saturation light color such as light gray, pale blue-gray, or pale warm gray so the horizon, contact shadows, and support surface remain visible.",
+    "Keep the ground subtle enough that it does not distract from task objects, but distinct enough to separate from the sky/background."
+  ],
+  "restrictions": [
+    "Do not override a prompt that explicitly asks for a white floor or a specific ground material.",
+    "Do not use dark or saturated floors when the task only needs a neutral evidence render."
+  ],
+  "checks": [
+    "Inspect sampled frames for a visible floor boundary, contact shadow, or surface cue.",
+    "Check scene/rendering code for a non-white floor material when background_color is white."
+  ],
+  "dispatch_hints": [
+    "Send to scene/rendering when floor material or background color is chosen.",
+    "Send to critic when objects appear to float or the ground plane is hard to distinguish."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Avoid invisible pure-white floors on white evidence backgrounds."
+  }
+}

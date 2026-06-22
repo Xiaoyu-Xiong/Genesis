@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
+import tempfile
+import threading
 import time
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from code_agent.assets.builtin_guard import builtin_asset_denied_roots
 from code_agent.configs import CONFIGS
@@ -22,6 +25,50 @@ USAGE_LIMIT_MARKERS = (
     "purchase more credits",
     "try again",
 )
+CODEX_ACCOUNT_FILE_ENV = "CODE_AGENT_CODEX_ACCOUNT_FILE"
+CODEX_ACCOUNTS_ENV = "CODE_AGENT_CODEX_ACCOUNTS"
+CODEX_QUOTA_WAIT_ENV = "CODE_AGENT_CODEX_QUOTA_WAIT"
+CODEX_QUOTA_PROBE_INTERVAL_ENV = "CODE_AGENT_CODEX_QUOTA_PROBE_INTERVAL_SEC"
+CODEX_QUOTA_PROBE_INITIAL_DELAY_ENV = "CODE_AGENT_CODEX_QUOTA_PROBE_INITIAL_DELAY_SEC"
+CODEX_QUOTA_PROBE_TIMEOUT_ENV = "CODE_AGENT_CODEX_QUOTA_PROBE_TIMEOUT_SEC"
+CODEX_QUOTA_PROBE_PROMPT_ENV = "CODE_AGENT_CODEX_QUOTA_PROBE_PROMPT"
+CODEX_QUOTA_PROBE_MODEL_ENV = "CODE_AGENT_CODEX_QUOTA_PROBE_MODEL"
+
+
+@dataclass(slots=True, frozen=True)
+class _CodexAccount:
+    """One pre-authenticated Codex account profile.
+
+    `codex_home` should point at a directory that has already been logged in with
+    `CODEX_HOME=/path/to/profile codex login`. `profile` maps to Codex CLI
+    `--profile`; it is optional and mainly useful when a CODEX_HOME contains
+    several config profiles.
+    """
+
+    name: str
+    codex_home: Path | None = None
+    profile: str | None = None
+    top_level_args: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class _CodexAccountState:
+    quota_limited: bool = False
+    auth_failed: bool = False
+    last_error: str | None = None
+    last_checked_at_unix: float | None = None
+
+
+_CODEX_ACCOUNT_LOCK = threading.RLock()
+_CODEX_ACCOUNT_STATES: dict[str, _CodexAccountState] = {}
+_ACTIVE_CODEX_ACCOUNT_NAME: str | None = None
+
+
+def _reset_codex_account_state_for_tests() -> None:
+    global _ACTIVE_CODEX_ACCOUNT_NAME
+    with _CODEX_ACCOUNT_LOCK:
+        _CODEX_ACCOUNT_STATES.clear()
+        _ACTIVE_CODEX_ACCOUNT_NAME = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -46,6 +93,8 @@ class CodexExecRequest:
     extra_args: tuple[str, ...] = ()
     hide_builtin_assets: bool = CONFIGS.codex.hide_builtin_assets_from_agents
     writable_roots: tuple[Path, ...] = ()
+    codex_home: Path | None = None
+    codex_account_name: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -66,6 +115,7 @@ class CodexExecResult:
     error_type: str | None = None
     error_message: str | None = None
     stderr_path: str | None = None
+    codex_account_name: str | None = None
     timed_out: bool = False
     started_at_unix: float = field(default_factory=time.time)
     ended_at_unix: float = field(default_factory=time.time)
@@ -131,11 +181,353 @@ def run_codex_exec(request: CodexExecRequest) -> CodexExecResult:
 
     Callers build an explicit request so output paths and execution policy stay visible at the callsite.
     """
-    return _run_codex_exec_request(request)
-
-
-def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
     request = _normalize_request_paths(request)
+    if not _codex_quota_wait_enabled():
+        return _run_codex_exec_request_once(request)
+
+    accounts = _configured_codex_accounts()
+    attempted_accounts: set[str] = set()
+    last_result: CodexExecResult | None = None
+    while True:
+        account = _select_codex_account(accounts, exclude=attempted_accounts)
+        if account is None:
+            if last_result is not None and not _has_codex_quota_limited_account(accounts):
+                return last_result
+            account = _wait_for_codex_quota_recovery(request, accounts)
+            attempted_accounts.clear()
+
+        result = _run_codex_exec_request_once(_request_for_codex_account(request, account))
+        last_result = result
+        if result.error_type == "codex_usage_limit":
+            _mark_codex_account_quota_limited(account, result.error_message)
+            attempted_accounts.add(account.name)
+            _append_codex_quota_event(
+                request,
+                {
+                    "event": "account_usage_limited",
+                    "account": account.name,
+                    "message": result.error_message,
+                    "will_try_next_account": len(attempted_accounts) < len(accounts),
+                },
+            )
+            continue
+        if result.error_type == "codex_auth_failed" and len(accounts) > 1:
+            _mark_codex_account_auth_failed(account, result.error_message)
+            attempted_accounts.add(account.name)
+            _append_codex_quota_event(
+                request,
+                {
+                    "event": "account_auth_failed",
+                    "account": account.name,
+                    "message": result.error_message,
+                    "will_try_next_account": len(attempted_accounts) < len(accounts),
+                },
+            )
+            continue
+        if result.success:
+            _mark_codex_account_success(account)
+        return result
+
+
+def _codex_quota_wait_enabled() -> bool:
+    raw = os.environ.get(CODEX_QUOTA_WAIT_ENV)
+    if raw is not None:
+        return raw.strip().lower() not in {"0", "false", "off", "no"}
+    return bool(CONFIGS.codex.quota_auto_wait)
+
+
+def _configured_codex_accounts() -> tuple[_CodexAccount, ...]:
+    accounts = _codex_accounts_from_file() or _codex_accounts_from_env()
+    if not accounts:
+        accounts = (_default_codex_account(),)
+    return _dedupe_codex_accounts(accounts)
+
+
+def _codex_accounts_from_file() -> tuple[_CodexAccount, ...]:
+    raw_path = os.environ.get(CODEX_ACCOUNT_FILE_ENV)
+    if not raw_path:
+        return ()
+    path = Path(raw_path).expanduser()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_accounts: Any = payload.get("accounts") if isinstance(payload, dict) else payload
+    if not isinstance(raw_accounts, list):
+        raise ValueError(f"{CODEX_ACCOUNT_FILE_ENV} must point to a JSON object/list with accounts")
+    return tuple(
+        account
+        for index, item in enumerate(raw_accounts)
+        if (account := _codex_account_from_mapping(item, default_index=index)) is not None
+    )
+
+
+def _codex_accounts_from_env() -> tuple[_CodexAccount, ...]:
+    raw = os.environ.get(CODEX_ACCOUNTS_ENV, "").strip()
+    if not raw:
+        return ()
+    accounts: list[_CodexAccount] = []
+    for index, token in enumerate(re.split(r"[;,]", raw)):
+        item = token.strip()
+        if not item:
+            continue
+        if "=" in item:
+            name, spec = item.split("=", 1)
+            name = name.strip() or f"account_{index + 1}"
+            spec = spec.strip()
+        else:
+            spec = item
+            name = Path(spec).expanduser().name or f"account_{index + 1}"
+        if spec.startswith("profile:"):
+            accounts.append(_CodexAccount(name=name, profile=spec.removeprefix("profile:").strip() or None))
+        else:
+            accounts.append(_CodexAccount(name=name, codex_home=Path(spec).expanduser()))
+    return tuple(accounts)
+
+
+def _codex_account_from_mapping(item: object, *, default_index: int) -> _CodexAccount | None:
+    if not isinstance(item, dict):
+        return None
+    raw_home = item.get("codex_home") or item.get("home") or item.get("CODEX_HOME")
+    codex_home = Path(str(raw_home)).expanduser() if raw_home else None
+    profile = item.get("profile")
+    profile_text = str(profile).strip() if profile is not None else None
+    raw_args = item.get("top_level_args") or item.get("codex_top_level_args") or ()
+    top_level_args = tuple(str(arg) for arg in raw_args) if isinstance(raw_args, list) else ()
+    name = str(item.get("name") or item.get("id") or "").strip()
+    if not name:
+        if codex_home is not None:
+            name = codex_home.name
+        elif profile_text:
+            name = profile_text
+        else:
+            name = f"account_{default_index + 1}"
+    return _CodexAccount(
+        name=name,
+        codex_home=codex_home,
+        profile=profile_text,
+        top_level_args=top_level_args,
+    )
+
+
+def _default_codex_account() -> _CodexAccount:
+    raw_home = os.environ.get("CODEX_HOME")
+    return _CodexAccount(
+        name=os.environ.get("CODE_AGENT_CODEX_ACCOUNT_NAME", "default"),
+        codex_home=Path(raw_home).expanduser() if raw_home else None,
+    )
+
+
+def _dedupe_codex_accounts(accounts: tuple[_CodexAccount, ...]) -> tuple[_CodexAccount, ...]:
+    seen: dict[str, int] = {}
+    deduped: list[_CodexAccount] = []
+    for account in accounts:
+        base_name = account.name or "account"
+        count = seen.get(base_name, 0)
+        seen[base_name] = count + 1
+        name = base_name if count == 0 else f"{base_name}_{count + 1}"
+        top_level_args = account.top_level_args
+        if account.profile:
+            top_level_args = ("--profile", account.profile, *top_level_args)
+        deduped.append(replace(account, name=name, top_level_args=top_level_args))
+    return tuple(deduped) or (_default_codex_account(),)
+
+
+def _select_codex_account(accounts: tuple[_CodexAccount, ...], *, exclude: set[str]) -> _CodexAccount | None:
+    with _CODEX_ACCOUNT_LOCK:
+        ordered = _ordered_codex_accounts(accounts)
+        for account in ordered:
+            if account.name in exclude:
+                continue
+            state = _CODEX_ACCOUNT_STATES.get(account.name)
+            if state is not None and (state.quota_limited or state.auth_failed):
+                continue
+            return account
+    return None
+
+
+def _ordered_codex_accounts(accounts: tuple[_CodexAccount, ...]) -> tuple[_CodexAccount, ...]:
+    if _ACTIVE_CODEX_ACCOUNT_NAME is None:
+        return accounts
+    for index, account in enumerate(accounts):
+        if account.name == _ACTIVE_CODEX_ACCOUNT_NAME:
+            return (*accounts[index:], *accounts[:index])
+    return accounts
+
+
+def _state_for_codex_account(account: _CodexAccount) -> _CodexAccountState:
+    state = _CODEX_ACCOUNT_STATES.get(account.name)
+    if state is None:
+        state = _CodexAccountState()
+        _CODEX_ACCOUNT_STATES[account.name] = state
+    return state
+
+
+def _has_codex_quota_limited_account(accounts: tuple[_CodexAccount, ...]) -> bool:
+    with _CODEX_ACCOUNT_LOCK:
+        return any(
+            (state := _CODEX_ACCOUNT_STATES.get(account.name)) is not None and state.quota_limited
+            for account in accounts
+        )
+
+
+def _mark_codex_account_quota_limited(account: _CodexAccount, message: str | None) -> None:
+    with _CODEX_ACCOUNT_LOCK:
+        state = _state_for_codex_account(account)
+        state.quota_limited = True
+        state.auth_failed = False
+        state.last_error = message
+        state.last_checked_at_unix = time.time()
+
+
+def _mark_codex_account_auth_failed(account: _CodexAccount, message: str | None) -> None:
+    with _CODEX_ACCOUNT_LOCK:
+        state = _state_for_codex_account(account)
+        state.auth_failed = True
+        state.last_error = message
+        state.last_checked_at_unix = time.time()
+
+
+def _mark_codex_account_success(account: _CodexAccount) -> None:
+    global _ACTIVE_CODEX_ACCOUNT_NAME
+    with _CODEX_ACCOUNT_LOCK:
+        state = _state_for_codex_account(account)
+        state.quota_limited = False
+        state.auth_failed = False
+        state.last_error = None
+        state.last_checked_at_unix = time.time()
+        _ACTIVE_CODEX_ACCOUNT_NAME = account.name
+
+
+def _wait_for_codex_quota_recovery(request: CodexExecRequest, accounts: tuple[_CodexAccount, ...]) -> _CodexAccount:
+    started = time.time()
+    _append_codex_quota_event(
+        request,
+        {
+            "event": "quota_pause_started",
+            "accounts": [account.name for account in accounts],
+            "probe_interval_sec": _codex_quota_probe_interval_sec(),
+        },
+    )
+    initial_delay = _codex_quota_probe_initial_delay_sec()
+    if initial_delay > 0:
+        _append_codex_quota_event(request, {"event": "quota_probe_sleep", "sleep_sec": initial_delay})
+        time.sleep(initial_delay)
+
+    while True:
+        for account in accounts:
+            result = _probe_codex_account_quota(request, account)
+            event = {
+                "event": "quota_probe_result",
+                "account": account.name,
+                "success": result.success,
+                "error_type": result.error_type,
+                "message": result.error_message,
+                "duration_sec": result.duration_sec,
+            }
+            if result.success:
+                _mark_codex_account_success(account)
+                _append_codex_quota_event(
+                    request,
+                    {
+                        **event,
+                        "event": "quota_recovered",
+                        "paused_sec": time.time() - started,
+                    },
+                )
+                return account
+            if result.error_type == "codex_usage_limit":
+                _mark_codex_account_quota_limited(account, result.error_message)
+            elif result.error_type == "codex_auth_failed":
+                _mark_codex_account_auth_failed(account, result.error_message)
+            _append_codex_quota_event(request, event)
+
+        interval = _codex_quota_probe_interval_sec()
+        _append_codex_quota_event(request, {"event": "quota_probe_sleep", "sleep_sec": interval})
+        if interval > 0:
+            time.sleep(interval)
+
+
+def _probe_codex_account_quota(request: CodexExecRequest, account: _CodexAccount) -> CodexExecResult:
+    probe_root = Path(
+        os.environ.get(
+            "CODE_AGENT_CODEX_QUOTA_PROBE_DIR",
+            str(Path(tempfile.gettempdir()) / "code-agent-codex-quota"),
+        )
+    ).expanduser()
+    probe_root.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", account.name)[:80] or "account"
+    stamp = int(time.time() * 1000)
+    probe_request = CodexExecRequest(
+        role=f"quota_probe_{safe_name}",
+        prompt=os.environ.get(CODEX_QUOTA_PROBE_PROMPT_ENV, CONFIGS.codex.quota_probe_prompt),
+        cwd=DEFAULT_REPO_ROOT,
+        sandbox="read-only",
+        model=_codex_quota_probe_model(request),
+        output_jsonl_path=probe_root / f"{safe_name}_{stamp}.jsonl",
+        final_message_path=probe_root / f"{safe_name}_{stamp}.final.txt",
+        codex_bin=request.codex_bin,
+        codex_top_level_args=request.codex_top_level_args,
+        reasoning_effort=None,
+        service_tier=request.service_tier,
+        timeout_sec=_codex_quota_probe_timeout_sec(),
+        hide_builtin_assets=False,
+    )
+    return _run_codex_exec_request_once(_request_for_codex_account(_normalize_request_paths(probe_request), account))
+
+
+def _codex_quota_probe_model(request: CodexExecRequest) -> str | None:
+    return os.environ.get(CODEX_QUOTA_PROBE_MODEL_ENV) or CONFIGS.codex.quota_probe_model or request.model
+
+
+def _codex_quota_probe_interval_sec() -> float:
+    return _float_env(CODEX_QUOTA_PROBE_INTERVAL_ENV, CONFIGS.codex.quota_probe_interval_sec)
+
+
+def _codex_quota_probe_initial_delay_sec() -> float:
+    return _float_env(CODEX_QUOTA_PROBE_INITIAL_DELAY_ENV, CONFIGS.codex.quota_probe_initial_delay_sec)
+
+
+def _codex_quota_probe_timeout_sec() -> float:
+    return _float_env(CODEX_QUOTA_PROBE_TIMEOUT_ENV, CONFIGS.codex.quota_probe_timeout_sec)
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return float(default)
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return float(default)
+
+
+def _request_for_codex_account(request: CodexExecRequest, account: _CodexAccount) -> CodexExecRequest:
+    codex_home = account.codex_home if account.codex_home is not None else request.codex_home
+    return replace(
+        request,
+        codex_home=codex_home,
+        codex_account_name=account.name,
+        codex_top_level_args=(*account.top_level_args, *request.codex_top_level_args),
+    )
+
+
+def _codex_env_overrides(request: CodexExecRequest) -> dict[str, str]:
+    if request.codex_home is None:
+        return {}
+    return {"CODEX_HOME": str(request.codex_home)}
+
+
+def _append_codex_quota_event(request: CodexExecRequest, event: dict[str, object]) -> None:
+    path = request.output_jsonl_path.with_suffix(request.output_jsonl_path.suffix + ".quota.jsonl")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "created_at_unix": time.time(),
+        "role": request.role,
+        **event,
+    }
+    with path.open("a", encoding="utf-8") as file:
+        file.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+
+def _run_codex_exec_request_once(request: CodexExecRequest) -> CodexExecResult:
     started = time.time()
     jsonl_path = request.output_jsonl_path
     final_path = request.final_message_path
@@ -163,7 +555,7 @@ def _run_codex_exec_request(request: CodexExecRequest) -> CodexExecResult:
                 stderr_path,
             )
     command = build_codex_exec_command(request, resolved_codex=resolved_codex)
-    run_env = build_local_execution_env()
+    run_env = build_local_execution_env(_codex_env_overrides(request))
     final_path.unlink(missing_ok=True)
 
     if resolved_codex is None:
@@ -298,6 +690,7 @@ def _result(
         error_type=error_type,
         error_message=error_message,
         stderr_path=str(stderr_path),
+        codex_account_name=request.codex_account_name,
         timed_out=timed_out,
         started_at_unix=started,
         ended_at_unix=ended,
@@ -320,6 +713,7 @@ def _normalize_request_paths(request: CodexExecRequest) -> CodexExecRequest:
         output_schema_path=None if request.output_schema_path is None else _repo_path(request.output_schema_path),
         image_paths=tuple(_repo_path(path) for path in request.image_paths),
         writable_roots=tuple(_repo_path(path) for path in request.writable_roots),
+        codex_home=None if request.codex_home is None else Path(request.codex_home).expanduser().resolve(),
     )
 
 
@@ -366,7 +760,7 @@ def _asset_sandbox_writable_roots(request: CodexExecRequest, *, denied_roots: tu
         request.final_message_path.parent,
         *request.writable_roots,
     ]
-    codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
+    codex_home = request.codex_home or Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
     if codex_home.exists():
         roots.append(codex_home)
     resolved: list[Path] = []

@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "id": "prompted_motion_legibility_guideline",
+  "title": "Make prompted motion visibly legible",
+  "summary": "Prompted displacements, rotations, compression, bending, collision, rebound, sliding, and wrapping should be plainly visible in the ordinary render unless the prompt imposes a subtle-motion constraint.",
+  "scopes": ["planner", "body", "action", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "motion",
+    "actuation",
+    "visibility",
+    "legibility",
+    "collision",
+    "deformation",
+    "sliding",
+    "wrapping",
+    "twisting"
+  ],
+  "failure_tags": [
+    "motion_too_subtle",
+    "barely_moves",
+    "invisible_rotation",
+    "weak_collision",
+    "weak_deformation",
+    "unclear_action"
+  ],
+  "guidance": [
+    "Actions explicitly requested in the prompt should be obvious from a normal video: translation, rotation, compression, bending, collision, rebound, sliding, twisting, and wrapping should not remain only tiny numerical changes.",
+    "When the prompt does not require subtle or delicate motion, increase actuation stroke, speed difference, initial spacing, collision speed, or deformation amplitude enough that a viewer can directly see the behavior.",
+    "Use physical causes for larger motion: actuator targets, force schedules, release heights, initial clearances, and contact paths. Do not direct-write passive object states after initialization.",
+    "Critic should flag cases where the required action technically exists but is too small or too brief to judge."
+  ],
+  "restrictions": [
+    "Do not amplify motion by teleporting, pose-writing, disabling collision, scaling objects mid-run, or faking deformation.",
+    "Do not increase motion so much that it violates task constraints, leaves the camera frame, or destroys a required delicate/stable outcome."
+  ],
+  "checks": [
+    "Inspect the video at ordinary playback speed and confirm the prompted behavior is visible without reading metrics.",
+    "Check metrics for displacement/rotation/deformation magnitudes when available, but keep video legibility as the main evidence."
+  ],
+  "dispatch_hints": [
+    "Send to planner/action for tasks with explicit dynamic verbs.",
+    "Send to critic when a result is physically plausible but the requested behavior is hard to see.",
+    "Send to opt when remaining failure is a bounded amplitude, timing, or actuation-strength issue."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Make explicitly requested motion visible enough for dataset and debug-card review."
+  }
+}

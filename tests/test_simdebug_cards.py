@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from code_agent.context.simdebug import build_simdebug_catalog, select_simdebug_cards
+from code_agent.configs import deformable_config_dict
 from code_agent.opt.types import OptAgentRequest
 from code_agent.planner.session import PlannerSession, PlannerSessionConfig
 from code_agent.prompts.opt import build_opt_prompt
@@ -202,10 +203,9 @@ def test_planner_prompt_includes_simdebug_dispatch_and_writes_audit(tmp_path):
             timeout_sec=1.0,
             render=False,
             repair_rounds=0,
-            deformable_enabled=True,
-            ipc_enabled=True,
         )
     )
+    _mark_session_fem_ipc_selected(session)
     session.contracts_dir.mkdir(parents=True)
     session.reports_dir.mkdir(parents=True)
     session.logs_dir.mkdir(parents=True)
@@ -223,6 +223,24 @@ def test_planner_prompt_includes_simdebug_dispatch_and_writes_audit(tmp_path):
     assert "ipc_fem_material_selection_guideline" in prompt
     assert "ipc_fem_material_selection_guideline" in ids
     assert session.state["simdebug"]["latest_selected_card_ids"]
+
+
+def test_planner_session_auto_physics_exposes_all_initial_modes(tmp_path):
+    session = PlannerSession(
+        PlannerSessionConfig(
+            case_id="mixed_case",
+            task="mixed rigid, cloth, or soft cases are selected per prompt",
+            case_dir=tmp_path / "case",
+            backend="gpu",
+            timeout_sec=1.0,
+            render=False,
+            repair_rounds=0,
+        )
+    )
+
+    assert set(session.simdebug_physics_modes()) == {"rigid", "rigid_ipc", "fem_ipc"}
+    assert session.deformable_config["enabled"] is False
+    assert session.deformable_config["ipc_enabled"] is False
 
 
 def test_legacy_prompts_are_preserved_and_active_prompts_are_slimmed():
@@ -301,7 +319,7 @@ from code_agent.planner.session import PlannerSession, PlannerSessionConfig
 from code_agent.prompts import prompt_mode
 from code_agent.prompts.worker import WORKER_COMMON_RULES
 with TemporaryDirectory() as tmp:
-    s = PlannerSession(PlannerSessionConfig(case_id='case', task='soft FEM IPC contact', case_dir=Path(tmp) / 'case', backend='gpu', timeout_sec=1.0, render=False, repair_rounds=0, deformable_enabled=True, ipc_enabled=True))
+    s = PlannerSession(PlannerSessionConfig(case_id='case', task='soft FEM IPC contact', case_dir=Path(tmp) / 'case', backend='gpu', timeout_sec=1.0, render=False, repair_rounds=0))
     s.reports_dir.mkdir(parents=True, exist_ok=True)
     s.logs_dir.mkdir(parents=True, exist_ok=True)
     s.contracts_dir.mkdir(parents=True, exist_ok=True)
@@ -324,7 +342,7 @@ with TemporaryDirectory() as tmp:
 
 
 def test_session_dispatches_role_specific_simdebug_cards(tmp_path):
-    session = _simdebug_test_session(tmp_path, deformable_enabled=True, ipc_enabled=True)
+    session = _simdebug_test_session(tmp_path)
 
     body_context = session.simdebug_card_context_for_role("body", turn=1, dispatch_reason="test_body")
     opt_context = session.simdebug_card_context_for_role("opt", turn=1, dispatch_reason="test_opt")
@@ -337,7 +355,7 @@ def test_session_dispatches_role_specific_simdebug_cards(tmp_path):
 
 
 def test_session_honors_planner_requested_simdebug_card_ids(tmp_path):
-    session = _simdebug_test_session(tmp_path, deformable_enabled=True, ipc_enabled=True)
+    session = _simdebug_test_session(tmp_path)
     action = {
         "simdebug_cards": {
             "body": ["ipc_fem_material_selection_guideline"],
@@ -364,7 +382,7 @@ def test_session_honors_planner_requested_simdebug_card_ids(tmp_path):
 
 
 def test_worker_and_opt_prompts_receive_planner_dispatched_cards(tmp_path):
-    session = _simdebug_test_session(tmp_path, deformable_enabled=True, ipc_enabled=True)
+    session = _simdebug_test_session(tmp_path)
     body_context = session.simdebug_card_context_for_role("body", turn=0, dispatch_reason="test_worker_prompt")
     worker_prompt = _worker_prompt(
         case_dir=session.case_dir,
@@ -387,12 +405,24 @@ def test_worker_and_opt_prompts_receive_planner_dispatched_cards(tmp_path):
     assert '"simdebug_card_context"' not in opt_prompt.split("Planner-dispatched SimDebug cards for Opt:", 1)[0]
 
 
-def _simdebug_test_session(
-    tmp_path,
-    *,
-    deformable_enabled: bool,
-    ipc_enabled: bool,
-) -> PlannerSession:
+def test_ipc_contact_coupling_tuning_bounds_are_exposed():
+    cfg = deformable_config_dict(physics_mode="fem_ipc")
+
+    assert cfg["ipc_contact_resistance_default"] == 1e7
+    assert cfg["ipc_contact_resistance_min"] == 3e6
+    assert cfg["ipc_contact_resistance"] == 1e7
+    assert cfg["ipc_contact_resistance_max"] == 1e8
+    assert cfg["ipc_constraint_strength_translation_default"] == 30
+    assert cfg["ipc_constraint_strength_translation_min"] == 10
+    assert cfg["ipc_constraint_strength_translation"] == 30
+    assert cfg["ipc_constraint_strength_translation_max"] == 100
+    assert cfg["ipc_constraint_strength_rotation_default"] == 30
+    assert cfg["ipc_constraint_strength_rotation_min"] == 10
+    assert cfg["ipc_constraint_strength_rotation"] == 30
+    assert cfg["ipc_constraint_strength_rotation_max"] == 100
+
+
+def _simdebug_test_session(tmp_path) -> PlannerSession:
     case_dir = tmp_path / "case"
     session = PlannerSession(
         PlannerSessionConfig(
@@ -403,12 +433,23 @@ def _simdebug_test_session(
             timeout_sec=1.0,
             render=False,
             repair_rounds=0,
-            deformable_enabled=deformable_enabled,
-            ipc_enabled=ipc_enabled,
         )
     )
+    _mark_session_fem_ipc_selected(session)
     session.contracts_dir.mkdir(parents=True)
     session.reports_dir.mkdir(parents=True)
     session.logs_dir.mkdir(parents=True)
     session.write_deformable_config_contract()
     return session
+
+
+def _mark_session_fem_ipc_selected(session: PlannerSession) -> None:
+    physics_plan = {
+        "mode": "fem_ipc",
+        "deformable_enabled": True,
+        "deformable_kind": "soft_body",
+        "ipc_enabled": True,
+        "rationale": "test FEM/IPC simdebug coverage",
+    }
+    session.deformable_config = deformable_config_dict(physics_mode="fem_ipc")
+    session._sync_capability_state(physics_plan)

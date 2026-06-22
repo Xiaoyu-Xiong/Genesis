@@ -24,6 +24,10 @@ class RunOptOptions:
     steps: int | None
     duration_sec: float | None
     render_fps: int | None
+    sim_dt: float | None
+    sim_substeps: int | None
+    render_every_n_steps: int | None
+    render_res: tuple[int, int] | None
     target_video_frames: int | None
     render_best: bool
     baseline_trials: int
@@ -306,6 +310,14 @@ class TrialExecutor:
             args.extend(("--steps", str(int(options.steps))))
         if options.render_fps is not None:
             args.extend(("--fps", str(int(options.render_fps))))
+        if options.sim_dt is not None:
+            args.extend(("--sim-dt", str(float(options.sim_dt))))
+        if options.sim_substeps is not None:
+            args.extend(("--sim-substeps", str(int(options.sim_substeps))))
+        if options.render_every_n_steps is not None:
+            args.extend(("--render-every-n-steps", str(int(options.render_every_n_steps))))
+        if options.render_res is not None:
+            args.extend(("--render-res", str(int(options.render_res[0])), str(int(options.render_res[1]))))
         if options.duration_sec is not None:
             args.extend(("--duration-sec", str(float(options.duration_sec))))
         if render and options.target_video_frames is not None:

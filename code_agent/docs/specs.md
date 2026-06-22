@@ -32,13 +32,24 @@ Current generated module interfaces:
 - `rendering.capture_frame(render_state, step)`
 - `rendering.finalize_rendering(render_state, *, event_log_path=None, metrics_path=None)`
 
-`contracts/deformable_config.json` carries the effective FEM/IPC contract. `enabled` gates FEM deformables, and
-`ipc_enabled` gates `gs.options.IPCCouplerOptions`; FEM enabled forces IPC enabled.
+`planner_output.physics_plan` carries the Planner-selected mode for a case:
+
+- `rigid`: ordinary rigid/articulated simulation, IPC off
+- `rigid_ipc`: rigid/articulated simulation with IPC contact/coupling
+- `fem_ipc`: FEM soft-body and/or FEM.Cloth simulation, IPC forced on
+
+`contracts/deformable_config.json` carries the effective FEM/IPC contract derived from that plan. `enabled` gates FEM
+deformables, and `ipc_enabled` gates `gs.options.IPCCouplerOptions`; FEM enabled forces IPC enabled. These are derived
+execution-contract fields, not config-level switches.
 
 The contract provides FEM material ranges/defaults for `E`, `nu`, and `rho`, plus shared FEM/IPC options such as
 `fem_model`, hydroelastic/contact-resistance settings, tet resolution, precision, and IPC solver/contact parameters.
 It intentionally does not provide a `fem_friction_mu` override: generated body code must choose explicit
 task-appropriate FEM `friction_mu` values per material.
+
+`planner_output.execution_plan` carries explicit runtime timing: `sim_dt`, `sim_substeps`,
+`render_every_n_steps`, `render_fps`, `render_budget`, and `render_res`. The harness records the resolved values in
+`contracts/timing.json` and passes them to `src/main.py` during execution and optimization.
 
 Optimization contract schemas live under `code_agent/specs/opt_schema/`:
 
