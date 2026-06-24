@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import weakref
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
@@ -41,6 +42,7 @@ if TYPE_CHECKING or UIPC_AVAILABLE:
         ElasticModuli,
         ElasticModuli2D,
         ExternalArticulationConstraint,
+        SoftPositionConstraint,
         SoftTransformConstraint,
         StableNeoHookean,
         StrainLimitingBaraffWitkinShell,
@@ -63,6 +65,19 @@ ABD_KAPPA = 100.0  # MPa unit
 # TODO: consider deriving from Genesis joint properties instead of hardcoding.
 STIFFNESS_DEFAULT = 1e4
 JOINT_STRENGTH_RATIO = 100.0
+FEM_VERTEX_CONSTRAINT_STRENGTH_DEFAULT = 100.0
+
+
+@dataclass
+class IPCFEMVertexConstraintData:
+    is_constrained: np.ndarray
+    target_pos: np.ndarray
+    strength_rate: np.ndarray
+    link_idx: np.ndarray
+    link_local_offset: np.ndarray
+    target_entity: np.ndarray
+    target_vertex_idx: np.ndarray
+    target_entity_offset: np.ndarray
 
 
 def _animate_rigid_link(coupler_ref, link, env_idx, info):
@@ -137,6 +152,7 @@ class IPCCoupler(RBC):
         # ==== IPC Constitutions ====
         self._ipc_abd: AffineBodyConstitution | None = None
         self._ipc_stk: StableNeoHookean | None = None
+        self._ipc_spc: SoftPositionConstraint | None = None
         self._ipc_stc: SoftTransformConstraint | None = None
         self._ipc_nks: StrainLimitingBaraffWitkinShell | None = None
         self._ipc_dsb: DiscreteShellBending | None = None
@@ -156,6 +172,8 @@ class IPCCoupler(RBC):
         self._entities_by_coup_type: dict[COUPLING_TYPE, list["RigidEntity"]] = {}
 
         # ==== ABD Geometry & State ====
+        self._fem_slots_by_entity: dict["FEMEntity", list[SimplicialComplexSlot]] = {}
+        self._fem_vertex_constraints_by_entity: dict["FEMEntity", IPCFEMVertexConstraintData] = {}
         self._abd_slots_by_link: dict["RigidLink", list[GeometrySlot]] = {}
         self._abd_state_feature: AffineBodyStateAccessorFeature | None = None
         self._abd_state_geom: SimplicialComplex | None = None  # Geometry for batch data transfer
@@ -356,6 +374,12 @@ class IPCCoupler(RBC):
                     moduli = ElasticModuli.youngs_poisson(entity.material.E, entity.material.nu)
                     self._ipc_stk.apply_to(mesh, moduli, mass_density=entity.material.rho)
 
+                if self.fem_solver._enable_vertex_constraints:
+                    if self._ipc_spc is None:
+                        self._ipc_spc = SoftPositionConstraint()
+                        self._ipc_constitution_tabular.insert(self._ipc_spc)
+                    self._ipc_spc.apply_to(mesh, FEM_VERTEX_CONSTRAINT_STRENGTH_DEFAULT)
+
                 # ---- Apply subscene and metadata ----
                 meta_attrs = mesh.meta()
                 meta_attrs.create("solver_type", solver_type)
@@ -363,7 +387,8 @@ class IPCCoupler(RBC):
                 meta_attrs.create("env_idx", str(env_idx))
 
                 # ---- Create IPC object and geometry slot ----
-                fem_obj.geometries().create(mesh)
+                fem_geom_slot, _ = fem_obj.geometries().create(mesh)
+                self._fem_slots_by_entity.setdefault(entity, []).append(fem_geom_slot)
 
     def _add_rigid_geoms_to_ipc(self) -> None:
         """Add rigid geoms to the IPC scene as ABD objects, merging geoms by link."""
@@ -726,8 +751,14 @@ class IPCCoupler(RBC):
         if self._abd_state_feature is None:
             requires_abd_state = (
                 self.options.two_way_coupling
-                or any(not entity.base_link.is_fixed for entity in self._entities_by_coup_type.get(COUPLING_TYPE.IPC_ONLY, []))
-                or any(not entity.base_link.is_fixed for entity in self._entities_by_coup_type.get(COUPLING_TYPE.EXTERNAL_ARTICULATION, []))
+                or any(
+                    not entity.base_link.is_fixed
+                    for entity in self._entities_by_coup_type.get(COUPLING_TYPE.IPC_ONLY, [])
+                )
+                or any(
+                    not entity.base_link.is_fixed
+                    for entity in self._entities_by_coup_type.get(COUPLING_TYPE.EXTERNAL_ARTICULATION, [])
+                )
             )
             if requires_abd_state:
                 gs.raise_exception(
@@ -828,6 +859,7 @@ class IPCCoupler(RBC):
 
         # Step 2: Pre-advance processing (per entity type)
         self._pre_advance_external_articulation()
+        self._update_fem_vertex_constraint_targets()
 
         # Step 3: IPC advance + retrieve (common)
         self._ipc_world.advance()
@@ -861,6 +893,7 @@ class IPCCoupler(RBC):
         gs.logger.debug("Resetting IPC coupler state")
         self._ipc_world.recover(0)
         self._ipc_world.retrieve()
+        self._write_fem_vertex_constraints()
 
     @property
     def is_active(self) -> bool:
@@ -883,6 +916,214 @@ class IPCCoupler(RBC):
     # ============================================================
     # Section 3: Helpers
     # ============================================================
+
+    def _ensure_fem_vertex_constraint_data(self, entity: "FEMEntity") -> IPCFEMVertexConstraintData:
+        if not self.fem_solver._enable_vertex_constraints:
+            gs.raise_exception(
+                "FEM vertex constraints under IPCCoupler require `FEMOptions(enable_vertex_constraints=True)`."
+            )
+
+        if entity not in self._fem_slots_by_entity:
+            gs.raise_exception("FEM entity is not registered in the IPC coupler.")
+
+        if entity not in self._fem_vertex_constraints_by_entity:
+            shape = (self.sim._B, entity.n_vertices)
+            self._fem_vertex_constraints_by_entity[entity] = IPCFEMVertexConstraintData(
+                is_constrained=np.zeros(shape, dtype=np.bool_),
+                target_pos=np.zeros((*shape, 3), dtype=np.float64),
+                strength_rate=np.full(shape, FEM_VERTEX_CONSTRAINT_STRENGTH_DEFAULT, dtype=np.float64),
+                link_idx=np.full(shape, -1, dtype=np.int32),
+                link_local_offset=np.zeros((*shape, 3), dtype=np.float64),
+                target_entity=np.empty(shape, dtype=object),
+                target_vertex_idx=np.full(shape, -1, dtype=np.int32),
+                target_entity_offset=np.zeros((*shape, 3), dtype=np.float64),
+            )
+            self._fem_vertex_constraints_by_entity[entity].target_entity[:, :] = None
+
+        return self._fem_vertex_constraints_by_entity[entity]
+
+    def set_fem_vertex_constraints(
+        self,
+        entity: "FEMEntity",
+        verts_idx: np.ndarray,
+        target_poss: np.ndarray,
+        strength_rate: float,
+        envs_idx: np.ndarray,
+        *,
+        link: "RigidLink | None" = None,
+        target_entity: "FEMEntity | None" = None,
+        target_verts_idx: np.ndarray | None = None,
+    ) -> None:
+        if link is not None and target_entity is not None:
+            gs.raise_exception("`link` and `target_entity` are mutually exclusive for FEM vertex constraints.")
+
+        data = self._ensure_fem_vertex_constraint_data(entity)
+        verts_idx = np.asarray(verts_idx, dtype=np.int64)
+        target_poss = np.asarray(target_poss, dtype=np.float64)
+        envs_idx = np.asarray(envs_idx, dtype=np.int64)
+        if target_verts_idx is not None:
+            target_verts_idx = np.asarray(target_verts_idx, dtype=np.int64)
+
+        current_pos = tensor_to_array(entity.get_state().pos, dtype=np.float64)
+        links_pos = links_quat = None
+        if link is not None:
+            links_pos = qd_to_numpy(self.rigid_solver.links_state.pos, transpose=True).astype(np.float64, copy=False)
+            links_quat = qd_to_numpy(self.rigid_solver.links_state.quat, transpose=True).astype(np.float64, copy=False)
+
+        target_entity_pos = None
+        if target_entity is not None:
+            if target_verts_idx is None:
+                gs.raise_exception("`target_verts_idx_local` is required when `target_entity` is provided.")
+            target_entity_pos = tensor_to_array(target_entity.get_state().pos, dtype=np.float64)
+
+        for env_slot, env_idx in enumerate(envs_idx):
+            for vert_slot, vert_idx in enumerate(verts_idx[env_slot]):
+                data.is_constrained[env_idx, vert_idx] = True
+                data.target_pos[env_idx, vert_idx] = target_poss[env_slot, vert_slot]
+                data.strength_rate[env_idx, vert_idx] = strength_rate
+                data.link_idx[env_idx, vert_idx] = -1
+                data.link_local_offset[env_idx, vert_idx] = 0.0
+                data.target_entity[env_idx, vert_idx] = None
+                data.target_vertex_idx[env_idx, vert_idx] = -1
+                data.target_entity_offset[env_idx, vert_idx] = 0.0
+
+                if link is not None:
+                    assert links_pos is not None and links_quat is not None
+                    link_pos = links_pos[env_idx, link.idx]
+                    link_quat = links_quat[env_idx, link.idx]
+                    data.link_idx[env_idx, vert_idx] = link.idx
+                    data.link_local_offset[env_idx, vert_idx] = gu.inv_transform_by_quat(
+                        current_pos[env_idx, vert_idx] - link_pos,
+                        link_quat,
+                    )
+                elif target_entity is not None:
+                    assert target_entity_pos is not None and target_verts_idx is not None
+                    target_vert_idx = int(target_verts_idx[env_slot, vert_slot])
+                    data.target_entity[env_idx, vert_idx] = target_entity
+                    data.target_vertex_idx[env_idx, vert_idx] = target_vert_idx
+                    data.target_entity_offset[env_idx, vert_idx] = (
+                        current_pos[env_idx, vert_idx] - target_entity_pos[env_idx, target_vert_idx]
+                    )
+
+        self._update_fem_vertex_constraint_targets()
+        self._write_fem_vertex_constraints(entity)
+
+    def update_fem_vertex_constraint_targets(
+        self,
+        entity: "FEMEntity",
+        verts_idx: np.ndarray,
+        target_poss: np.ndarray,
+        envs_idx: np.ndarray,
+    ) -> None:
+        data = self._ensure_fem_vertex_constraint_data(entity)
+        verts_idx = np.asarray(verts_idx, dtype=np.int64)
+        target_poss = np.asarray(target_poss, dtype=np.float64)
+        envs_idx = np.asarray(envs_idx, dtype=np.int64)
+
+        for env_slot, env_idx in enumerate(envs_idx):
+            for vert_slot, vert_idx in enumerate(verts_idx[env_slot]):
+                if not data.is_constrained[env_idx, vert_idx]:
+                    continue
+                data.target_pos[env_idx, vert_idx] = target_poss[env_slot, vert_slot]
+                data.link_idx[env_idx, vert_idx] = -1
+                data.target_entity[env_idx, vert_idx] = None
+                data.target_vertex_idx[env_idx, vert_idx] = -1
+                data.target_entity_offset[env_idx, vert_idx] = 0.0
+
+        self._write_fem_vertex_constraints(entity)
+
+    def remove_fem_vertex_constraints(
+        self,
+        entity: "FEMEntity",
+        verts_idx: np.ndarray | None = None,
+        envs_idx: np.ndarray | None = None,
+    ) -> None:
+        data = self._ensure_fem_vertex_constraint_data(entity)
+        if envs_idx is None:
+            envs_idx = np.arange(self.sim._B, dtype=np.int64)
+        else:
+            envs_idx = np.asarray(envs_idx, dtype=np.int64)
+
+        if verts_idx is None:
+            data.is_constrained[envs_idx, :] = False
+            data.link_idx[envs_idx, :] = -1
+            data.target_entity[envs_idx, :] = None
+            data.target_vertex_idx[envs_idx, :] = -1
+            self._write_fem_vertex_constraints(entity)
+            return
+
+        verts_idx = np.asarray(verts_idx, dtype=np.int64)
+        for env_slot, env_idx in enumerate(envs_idx):
+            for vert_idx in verts_idx[env_slot]:
+                data.is_constrained[env_idx, vert_idx] = False
+                data.link_idx[env_idx, vert_idx] = -1
+                data.target_entity[env_idx, vert_idx] = None
+                data.target_vertex_idx[env_idx, vert_idx] = -1
+        self._write_fem_vertex_constraints(entity)
+
+    def _update_fem_vertex_constraint_targets(self) -> None:
+        if not self._fem_vertex_constraints_by_entity:
+            return
+
+        links_pos = links_quat = None
+        if self.rigid_solver.is_active:
+            links_pos = qd_to_numpy(self.rigid_solver.links_state.pos, transpose=True).astype(np.float64, copy=False)
+            links_quat = qd_to_numpy(self.rigid_solver.links_state.quat, transpose=True).astype(np.float64, copy=False)
+
+        entity_positions: dict["FEMEntity", np.ndarray] = {}
+        for entity, data in self._fem_vertex_constraints_by_entity.items():
+            constrained_envs, constrained_verts = np.nonzero(data.is_constrained)
+            for env_idx, vert_idx in zip(constrained_envs, constrained_verts):
+                link_idx = data.link_idx[env_idx, vert_idx]
+                if link_idx >= 0:
+                    if links_pos is None or links_quat is None:
+                        continue
+                    data.target_pos[env_idx, vert_idx] = links_pos[env_idx, link_idx] + gu.transform_by_quat(
+                        data.link_local_offset[env_idx, vert_idx],
+                        links_quat[env_idx, link_idx],
+                    )
+                    continue
+
+                target_entity = data.target_entity[env_idx, vert_idx]
+                if target_entity is not None:
+                    if target_entity not in entity_positions:
+                        entity_positions[target_entity] = tensor_to_array(
+                            target_entity.get_state().pos, dtype=np.float64
+                        )
+                    target_vert_idx = data.target_vertex_idx[env_idx, vert_idx]
+                    data.target_pos[env_idx, vert_idx] = (
+                        entity_positions[target_entity][env_idx, target_vert_idx]
+                        + data.target_entity_offset[env_idx, vert_idx]
+                    )
+
+            self._write_fem_vertex_constraints(entity)
+
+    def _write_fem_vertex_constraints(self, entity: "FEMEntity | None" = None) -> None:
+        entities = [entity] if entity is not None else list(self._fem_vertex_constraints_by_entity)
+        for entity_ in entities:
+            data = self._fem_vertex_constraints_by_entity.get(entity_)
+            if data is None:
+                continue
+
+            slots = self._fem_slots_by_entity[entity_]
+            for env_idx, geom_slot in enumerate(slots):
+                geom = geom_slot.geometry()
+                vertices = geom.vertices()
+                is_constrained_attr = vertices.find(uipc.builtin.is_constrained)
+                aim_position_attr = vertices.find(uipc.builtin.aim_position)
+                strength_attr = vertices.find("strength_ratio")
+                if is_constrained_attr is None or aim_position_attr is None:
+                    gs.raise_exception(
+                        "IPC FEM vertex constraint attributes are missing. Did you build the scene with "
+                        "`FEMOptions(enable_vertex_constraints=True)`?"
+                    )
+
+                constrained_view = uipc.view(is_constrained_attr)
+                aim_position_view = uipc.view(aim_position_attr)
+                constrained_view[:] = data.is_constrained[env_idx].astype(np.int32)
+                aim_position_view[:, :, 0] = data.target_pos[env_idx]
+                if strength_attr is not None:
+                    uipc.view(strength_attr)[:] = data.strength_rate[env_idx]
 
     def _apply_base_link_velocity_from_ipc(self, entity):
         envs_vel = np.empty((self.sim._B, 6), dtype=gs.np_float)

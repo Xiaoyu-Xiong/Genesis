@@ -30,10 +30,10 @@ def build_dataset(config: BuildConfig) -> BuildSummary:
     store.ensure_dirs()
     manifest = store.load()
     if _backfill_clip_visual_signatures(store, manifest):
-        store.save(manifest)
+        store.save_merged(manifest)
     split_summary = store.assign_train_test_splits(manifest)
     if split_summary.get("changed"):
-        store.save(manifest)
+        store.save_merged(manifest)
     sources = _load_sources(config)
     similarity_seeds = collect_similarity_seeds(config, manifest)
     target = max(0, int(config.target_clips))
@@ -47,105 +47,182 @@ def build_dataset(config: BuildConfig) -> BuildSummary:
     )
     if summary.accepted_clips >= target:
         store.assign_train_test_splits(manifest)
-        store.save(manifest)
+        store.save_merged(manifest)
         return summary
 
     run_dir = store.logs_dir / f"build_{now_iso().replace(':', '').replace('-', '').replace('+', '_')}"
     run_dir.mkdir(parents=True, exist_ok=True)
-    needed = target - summary.accepted_clips
     explicit_candidates = _explicit_source_candidates(sources)
     all_sources_are_explicit = bool(sources) and len(explicit_candidates) == len(sources)
-    codex_candidates = []
-    if not all_sources_are_explicit:
-        codex_candidates = agents.scout_sources(
+    max_scout_rounds = _resolve_max_scout_rounds(
+        config,
+        target=target,
+        accepted_clips=summary.accepted_clips,
+        all_sources_are_explicit=all_sources_are_explicit,
+    )
+    max_empty_scout_rounds = max(1, int(config.max_empty_scout_rounds))
+    candidate_budget = None if config.max_candidates is None else max(0, int(config.max_candidates))
+    download_limit = None if config.max_downloads is None else max(0, int(config.max_downloads))
+    attempted_urls: set[str] = set()
+    explicit_candidates_used = False
+    consecutive_empty_rounds = 0
+
+    while store.accepted_count(manifest) < target:
+        if download_limit is not None and summary.videos_downloaded >= download_limit:
+            summary.skipped.append(f"download_limit_reached:{download_limit}")
+            break
+        if candidate_budget is not None and summary.candidates_seen >= candidate_budget:
+            summary.skipped.append(f"candidate_limit_reached:{candidate_budget}")
+            break
+
+        if all_sources_are_explicit:
+            if explicit_candidates_used:
+                break
+            explicit_candidates_used = True
+            round_index = 1
+            round_logs_dir = run_dir / f"round_{round_index:02d}"
+            round_logs_dir.mkdir(parents=True, exist_ok=True)
+            raw_candidates = _dedupe_candidates(explicit_candidates)
+        else:
+            if summary.scout_rounds >= max_scout_rounds:
+                summary.skipped.append(f"scout_round_limit_reached:{max_scout_rounds}")
+                break
+            summary.scout_rounds += 1
+            round_index = summary.scout_rounds
+            round_logs_dir = run_dir / f"round_{round_index:02d}"
+            round_logs_dir.mkdir(parents=True, exist_ok=True)
+            needed = target - store.accepted_count(manifest)
+            codex_candidates = agents.scout_sources(
+                store=store,
+                manifest=manifest,
+                sources=sources,
+                needed_clips=needed,
+                logs_dir=round_logs_dir,
+                similarity_seeds=similarity_seeds,
+                run_codex=config.run_codex,
+            )
+            raw_candidates = _dedupe_candidates(
+                [*codex_candidates, *(explicit_candidates if not explicit_candidates_used else [])]
+            )
+            explicit_candidates_used = True
+
+        if candidate_budget is not None:
+            remaining_candidates = max(0, candidate_budget - summary.candidates_seen)
+            raw_candidates = raw_candidates[:remaining_candidates]
+        summary.candidates_seen += len(raw_candidates)
+
+        candidates = _fresh_candidates(
             store=store,
             manifest=manifest,
-            sources=sources,
-            needed_clips=needed,
-            logs_dir=run_dir,
+            candidates=raw_candidates,
+            attempted_urls=attempted_urls,
+            skipped=summary.skipped,
+        )
+        if not candidates:
+            summary.empty_scout_rounds += 1
+            consecutive_empty_rounds += 1
+            if all_sources_are_explicit or consecutive_empty_rounds >= max_empty_scout_rounds:
+                summary.skipped.append(f"empty_scout_round_limit_reached:{consecutive_empty_rounds}")
+                break
+            continue
+
+        curated = agents.curate_sources(
+            candidates=candidates,
+            manifest=manifest,
+            logs_dir=round_logs_dir,
             similarity_seeds=similarity_seeds,
             run_codex=config.run_codex,
         )
-    candidates = _dedupe_candidates([*codex_candidates, *explicit_candidates])
-    if config.max_candidates is not None:
-        candidates = candidates[: max(0, config.max_candidates)]
-    curated = agents.curate_sources(
-        candidates=candidates,
-        manifest=manifest,
-        logs_dir=run_dir,
-        similarity_seeds=similarity_seeds,
-        run_codex=config.run_codex,
-    )
-    curated = _expand_project_page_candidates(curated)
-    summary.candidates_seen = len(candidates)
-    download_limit = config.max_downloads if config.max_downloads is not None else len(curated)
+        curated = _dedupe_candidates(_expand_project_page_candidates(curated))
+        round_attempts = 0
+        round_downloads_before = summary.videos_downloaded
+        round_clips_before = summary.clips_added
 
-    for candidate in curated:
-        if store.accepted_count(manifest) >= target:
-            break
-        if summary.videos_downloaded >= download_limit:
-            summary.skipped.append(f"download_limit_reached:{download_limit}")
-            break
-        if store.source_url_seen(manifest, candidate.video_url):
-            summary.skipped.append(f"source_url_seen:{candidate.video_url}")
-            continue
-        source_id = store.unique_source_id(manifest, first_nonempty(candidate.title, candidate.video_url))
-        try:
-            video_path = download_video(candidate, out_dir=store.videos_dir, source_id=source_id)
-            download = describe_download(video_path)
-        except Exception as exc:  # noqa: BLE001 - record per-source failure and continue building.
-            failure_record = _failed_source_record(store, source_id=source_id, candidate=candidate, error=str(exc))
-            store.add_source_video(manifest, failure_record)
-            store.save(manifest)
-            summary.failures.append(f"{candidate.video_url}: {type(exc).__name__}: {exc}")
-            continue
+        for candidate in curated:
+            if store.accepted_count(manifest) >= target:
+                break
+            if download_limit is not None and summary.videos_downloaded >= download_limit:
+                summary.skipped.append(f"download_limit_reached:{download_limit}")
+                break
+            if store.source_url_seen(manifest, candidate.video_url):
+                summary.skipped.append(f"source_url_seen:{candidate.video_url}")
+                continue
+            if candidate.video_url in attempted_urls:
+                summary.skipped.append(f"source_url_attempted_this_run:{candidate.video_url}")
+                continue
 
-        if store.source_hash_seen(manifest, download.sha256):
-            summary.skipped.append(f"source_hash_seen:{candidate.video_url}")
-            continue
+            attempted_urls.add(candidate.video_url)
+            round_attempts += 1
+            source_id = store.unique_source_id(manifest, first_nonempty(candidate.title, candidate.video_url))
+            try:
+                video_path = download_video(candidate, out_dir=store.videos_dir, source_id=source_id)
+                download = describe_download(video_path)
+            except Exception as exc:  # noqa: BLE001 - record per-source failure and continue building.
+                failure_record = _failed_source_record(store, source_id=source_id, candidate=candidate, error=str(exc))
+                store.add_source_video(manifest, failure_record)
+                store.save_merged(manifest)
+                summary.failures.append(f"{candidate.video_url}: {type(exc).__name__}: {exc}")
+                continue
 
-        summary.videos_downloaded += 1
-        source_record = _source_record(store, source_id=source_id, candidate=candidate, download=download)
-        store.add_source_video(manifest, source_record)
-        store.save(manifest)
+            if store.source_hash_seen(manifest, download.sha256):
+                summary.skipped.append(f"source_hash_seen:{candidate.video_url}")
+                continue
 
-        try:
-            timeline_sheet = store.timelines_dir / f"{source_id}.jpg"
-            build_contact_sheet(video_path, timeline_sheet, max_frames=16, thumb_width=180)
-            deterministic_segments = detect_scene_segments(video_path, source_id=source_id)
-            segments = agents.segment_video(
-                source_record=source_record,
-                deterministic_segments=deterministic_segments,
-                timeline_sheet=timeline_sheet,
-                logs_dir=run_dir,
-                similarity_seeds=similarity_seeds,
-                run_codex=config.run_codex,
-            )
-            added = _materialize_segments(
-                store=store,
-                manifest=manifest,
-                source_record=source_record,
-                source_path=video_path,
-                segments=_valid_segments(segments, duration=float(source_record.get("duration_sec") or 0.0)),
-                target=target,
-                logs_dir=run_dir,
-                similarity_seeds=similarity_seeds,
-                run_codex=config.run_codex,
-            )
-            summary.clips_added += added
-            store.save(manifest)
-        except Exception as exc:  # noqa: BLE001 - keep successful source metadata and continue.
-            summary.failures.append(f"{source_id}: {type(exc).__name__}: {exc}")
-            source_record["status"] = "failed"
-            source_record["error"] = str(exc)
-            store.save(manifest)
+            summary.videos_downloaded += 1
+            source_record = _source_record(store, source_id=source_id, candidate=candidate, download=download)
+            store.add_source_video(manifest, source_record)
+            store.save_merged(manifest)
+
+            try:
+                timeline_sheet = store.timelines_dir / f"{source_id}.jpg"
+                build_contact_sheet(video_path, timeline_sheet, max_frames=16, thumb_width=180)
+                deterministic_segments = detect_scene_segments(video_path, source_id=source_id)
+                segments = agents.segment_video(
+                    source_record=source_record,
+                    deterministic_segments=deterministic_segments,
+                    timeline_sheet=timeline_sheet,
+                    logs_dir=round_logs_dir,
+                    similarity_seeds=similarity_seeds,
+                    run_codex=config.run_codex,
+                )
+                added = _materialize_segments(
+                    store=store,
+                    manifest=manifest,
+                    source_record=source_record,
+                    source_path=video_path,
+                    segments=_valid_segments(segments, duration=float(source_record.get("duration_sec") or 0.0)),
+                    target=target,
+                    logs_dir=round_logs_dir,
+                    similarity_seeds=similarity_seeds,
+                    run_codex=config.run_codex,
+                )
+                summary.clips_added += added
+                store.save_merged(manifest)
+            except Exception as exc:  # noqa: BLE001 - keep successful source metadata and continue.
+                summary.failures.append(f"{source_id}: {type(exc).__name__}: {exc}")
+                source_record["status"] = "failed"
+                source_record["error"] = str(exc)
+                store.save_merged(manifest)
+
+        if (
+            round_attempts
+            or summary.videos_downloaded > round_downloads_before
+            or summary.clips_added > round_clips_before
+        ):
+            consecutive_empty_rounds = 0
+        else:
+            summary.empty_scout_rounds += 1
+            consecutive_empty_rounds += 1
+            if all_sources_are_explicit or consecutive_empty_rounds >= max_empty_scout_rounds:
+                summary.skipped.append(f"empty_scout_round_limit_reached:{consecutive_empty_rounds}")
+                break
 
     summary.accepted_clips = store.accepted_count(manifest)
     summary.status = "complete" if summary.accepted_clips >= target else "partial"
-    if not candidates:
+    if summary.candidates_seen == 0:
         summary.status = "blocked_no_candidates"
     store.assign_train_test_splits(manifest)
-    store.save(manifest)
+    store.save_merged(manifest)
     return summary
 
 
@@ -220,7 +297,7 @@ def _materialize_segments(
         clip_record["category_source"] = "auto_prompt_heuristic"
         clip_record["status"] = "accepted"
         store.add_clip(manifest, clip_record)
-        store.save(manifest)
+        store.save_merged(manifest)
         added += 1
     return added
 
@@ -265,6 +342,46 @@ def _dedupe_candidates(candidates: list[SourceCandidate]) -> list[SourceCandidat
     return deduped
 
 
+def _resolve_max_scout_rounds(
+    config: BuildConfig,
+    *,
+    target: int,
+    accepted_clips: int,
+    all_sources_are_explicit: bool,
+) -> int:
+    if all_sources_are_explicit:
+        return 0
+    if config.max_scout_rounds is not None:
+        return max(0, int(config.max_scout_rounds))
+    needed = max(0, target - accepted_clips)
+    # Scout is noisy on broad index pages: many returned URLs can already be in the manifest or later fail to download.
+    # Default to enough rounds for large targets while keeping a hard cap against accidental infinite collection loops.
+    return max(3, min(20, (needed + 4) // 5))
+
+
+def _fresh_candidates(
+    *,
+    store: DatasetStore,
+    manifest: dict[str, Any],
+    candidates: list[SourceCandidate],
+    attempted_urls: set[str],
+    skipped: list[str],
+) -> list[SourceCandidate]:
+    fresh = []
+    for candidate in candidates:
+        url = candidate.video_url.strip()
+        if not url:
+            continue
+        if store.source_url_seen(manifest, url):
+            skipped.append(f"source_url_seen:{url}")
+            continue
+        if url in attempted_urls:
+            skipped.append(f"source_url_attempted_this_run:{url}")
+            continue
+        fresh.append(candidate)
+    return fresh
+
+
 def _expand_project_page_candidates(candidates: list[SourceCandidate]) -> list[SourceCandidate]:
     expanded: list[SourceCandidate] = []
     for candidate in candidates:
@@ -304,7 +421,9 @@ def _expand_project_page_candidates(candidates: list[SourceCandidate]) -> list[S
 
 def _is_downloadable_candidate(candidate: SourceCandidate) -> bool:
     local_path = Path(candidate.video_url).expanduser()
-    return local_path.exists() or is_probably_video_url(candidate.video_url) or is_ytdlp_supported_url(candidate.video_url)
+    return (
+        local_path.exists() or is_probably_video_url(candidate.video_url) or is_ytdlp_supported_url(candidate.video_url)
+    )
 
 
 def _valid_segments(segments: list[SegmentCandidate], *, duration: float) -> list[SegmentCandidate]:

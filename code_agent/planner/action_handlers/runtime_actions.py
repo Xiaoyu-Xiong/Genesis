@@ -106,7 +106,7 @@ class RuntimeActionHandler:
         main_py = Path(str(self.session.state["integration"]["main_py"]))
         backend = str(action.get("backend") or self.session.config.backend)
         render = self.session.config.render if action.get("render") is None else bool(action.get("render"))
-        timeout_sec = float(action.get("timeout_sec") or self.session.config.timeout_sec)
+        timeout_sec = float(self.session.config.timeout_sec)
         execution = run_generated_simulation(
             main_py=main_py,
             run_dir=self.session.case_dir,

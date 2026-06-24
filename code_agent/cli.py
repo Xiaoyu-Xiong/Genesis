@@ -4,15 +4,19 @@ import argparse
 import os
 from pathlib import Path
 import sys
+from typing import Any
 
 from code_agent.configs import CONFIGS
 from code_agent.context.genesis import build_genesis_context_pack
+from code_agent.dataset.store import DEFAULT_DATA_ROOT, DatasetStore
 from code_agent.opt.runner import RunOptConfig, run_optimization
 from code_agent.utils.suite import run_suite
 
 
 def _cmd_run_suite(args: argparse.Namespace) -> None:
     out_dir = args.out_dir.resolve()
+    summary_path = out_dir / "summary.json"
+    summary_callback = _dataset_train_summary_callback(args, out_dir=out_dir, summary_path=summary_path)
     summary = run_suite(
         tasks_file=args.tasks_file.resolve(),
         out_dir=out_dir,
@@ -26,9 +30,38 @@ def _cmd_run_suite(args: argparse.Namespace) -> None:
         duration_sec=args.duration_sec,
         render_fps=args.render_fps,
         opt_enabled=args.opt_enabled,
+        summary_callback=summary_callback,
     )
-    summary_path = out_dir / "summary.json"
     print(f"Done. {summary['num_passed']}/{summary['num_cases']} cases passed. Summary: {summary_path}")
+
+
+def _dataset_train_summary_callback(
+    args: argparse.Namespace,
+    *,
+    out_dir: Path,
+    summary_path: Path,
+):
+    if args.no_dataset_train_sync or not _looks_like_dataset_train_batch(args.tasks_file, out_dir):
+        return None
+
+    store = DatasetStore(args.dataset_data_root)
+
+    def sync(summary: dict[str, Any]) -> None:
+        result = store.mark_train_results_from_suite(summary, summary_path=summary_path)
+        if result.get("changed"):
+            print(
+                "[dataset] marked train passes: "
+                f"{result['changed']} changed; run_id={result['run_id']}",
+                flush=True,
+            )
+
+    return sync
+
+
+def _looks_like_dataset_train_batch(tasks_file: Path, out_dir: Path) -> bool:
+    return out_dir.name.startswith("dataset_train_batch_") or tasks_file.resolve().parent.name.startswith(
+        "dataset_train_batch_"
+    )
 
 
 def _cmd_build_genesis_context(args: argparse.Namespace) -> None:
@@ -81,6 +114,17 @@ def build_parser() -> argparse.ArgumentParser:
     run_suite_parser.add_argument("--duration-sec", type=float, default=None)
     run_suite_parser.add_argument("--render-fps", type=int, default=None)
     run_suite_parser.add_argument("--repair-rounds", type=int, default=CONFIGS.harness.max_repair_rounds)
+    run_suite_parser.add_argument(
+        "--dataset-data-root",
+        type=Path,
+        default=DEFAULT_DATA_ROOT,
+        help="Dataset manifest root to sync pass-only train markers for dataset_train_batch_* suites.",
+    )
+    run_suite_parser.add_argument(
+        "--no-dataset-train-sync",
+        action="store_true",
+        help="Disable automatic pass-only dataset trained marker sync for dataset_train_batch_* suites.",
+    )
     opt_group = run_suite_parser.add_mutually_exclusive_group()
     opt_group.add_argument("--enable-opt", action="store_true", dest="opt_enabled", default=None)
     opt_group.add_argument("--disable-opt", action="store_false", dest="opt_enabled")

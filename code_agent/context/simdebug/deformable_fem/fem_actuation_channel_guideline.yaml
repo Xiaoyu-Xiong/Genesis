@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "id": "fem_actuation_channel_guideline",
-  "title": "Drive FEM bodies through verified physical channels, not assumed vertex force APIs",
-  "summary": "FEM+IPC soft-body actions should prefer actuated rigid contacts, clamps, rollers, plates, and verified public force or boundary-control paths, and should prove that scheduled actuation actually affected the deformable body.",
+  "title": "Prefer verified FEM vertex constraints for boundary control",
+  "summary": "FEM+IPC soft-body and cloth boundary actions should prefer the verified FEMEntity vertex-constraint path for pinned or driven endpoints, edges, rims, and handle patches, while using contact-driven tools for contact, rolling, squeezing, impact, or force-driven motion.",
   "scopes": ["planner", "body", "action", "critic", "opt"],
   "physics_modes": ["fem_ipc"],
   "task_tags": [
@@ -12,54 +12,80 @@
     "actuation",
     "force",
     "clamp",
+    "pin",
+    "vertex_constraint",
     "roller",
     "plate",
+    "cloth",
+    "handle",
+    "rim",
+    "visible_attachment",
+    "connector",
     "boundary_control",
     "deformation"
   ],
   "failure_tags": [
     "unsupported_fem_force_shape",
     "force_applications_zero",
-    "set_vertex_constraints_unsupported",
+    "vertex_constraint_missing_enable_flag",
+    "vertex_constraint_hidden_shortcut",
+    "one_way_constraint_misrepresented",
+    "floating_attachment",
+    "visible_attachment_gap",
+    "invisible_tether",
+    "detached_visual_clamp",
     "no_deformation_effect",
     "scheduled_but_not_applied",
     "direct_vertex_edit",
     "static_soft_body"
   ],
   "guidance": [
-    "Prefer driving soft bodies through real rigid/FEM contact: moving plates, paddles, rods, rollers, clamps, grippers, cups, guide rails, or other actuated rigid colliders.",
-    "If a task needs endpoint or boundary motion, model it as physical clamps or controlled support geometry when the available Genesis/FEM API does not provide a verified public boundary-control path.",
-    "For endpoint-driven rods, ropes, tubes, or strips, verify that the clamp/socket collision path actually transfers motion to the FEM body. A moving rigid endpoint mechanism is not sufficient evidence; require FEM endpoint displacement, centerline twist/braid, deformation, and contact metrics.",
-    "When a clamp or socket uses narrow mechanical capture instead of a verified FEM boundary-constraint API, keep clearances positive but small enough for IPC contact to transmit motion, cap overtravel, and validate that the body moves by contact rather than by hidden vertex edits.",
-    "If using a force or constraint API, verify the expected tensor shape and public availability before relying on it, and record both attempted and successfully applied actuation counts.",
-    "Record deformation evidence tied to the actuation channel, such as FEM COM displacement, bbox change, height ratio, spread, surface marker displacement, contact count, and max/min vertex displacement.",
+    "For FEM+IPC endpoint, edge, rim, or patch control, prefer FEMEntity.set_vertex_constraints over contact-only workaround clamps when the prompt calls for pinned boundaries, fixed clamps, moving clamps, endpoint constraints, driven rims, or attached handles.",
+    "Enable this path with gs.options.FEMOptions(enable_vertex_constraints=True). Under IPCCoupler these are soft position constraints, so choose stiffness deliberately and verify constrained vertices remain close enough to their targets.",
+    "Use target_poss for fixed world pins or moving world targets, update_constraint_targets for animated endpoints, link=... for vertices following a visible rigid link, and target_entity/target_verts_idx_local only when one-way FEM-to-FEM target following is intended.",
+    "Constrain only the boundary vertices that correspond to the physical clamp, pin, handle, rim, socket, or support. Use a small selected patch when needed for stability; do not constrain broad interior regions or the whole object to sculpt the final shape.",
+    "When using link-based constraints, make the clamp or handle visible and place its geometry outside, beside, or around the constrained boundary rather than interpenetrating the cloth or soft body.",
+    "If a cloth or deformable-body boundary is constrained to a visible rigid clamp, handle, ring, rod, socket, link, or target body, make the rendered attachment look physically connected: the constrained boundary should touch, sit inside, wrap around, or be covered by a visible connector region with no floating gap or invisible tether. Any numerical offset used for stability should be hidden by connector geometry rather than leaving the soft body visibly suspended away from the object.",
+    "Treat link-based vertex constraints as one-way target following. Do not claim that they provide stitch-like bidirectional coupling, weld reaction forces, or load transfer back into the rigid body.",
+    "For tasks where motion should arise from contact, friction, rolling, squeezing, collision, free fall, rebound, or distributed physical forces, use actuated rigid contacts or the verified external-force path instead of vertex constraints.",
+    "If a task needs true bidirectional rigid-soft attachment, load transfer, or stitch-style behavior, do not present soft position constraints as sufficient; use visible contact geometry if acceptable, or mark the missing coupling as a limitation.",
+    "Record deformation evidence tied to the actuation channel, such as constrained vertex target error, selected vertex count, endpoint displacement, FEM COM displacement, bbox change, height ratio, spread, surface marker displacement, contact count, and max/min vertex displacement.",
     "Treat scheduled impulses, disturbances, or constraints as incomplete unless metrics prove that they were applied and changed the soft body state."
   ],
   "restrictions": [
     "Do not use private or guessed UIPC/FEM force slots whose shape or semantics are not verified by a successful run.",
     "Do not directly edit FEM vertices, poses, or qpos after initialization to create the requested soft-body motion.",
+    "Do not use vertex constraints as hidden goal-following shortcuts for passive regions or for the final object shape.",
+    "Do not use FEMEntity.set_vertex_constraints as a substitute for distributed physical forces such as wind, thrust, gravity-like loads, or impact impulses.",
+    "Do not claim a link-based FEM vertex constraint is a physical stitch, weld, or bidirectional rigid-soft coupling unless such coupling has actually been implemented and verified.",
+    "Do not constrain FEM or cloth vertices to a visible clamp, link, or body while leaving a visible air gap, floating endpoint, or invisible tether. If the prompt names a clamp, handle, ring, or rigid body, the soft boundary must visually meet that object.",
     "Do not mark a run successful when force_attempts is nonzero but force_applications is zero, or when the deformable COM/deformation metrics remain unchanged.",
     "Do not mark endpoint-clamp scenes successful when actuator DOFs reach their targets but FEM vertex displacement, endpoint displacement, twist/braid, or contact evidence remain near zero."
   ],
   "checks": [
-    "Check stderr and execution reports for unsupported FEM position or external-force shapes, failed force callbacks, or unavailable vertex-constraint methods.",
-    "Check event logs for attempted versus applied force, clamp, or contact actuation counts.",
+    "Check that gs.options.FEMOptions(enable_vertex_constraints=True) is set when FEMEntity.set_vertex_constraints is used under IPCCoupler.",
+    "Check that constrained vertices are boundary, handle, rim, socket, or pin vertices, not arbitrary interior or whole-body vertices.",
+    "Check logs and metrics for selected vertex count, target updates, max constrained-vertex error, and FEM/cloth deformation response.",
+    "For visible clamps or handles, inspect frames for initial interpenetration and make sure the rigid visual clamp is placed beside or around the constrained boundary rather than inside the soft body.",
+    "For every visible FEM/cloth attachment, inspect start, middle, and end frames and verify the constrained boundary remains visually connected to the clamp, handle, ring, link, or target body with no air gap, no floating endpoint, and no misleading invisible tether.",
     "Check metrics and frames for actual deformation caused by the intended physical channel.",
     "For twisting or braiding rods, compare initial and final frames plus numeric braid/twist and RMS vertex displacement; static rods with moving clamps indicate a body/collision-coupling defect.",
-    "Check that body/action repairs replace unsupported direct FEM actuation with robust contact-driven mechanisms when needed."
+    "Reject static soft bodies with moving visual clamps when constrained FEM/cloth vertices do not follow the intended target."
   ],
   "dispatch_hints": [
-    "Send to action for soft-body disturbance, twist, pull, press, roll, squeeze, or boundary-control tasks.",
-    "Send to body when the scene needs physical clamps, rods, rollers, plates, or supports to make action actuation possible.",
-    "Send to critic when logs claim scheduled FEM actuation but visible or numeric deformation is absent."
+    "Send to body when the scene needs visible clamps, handles, rims, support geometry, or boundary vertex selection.",
+    "Send to action for animated constraint targets, moving endpoint schedules, link-following targets, and force/contact actuation schedules.",
+    "Send to critic when logs claim scheduled FEM actuation but visible or numeric deformation is absent.",
+    "Send to opt when constraint stiffness, selected boundary patch, target trajectory, material parameters, or contact/friction settings need tuning."
   ],
   "provenance": {
-    "source": "workspace_failure_survey",
+    "source": "workspace_failure_survey_and_local_render_validation",
     "examples": [
       "soft_dragon_obstacle_course",
       "twisted_soft_tube",
-      "soft_capsules_rigid_rings_bowl"
+      "soft_capsules_rigid_rings_bowl",
+      "ipc_vertex_constraint_render_validation_no_visible_overlap_20260622_163803"
     ],
-    "motivation": "Older FEM runs scheduled disturbances or constraints through unsupported channels, producing zero applied forces, static bodies, or runtime shape errors."
+    "motivation": "Older FEM runs scheduled disturbances or constraints through unsupported channels, but FEMEntity.set_vertex_constraints is now implemented and render-tested for FEM and cloth under IPCCoupler, including fixed world targets, moving endpoints, static rigid-link targets, and moving rigid-link targets."
   }
 }

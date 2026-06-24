@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "id": "visual_texture_asset_request_guideline",
-  "title": "Texture-dependent objects should be requested as generated assets",
-  "summary": "When requested appearance depends on texture or nontrivial visual ornamentation, Planner should request generated assets instead of asking writers to fake the look with primitive colors.",
+  "title": "Use generated mesh assets for textured or complex static objects",
+  "summary": "When requested appearance depends on texture, pattern, ornamentation, or complex non-articulated object structure, Planner should prefer Meshy-generated mesh assets over primitive approximations.",
   "scopes": ["planner", "body", "rendering", "critic"],
   "physics_modes": ["any"],
   "task_tags": [
@@ -22,8 +22,12 @@
   ],
   "guidance": [
     "Any object whose requested appearance depends on texture, patterned surface detail, decorative material variation, image-like surface content, or nontrivial visual ornamentation should be represented by a Meshy-generated asset request, even when the task does not explicitly say mesh.",
+    "If an object has a complex recognizable shape, organic silhouette, decorative pattern, or texture, and it does not need joints, actuators, or articulation, prefer a Meshy generated_mesh asset instead of approximating it with many primitives or plain colors.",
     "Do not ask writers to fake texture-dependent objects with plain primitive colors or simple Genesis surfaces.",
     "When visual appearance matters, include texture needs and simulation role in the asset request so downstream workers can use manifest texture metadata and critic can verify rendered texture evidence."
+  ],
+  "restrictions": [
+    "Do not use Meshy for objects that need controllable joints, hinges, sliders, or articulated mechanisms; route those to XML/MJCF asset requests instead."
   ],
   "dispatch_hints": [
     "Send to planner when writing planner_output asset_requests.",

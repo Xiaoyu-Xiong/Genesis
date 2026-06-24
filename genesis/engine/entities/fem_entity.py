@@ -933,7 +933,15 @@ class FEMEntity(Entity):
         )
 
     def set_vertex_constraints(
-        self, verts_idx_local, target_poss=None, link=None, is_soft_constraint=False, stiffness=0.0, envs_idx=None
+        self,
+        verts_idx_local,
+        target_poss=None,
+        link=None,
+        is_soft_constraint=False,
+        stiffness=0.0,
+        envs_idx=None,
+        target_entity=None,
+        target_verts_idx_local=None,
     ):
         """
         Set vertex constraints for specified vertices.
@@ -946,6 +954,11 @@ class FEMEntity(Entity):
                 List of target positions [x, y, z] for each vertex. If not provided, the initial positions are used.
             link : RigidLink
                 Optional rigid link for the vertices to follow, maintaining relative position.
+            target_entity : FEMEntity
+                Optional FEM entity for the vertices to follow under IPCCoupler. This is one-way target following,
+                intended for soft body/cloth pinning to a moving soft reference.
+            target_verts_idx_local : array_like
+                Target FEM vertices corresponding to ``verts_idx_local`` when ``target_entity`` is provided.
             is_soft_constraint: bool
                 By default, use a hard constraint directly sets position and zero velocity.
                 A soft constraint uses a spring force to pull the vertex towards the target position.
@@ -962,7 +975,53 @@ class FEMEntity(Entity):
             )
 
         if isinstance(self.sim.coupler, IPCCoupler):
-            gs.raise_exception("This method is only supported by IPC coupler.")
+            if not self._solver._enable_vertex_constraints:
+                gs.raise_exception(
+                    "FEM vertex constraints under IPCCoupler require `FEMOptions(enable_vertex_constraints=True)`."
+                )
+            if is_soft_constraint:
+                gs.logger.warning(
+                    "IPCCoupler FEM vertex constraints are always soft penalty constraints; "
+                    "`is_soft_constraint` is ignored."
+                )
+            if link is not None and target_entity is not None:
+                gs.raise_exception("`link` and `target_entity` are mutually exclusive.")
+            if target_entity is not None and not isinstance(target_entity, FEMEntity):
+                gs.raise_exception("`target_entity` must be a FEMEntity.")
+            if target_entity is not None and target_poss is not None:
+                gs.raise_exception("`target_poss` cannot be combined with `target_entity`.")
+
+            use_current_poss = target_poss is None
+            envs_idx = self._scene._sanitize_envs_idx(envs_idx)
+            verts_idx_local = self._sanitize_verts_idx_local(verts_idx_local, envs_idx)
+            verts_idx = verts_idx_local + self._v_start
+            target_poss = self._sanitize_verts_tensor(target_poss, gs.tc_float, verts_idx, envs_idx, (3,))
+
+            if use_current_poss:
+                current_poss = self.get_state().pos
+                target_poss = current_poss[envs_idx[:, None], verts_idx_local]
+
+            target_verts_idx = None
+            if target_entity is not None:
+                target_verts_idx = target_entity._sanitize_verts_idx_local(target_verts_idx_local, envs_idx)
+                if target_verts_idx.shape != verts_idx_local.shape:
+                    gs.raise_exception("`target_verts_idx_local` must match `verts_idx_local` shape.")
+
+            strength_rate = stiffness if stiffness > 0.0 else 100.0
+            self.sim.coupler.set_fem_vertex_constraints(
+                self,
+                tensor_to_array(verts_idx_local),
+                tensor_to_array(target_poss),
+                strength_rate,
+                tensor_to_array(envs_idx),
+                link=link,
+                target_entity=target_entity,
+                target_verts_idx=None if target_verts_idx is None else tensor_to_array(target_verts_idx),
+            )
+            return
+
+        if target_entity is not None:
+            gs.raise_exception("`target_entity` FEM vertex constraints are only supported by IPCCoupler.")
 
         if not self._solver._constraints_initialized:
             self._solver.init_constraints()
@@ -1003,6 +1062,22 @@ class FEMEntity(Entity):
 
     def update_constraint_targets(self, verts_idx_local, target_poss, envs_idx=None):
         """Update target positions for existing constraints."""
+        from genesis.engine.couplers import IPCCoupler
+
+        if isinstance(self.sim.coupler, IPCCoupler):
+            assert target_poss is not None
+            envs_idx = self._scene._sanitize_envs_idx(envs_idx)
+            verts_idx_local = self._sanitize_verts_idx_local(verts_idx_local, envs_idx)
+            verts_idx = verts_idx_local + self._v_start
+            target_poss = self._sanitize_verts_tensor(target_poss, gs.tc_float, verts_idx, envs_idx, (3,))
+            self.sim.coupler.update_fem_vertex_constraint_targets(
+                self,
+                tensor_to_array(verts_idx_local),
+                tensor_to_array(target_poss),
+                tensor_to_array(envs_idx),
+            )
+            return
+
         if not self._solver._constraints_initialized:
             gs.logger.warning("Ignoring update_constraint_targets; constraints have not been initialized.")
             return
@@ -1017,6 +1092,21 @@ class FEMEntity(Entity):
 
     def remove_vertex_constraints(self, verts_idx_local=None, envs_idx=None):
         """Remove constraints from specified vertices, or all if None."""
+        from genesis.engine.couplers import IPCCoupler
+
+        if isinstance(self.sim.coupler, IPCCoupler):
+            envs_idx = self._scene._sanitize_envs_idx(envs_idx)
+            if verts_idx_local is None:
+                self.sim.coupler.remove_fem_vertex_constraints(self, None, tensor_to_array(envs_idx))
+                return
+            verts_idx_local = self._sanitize_verts_idx_local(verts_idx_local, envs_idx)
+            self.sim.coupler.remove_fem_vertex_constraints(
+                self,
+                tensor_to_array(verts_idx_local),
+                tensor_to_array(envs_idx),
+            )
+            return
+
         if not self._solver._constraints_initialized:
             gs.logger.warning("Ignoring remove_vertex_constraints; constraints have not been initialized.")
             return

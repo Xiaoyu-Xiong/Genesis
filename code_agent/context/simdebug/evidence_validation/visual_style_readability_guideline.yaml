@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "id": "visual_style_readability_guideline",
+  "title": "Use readable, appealing visual styling for simulation evidence",
+  "summary": "Planner, asset decisions, scene/body/rendering workers, and Critic should treat visual readability and tasteful object styling as soft quality goals alongside semantics and physics.",
+  "scopes": ["planner", "asset", "scene", "body", "rendering", "critic", "opt"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "asset",
+    "scene",
+    "body",
+    "critic",
+    "visual_readability",
+    "aesthetics",
+    "render",
+    "camera",
+    "contrast",
+    "occlusion",
+    "color",
+    "palette",
+    "color_design",
+    "soft_colors",
+    "object_separation"
+  ],
+  "failure_tags": [
+    "hard_to_review",
+    "tiny_objects",
+    "low_contrast",
+    "occluded",
+    "muddy_colors",
+    "unreadable_motion",
+    "ugly_render",
+    "default_gray_objects",
+    "oversaturated_palette",
+    "poor_color_separation",
+    "muddy_palette"
+  ],
+  "guidance": [
+    "Planner, asset decisions, scene/body/rendering workers, and Critic should inspect not only semantic and physics correctness, but also whether the video is visually readable and easy to review.",
+    "Treat subject size, ground/background contrast, viewing angle, occlusion, color separation, lighting, and one-glance motion legibility as soft quality goals.",
+    "Visual readability is not normally a hard pass/fail condition by itself, but repair advice and generated visual choices should push the result toward clearer, more polished, and easier-to-review output when semantics are otherwise close.",
+    "When the prompt does not specify object colors, avoid defaulting all important objects to gray. Assign distinct, role-aware colors so different actors, obstacles, targets, supports, and actuators are easy to distinguish.",
+    "Prefer soft, low-to-medium saturation colors with clear value contrast: muted teal, soft blue, gentle green, warm orange, dusty rose, lavender, pale yellow, or warm clay. Use gray mainly for neutral supports, floors, metal fixtures, or intentionally background objects.",
+    "Use a clean character-animation visualization style: simple readable shapes, uncluttered backgrounds, subtle floor cues, soft shadows, and a small number of coordinated colors that clarify motion rather than distract from it.",
+    "Use color semantically: the main dynamic actor gets the strongest readable color; passive obstacles and supports get quieter colors; goals, handles, or actuators may receive a consistent accent color.",
+    "Keep color contrast high enough for separation, but avoid high-saturation neon colors unless the prompt explicitly requests them."
+  ],
+  "restrictions": [
+    "Do not let numerical metrics alone override visibly confusing, tiny, occluded, or low-contrast evidence.",
+    "Do not recommend purely cosmetic changes that would break physical semantics or hide failure evidence.",
+    "Do not leave multiple important prompt-unspecified objects as the same gray material when color separation would make the behavior easier to inspect.",
+    "Do not use highly saturated, neon, or rainbow palettes as the default style; reserve them for prompts that explicitly ask for bright, toy-like, or stylized colors.",
+    "Do not choose colors that make contact, deformation, or relative motion harder to see against the ground/background."
+  ],
+  "checks": [
+    "Review sampled frames and video, not only metrics and event logs.",
+    "When proposing repair, separate hard correctness failures from soft visual-readability improvements.",
+    "Check whether the main actor, passive objects, obstacles, supports, and targets are visually separable in sampled frames.",
+    "Check whether unspecified colors were chosen intentionally rather than falling back to gray/default materials.",
+    "Check that the palette is coordinated and low-to-medium saturation unless the prompt asked for vivid colors."
+  ],
+  "dispatch_hints": [
+    "Send to planner when visual styling, asset requests, or worker dispatch may affect readability.",
+    "Send to scene/body/rendering when choosing materials, colors, asset appearance, camera, lighting, or visual evidence setup.",
+    "Send to critic by default when render artifacts exist.",
+    "Send to opt only when visual-readability variables are intentionally being tuned."
+  ],
+  "provenance": {
+    "source": "new_simdebug_card",
+    "motivation": "Encourage Planner, visual-generation workers, and Critic to improve readability and review quality without turning aesthetics into a hard gate."
+  }
+}

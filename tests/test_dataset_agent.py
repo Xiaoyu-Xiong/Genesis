@@ -10,15 +10,19 @@ import pytest
 
 from code_agent.dataset import review_tui
 from code_agent.dataset import agents
+from code_agent.dataset import builder as dataset_builder
 from code_agent.dataset.builder import _materialize_segments, build_dataset
 from code_agent.dataset.media import (
+    DownloadedVideo,
     average_video_hash,
     build_contact_sheet,
     cut_clip,
     detect_scene_segments,
     discover_video_urls_from_page,
+    resolve_ytdlp_js_runtime_args,
     probe_video,
     resolve_ytdlp_command,
+    VideoInfo,
     visual_signature,
 )
 from code_agent.dataset.models import BuildConfig, SegmentCandidate, SourceCandidate
@@ -397,7 +401,7 @@ def test_assign_train_test_splits_groups_whole_papers_and_backfills_category(tmp
     assert all(clip.get("trained") is False for clip in manifest["clips"] if clip.get("split") == "train")
 
 
-def test_make_run_batch_uses_only_permanent_splits_and_marks_train_order(tmp_path):
+def test_make_run_batch_uses_only_permanent_splits_without_marking_trained(tmp_path):
     store = DatasetStore(tmp_path / "dataset")
     manifest = store.empty_manifest()
     for index, split in enumerate(("train", "train", "train-tmp", "test", "test-tmp"), start=1):
@@ -418,14 +422,166 @@ def test_make_run_batch_uses_only_permanent_splits_and_marks_train_order(tmp_pat
     manifest = store.load()
 
     assert train_summary["clip_ids"] == ["clip_2"]
+    assert train_summary["marked_trained"] is False
+    assert train_summary["training_marker_policy"] == "pass_only"
     assert "case_2|Create a FEM+IPC scene" in (tmp_path / "train.txt").read_text(encoding="utf-8")
-    assert next(clip for clip in manifest["clips"] if clip["id"] == "clip_2")["trained"] is True
+    assert next(clip for clip in manifest["clips"] if clip["id"] == "clip_2")["trained"] is False
     assert next(clip for clip in manifest["clips"] if clip["id"] == "clip_3")["trained"] is False
 
     test_summary = store.make_run_batch(mode="test", count=5, out_path=tmp_path / "test.txt", seed=7)
 
     assert test_summary["clip_ids"] == ["clip_4"]
     assert "case_4|Create a FEM+IPC scene" in (tmp_path / "test.txt").read_text(encoding="utf-8")
+
+
+def test_mark_train_results_marks_only_passed_train_cases(tmp_path):
+    store = DatasetStore(tmp_path / "dataset")
+    manifest = store.empty_manifest()
+    for clip_id, case_id, split in (
+        ("clip_pass", "case_pass", "train"),
+        ("clip_fail", "case_fail", "train"),
+        ("clip_incomplete", "case_incomplete", "train"),
+        ("clip_test_pass", "case_test_pass", "test"),
+    ):
+        store.add_clip(
+            manifest,
+            {
+                "id": clip_id,
+                "status": "accepted",
+                "case_id": case_id,
+                "prompt": f"Create a FEM+IPC scene inspired by {case_id}. Render 10s behavior.",
+                "split": split,
+                "trained": False,
+            },
+        )
+    store.save(manifest)
+
+    suite_root = tmp_path / "dataset_train_batch_20260622_123456"
+    summary = {
+        "out_dir": str(suite_root),
+        "tasks_file": str(suite_root / "tasks.txt"),
+        "num_cases": 4,
+        "num_completed": 3,
+        "results": [
+            {"case_id": "case_pass", "verdict": "pass", "status": "pass", "case_dir": str(suite_root / "case_pass")},
+            {"case_id": "case_fail", "verdict": "fail", "status": "fail", "case_dir": str(suite_root / "case_fail")},
+            {
+                "case_id": "case_test_pass",
+                "verdict": "pass",
+                "status": "pass",
+                "case_dir": str(suite_root / "case_test_pass"),
+            },
+        ],
+    }
+
+    result = store.mark_train_results_from_suite(summary, summary_path=suite_root / "summary.json")
+    manifest = store.load()
+
+    assert result["changed"] == 1
+    assert result["passed_cases"] == 2
+    assert result["matched_train_clips"] == 1
+    assert result["missing_train_case_ids"] == ["case_test_pass"]
+    by_id = {clip["id"]: clip for clip in manifest["clips"]}
+    assert by_id["clip_pass"]["trained"] is True
+    assert by_id["clip_pass"]["trained_run_id"] == "train_suite_dataset_train_batch_20260622_123456"
+    assert by_id["clip_pass"]["training_history"][-1]["mode"] == "train_passed"
+    assert by_id["clip_fail"]["trained"] is False
+    assert by_id["clip_incomplete"]["trained"] is False
+    assert by_id["clip_test_pass"]["trained"] is False
+
+    history_count = len([item for item in by_id["clip_pass"]["training_history"] if item["mode"] == "train_passed"])
+    second = store.mark_train_results_from_suite(summary, summary_path=suite_root / "summary.json")
+    manifest = store.load()
+    updated_pass_clip = next(clip for clip in manifest["clips"] if clip["id"] == "clip_pass")
+    assert second["changed"] == 0
+    assert second["already_marked"] == 1
+    assert (
+        len([item for item in updated_pass_clip["training_history"] if item["mode"] == "train_passed"]) == history_count
+    )
+
+    manifest = store.load()
+    blocked_clip = next(clip for clip in manifest["clips"] if clip["id"] == "clip_pass")
+    blocked_clip["trained"] = False
+    blocked_clip.pop("trained_at", None)
+    blocked_clip.pop("trained_run_id", None)
+    blocked_clip["prompt"] = "Create a manually edited prompt that must be preserved. Render 10s behavior."
+    blocked_clip["training_history"].append(
+        {
+            "mode": "retrain_requested",
+            "timestamp": "2026-06-22T12:45:00Z",
+            "reason": "human requested retrain",
+            "block_train_passed_run_id": "train_suite_dataset_train_batch_20260622_123456",
+        }
+    )
+    store.save(manifest)
+
+    blocked = store.mark_train_results_from_suite(summary, summary_path=suite_root / "summary.json")
+    manifest = store.load()
+    blocked_clip = next(clip for clip in manifest["clips"] if clip["id"] == "clip_pass")
+    assert blocked["changed"] == 0
+    assert blocked["blocked_by_retrain_request"] == 1
+    assert blocked_clip["trained"] is False
+    assert "trained_at" not in blocked_clip
+    assert "trained_run_id" not in blocked_clip
+    assert blocked_clip["prompt"] == "Create a manually edited prompt that must be preserved. Render 10s behavior."
+
+
+def test_save_merged_preserves_concurrent_review_and_train_updates(tmp_path):
+    store = DatasetStore(tmp_path / "dataset")
+    manifest = store.empty_manifest()
+    for clip_id, case_id in (("clip_review", "case_review"), ("clip_train", "case_train")):
+        store.add_clip(
+            manifest,
+            {
+                "id": clip_id,
+                "status": "accepted",
+                "case_id": case_id,
+                "prompt": f"Create a FEM+IPC scene inspired by {case_id}. Render 10s behavior.",
+                "split": "train",
+                "trained": False,
+            },
+        )
+    store.save(manifest)
+
+    stale_builder_manifest = store.load()
+    store.reject_clip("clip_review", reason="manual reject while builder is running")
+    store.mark_train_results_from_suite(
+        {
+            "out_dir": str(tmp_path / "dataset_train_batch_20260623_111111"),
+            "results": [{"case_id": "case_train", "status": "pass", "verdict": "pass"}],
+        }
+    )
+
+    stale_builder_manifest["source_videos"].append(
+        {
+            "id": "new_source",
+            "url": "https://example.test/new.mp4",
+            "status": "ready",
+            "sha256": "new_sha",
+        }
+    )
+    stale_builder_manifest["clips"][0]["split"] = "train-tmp"
+    stale_builder_manifest["clips"][0]["split_source"] = "auto_tmp_paper_grouped"
+    stale_builder_manifest["clips"].append(
+        {
+            "id": "clip_new",
+            "source_video_id": "new_source",
+            "status": "accepted",
+            "case_id": "case_new",
+            "prompt": "Create a rigid scene inspired by a new demo. Render 10s behavior.",
+            "split": "train-tmp",
+        }
+    )
+
+    store.save_merged(stale_builder_manifest)
+    merged = store.load()
+    by_id = {clip["id"]: clip for clip in merged["clips"]}
+
+    assert by_id["clip_review"]["status"] == "rejected"
+    assert by_id["clip_train"]["trained"] is True
+    assert by_id["clip_train"]["trained_run_id"] == "train_suite_dataset_train_batch_20260623_111111"
+    assert by_id["clip_new"]["status"] == "accepted"
+    assert any(source["id"] == "new_source" for source in merged["source_videos"])
 
 
 def test_review_tui_start_position_helpers_follow_last_reviewed_clip(tmp_path):
@@ -552,6 +708,39 @@ def test_failed_source_urls_are_retryable(tmp_path):
 
 def test_ytdlp_resolver_prefers_current_python_module():
     assert resolve_ytdlp_command()[1:] == ["-m", "yt_dlp"]
+
+
+def test_ytdlp_js_runtime_args_select_supported_runtime(monkeypatch):
+    def fake_which(name):
+        return {"node": "/usr/bin/node", "deno": "/usr/bin/deno"}.get(name)
+
+    def fake_version_text(path, executable_name):
+        return {"deno": "deno 2.3.1\nv8 13.0", "node": "v18.19.1"}.get(executable_name, "")
+
+    monkeypatch.setattr("code_agent.dataset.media.shutil.which", fake_which)
+    monkeypatch.setattr("code_agent.dataset.media._runtime_version_text", fake_version_text)
+
+    assert resolve_ytdlp_js_runtime_args() == ["--js-runtimes", "deno:/usr/bin/deno"]
+
+
+def test_ytdlp_js_runtime_args_rejects_unsupported_node(monkeypatch):
+    monkeypatch.setattr(
+        "code_agent.dataset.media.shutil.which",
+        lambda name: "/usr/bin/node" if name == "node" else None,
+    )
+    monkeypatch.setattr("code_agent.dataset.media._runtime_version_text", lambda path, executable_name: "v18.19.1")
+
+    assert resolve_ytdlp_js_runtime_args() == []
+
+
+def test_ytdlp_js_runtime_args_accepts_new_node(monkeypatch):
+    monkeypatch.setattr(
+        "code_agent.dataset.media.shutil.which",
+        lambda name: "/usr/local/bin/node" if name == "node" else None,
+    )
+    monkeypatch.setattr("code_agent.dataset.media._runtime_version_text", lambda path, executable_name: "v22.2.0")
+
+    assert resolve_ytdlp_js_runtime_args() == ["--js-runtimes", "node:/usr/local/bin/node"]
 
 
 def test_curator_memory_marks_failed_sources_retryable(tmp_path):
@@ -1038,6 +1227,105 @@ def test_build_dataset_direct_sources_skip_scout_but_keep_codex_steps(tmp_path, 
 
     assert summary.status == "complete"
     assert called == ["curator", "segmenter", "prompt_writer"]
+
+
+def test_build_dataset_repeats_scout_until_target_after_seen_url(tmp_path, monkeypatch):
+    data_root = tmp_path / "dataset"
+    store = DatasetStore(data_root)
+    manifest = store.empty_manifest()
+    old_url = "https://example.test/already_seen.mp4"
+    new_url = "https://example.test/new_demo.mp4"
+    store.add_source_video(
+        manifest,
+        {
+            "id": "old_source",
+            "url": old_url,
+            "status": "ready",
+            "sha256": "old_sha",
+            "path": "videos/old_source.mp4",
+        },
+    )
+    store.save(manifest)
+    scout_calls: list[int] = []
+
+    def fake_scout_sources(**kwargs):
+        scout_calls.append(kwargs["needed_clips"])
+        if len(scout_calls) == 1:
+            return [SourceCandidate(candidate_id="old", video_url=old_url, title="Already Seen")]
+        return [SourceCandidate(candidate_id="new", video_url=new_url, title="New Demo")]
+
+    def fake_curate_sources(**kwargs):
+        return kwargs["candidates"]
+
+    def fake_download_video(candidate, *, out_dir, source_id, timeout_sec=120.0):
+        path = out_dir / f"{source_id}.mp4"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"fake video")
+        return path
+
+    def fake_describe_download(path):
+        return DownloadedVideo(
+            path=path,
+            sha256=f"sha_{path.stem}",
+            bytes=path.stat().st_size,
+            info=VideoInfo(duration_sec=2.0, width=160, height=120),
+        )
+
+    def fake_build_contact_sheet(video_path, out_path, *, max_frames=12, thumb_width=180):
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(b"fake sheet")
+
+    def fake_segment_video(**kwargs):
+        return [
+            SegmentCandidate(
+                title_slug="new_single_demo",
+                start_sec=0.0,
+                end_sec=2.0,
+                visual_summary="one complete new demo",
+                reason="test",
+            )
+        ]
+
+    def fake_materialize_segments(*, store, manifest, source_record, source_path, segments, target, **kwargs):
+        store.add_clip(
+            manifest,
+            {
+                "id": "new_clip",
+                "source_video_id": source_record["id"],
+                "status": "accepted",
+                "case_id": "new_clip",
+                "prompt": "Create a rigid scene inspired by a new demo. Render 2s behavior.",
+                "category": "rigid",
+                "prompt_revisions": [],
+            },
+        )
+        return 1
+
+    monkeypatch.setattr(agents, "scout_sources", fake_scout_sources)
+    monkeypatch.setattr(agents, "curate_sources", fake_curate_sources)
+    monkeypatch.setattr(agents, "segment_video", fake_segment_video)
+    monkeypatch.setattr(dataset_builder, "download_video", fake_download_video)
+    monkeypatch.setattr(dataset_builder, "describe_download", fake_describe_download)
+    monkeypatch.setattr(dataset_builder, "build_contact_sheet", fake_build_contact_sheet)
+    monkeypatch.setattr(dataset_builder, "detect_scene_segments", lambda *args, **kwargs: [])
+    monkeypatch.setattr(dataset_builder, "_materialize_segments", fake_materialize_segments)
+
+    summary = build_dataset(
+        BuildConfig(
+            target_clips=1,
+            data_root=data_root,
+            sources=("https://kesen.realtimerendering.com/",),
+            max_scout_rounds=2,
+        )
+    )
+
+    assert summary.status == "complete"
+    assert summary.scout_rounds == 2
+    assert summary.empty_scout_rounds == 1
+    assert summary.candidates_seen == 2
+    assert summary.clips_added == 1
+    assert any(item == f"source_url_seen:{old_url}" for item in summary.skipped)
+    assert DatasetStore(data_root).accepted_count() == 1
 
 
 def _payload_for_role(role: str) -> dict[str, object]:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import time
 import traceback
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -130,6 +131,7 @@ def run_suite(
     duration_sec: float | None = None,
     render_fps: int | None = None,
     opt_enabled: bool | None = None,
+    summary_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, object]:
     tasks_file = tasks_file.resolve()
     out_dir = out_dir.resolve()
@@ -168,6 +170,8 @@ def run_suite(
     if not cases:
         summary = _suite_summary(summary_base, results=[])
         dump_json(summary, out_dir / "summary.json")
+        if summary_callback is not None:
+            summary_callback(summary)
         return summary
 
     with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="code-agent-case") as executor:
@@ -206,6 +210,8 @@ def run_suite(
                 started_at_unix=started_at,
             )
             dump_json(partial_summary, out_dir / "summary.json")
+            if summary_callback is not None:
+                summary_callback(partial_summary)
 
     results = [
         item if item is not None else _missing_case_summary(cases[index], out_dir / cases[index].case_id)
@@ -219,6 +225,8 @@ def run_suite(
         started_at_unix=started_at,
     )
     dump_json(summary, out_dir / "summary.json")
+    if summary_callback is not None:
+        summary_callback(summary)
     return summary
 
 

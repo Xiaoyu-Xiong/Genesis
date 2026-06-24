@@ -30,7 +30,7 @@
     "hidden_proxy_force"
   ],
   "guidance": [
-    "Use direct FEM external force only when force is part of the requested physical scene or a clearly modeled disturbance. Prefer contact-driven rigid tools for clamps, rollers, rods, plates, grippers, and boundary mechanisms.",
+    "Use direct FEM external force only when force is part of the requested physical scene or a clearly modeled disturbance. Prefer FEMEntity.set_vertex_constraints for pinned or driven boundary conditions, and prefer contact-driven rigid tools for rollers, plates, grippers, impacts, squeezing, and contact mechanisms.",
     "Genesis does not expose a high-level FEMEntity.apply_external_force API for IPCCoupler. Do not call rigid_solver.apply_links_external_force for FEM bodies.",
     "Register uipc.constitution.FiniteElementExternalForce after IPCCoupler has created FEM geometries in coupler._ipc_scene and before coupler._ipc_world.init(...). A generated simulation can do this by patching IPCCoupler._add_fem_entities_to_ipc before scene.build().",
     "Find target FEM geometries with uipc.backend.SceneVisitor(coupler._ipc_scene), uipc.geometry.SimplicialComplexSlot, and genesis.engine.couplers.ipc_coupler.utils.read_ipc_geometry_metadata; apply this card only to metadata entries with solver_type == 'fem' unless cloth force support is separately verified.",
@@ -43,7 +43,7 @@
   ],
   "restrictions": [
     "Do not rely on scene.add_force_field for FEM+IPC external force unless that path has been separately verified in the current simulator.",
-    "Do not use FEMEntity.set_vertex_constraints under IPCCoupler as the external-force path; the current Genesis wrapper blocks that method for IPCCoupler.",
+    "Do not use FEMEntity.set_vertex_constraints as the external-force path for distributed forces or impulses. It is allowed for explicit pinned or driven FEM/cloth boundary conditions under IPCCoupler when gs.options.FEMOptions(enable_vertex_constraints=True) is set and target-tracking evidence is recorded.",
     "Do not write private or guessed UIPC force slots. Require a successful attribute check for vertices.external_force and vertices.is_constrained before claiming force support.",
     "Do not use hidden goal-following forces, target-tracking proxy forces, or forces that directly encode the desired outcome rather than a physical mechanism.",
     "Do not mark FEM force actuation successful unless force_applications is nonzero, selected vertices are nonzero, and FEM state evidence shows corresponding COM, bbox, or vertex displacement."

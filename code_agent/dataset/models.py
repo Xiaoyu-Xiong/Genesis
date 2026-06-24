@@ -27,6 +27,8 @@ class BuildConfig:
     similarity_seed_limit: int = 12
     max_candidates: int | None = None
     max_downloads: int | None = None
+    max_scout_rounds: int | None = None
+    max_empty_scout_rounds: int = 3
     run_codex: bool = True
 
 
@@ -38,6 +40,8 @@ class BuildSummary:
     target_clips: int
     accepted_clips: int
     candidates_seen: int = 0
+    scout_rounds: int = 0
+    empty_scout_rounds: int = 0
     videos_downloaded: int = 0
     clips_added: int = 0
     similarity_seeds: int = 0
@@ -52,6 +56,8 @@ class BuildSummary:
             "target_clips": self.target_clips,
             "accepted_clips": self.accepted_clips,
             "candidates_seen": self.candidates_seen,
+            "scout_rounds": self.scout_rounds,
+            "empty_scout_rounds": self.empty_scout_rounds,
             "videos_downloaded": self.videos_downloaded,
             "clips_added": self.clips_added,
             "similarity_seeds": self.similarity_seeds,

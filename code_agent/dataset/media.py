@@ -308,6 +308,20 @@ def resolve_ytdlp_command() -> list[str]:
     )
 
 
+def resolve_ytdlp_js_runtime_args() -> list[str]:
+    runtime = _supported_ytdlp_js_runtime()
+    if runtime is None:
+        return []
+    name, path = runtime
+    return ["--js-runtimes", f"{name}:{path}"]
+
+
+def resolve_ytdlp_remote_component_args() -> list[str]:
+    if not resolve_ytdlp_js_runtime_args():
+        return []
+    return ["--remote-components", "ejs:github"]
+
+
 def discover_video_urls_from_page(page_url: str, *, timeout_sec: float = 30.0, max_links: int = 20) -> list[str]:
     if _is_unsupported_youtube_page(page_url):
         return []
@@ -359,6 +373,8 @@ def _download_with_ytdlp(url: str, out_path: Path, *, timeout_sec: float) -> Pat
     subprocess.run(
         [
             *resolve_ytdlp_command(),
+            *resolve_ytdlp_js_runtime_args(),
+            *resolve_ytdlp_remote_component_args(),
             "--no-playlist",
             "--format",
             (
@@ -388,6 +404,58 @@ def _download_with_ytdlp(url: str, out_path: Path, *, timeout_sec: float) -> Pat
     return out_path
 
 
+def _supported_ytdlp_js_runtime() -> tuple[str, str] | None:
+    runtime_specs = (
+        ("deno", "deno", (2, 3, 0), r"^deno\s+(\S+)"),
+        ("node", "node", (22, 0, 0), r"^v?(\S+)"),
+        ("bun", "bun", (1, 2, 11), r"^(\S+)"),
+        ("quickjs", "qjs", (2023, 12, 9), r"^QuickJS(?:-ng)?\s+version\s+(\S+)"),
+    )
+    for runtime_name, executable_name, minimum_version, version_pattern in runtime_specs:
+        path = shutil.which(executable_name)
+        if not path:
+            continue
+        version_text = _runtime_version_text(path, executable_name)
+        if _version_satisfies(version_text, minimum_version, version_pattern):
+            return runtime_name, path
+    return None
+
+
+def _runtime_version_text(path: str, executable_name: str) -> str:
+    args = [path, "--help"] if executable_name == "qjs" else [path, "--version"]
+    completed = subprocess.run(
+        args,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=5,
+    )
+    return "\n".join(part for part in (completed.stdout, completed.stderr) if part)
+
+
+def _version_satisfies(text: str, minimum: tuple[int, ...], pattern: str) -> bool:
+    match = re.search(pattern, text, flags=re.MULTILINE)
+    if not match:
+        return False
+    version = _version_tuple(match.group(1))
+    if not version:
+        return False
+    padded_version = version + (0,) * max(0, len(minimum) - len(version))
+    return padded_version[: len(minimum)] >= minimum
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for part in version.split("."):
+        match = re.match(r"(\d+)", part)
+        if not match:
+            break
+        parts.append(int(match.group(1)))
+    return tuple(parts)
+
+
 def _is_unsupported_youtube_page(url: str) -> bool:
     parsed = urlparse(url)
     host = parsed.netloc.lower()
@@ -403,9 +471,7 @@ def _download_suffix(url: str) -> str:
     return ".mp4"
 
 
-_HTML_ATTR_URL_RE = re.compile(
-    r"""(?is)\b(?:href|src|data-src|data-video|content)\s*=\s*["']([^"']+)["']"""
-)
+_HTML_ATTR_URL_RE = re.compile(r"""(?is)\b(?:href|src|data-src|data-video|content)\s*=\s*["']([^"']+)["']""")
 _ABSOLUTE_URL_RE = re.compile(r"""https?://[^\s"'<>\\]+""", re.IGNORECASE)
 
 

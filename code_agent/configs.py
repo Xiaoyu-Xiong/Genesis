@@ -39,8 +39,8 @@ class HarnessConfigs:
 
     max_parallel_cases: int | None = None
     max_parallel_workers: int | None = None
-    max_repair_rounds: int = 12
-    execution_timeout_sec: float = 10000.0
+    max_repair_rounds: int = 20
+    execution_timeout_sec: float = 3600.0
     command_timeout_sec: float = 1000.0
     default_backend: str = "gpu"
 

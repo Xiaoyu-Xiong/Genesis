@@ -23,6 +23,8 @@ def _cmd_build(args: argparse.Namespace) -> None:
             similarity_seed_limit=args.similarity_seed_limit,
             max_candidates=args.max_candidates,
             max_downloads=args.max_downloads,
+            max_scout_rounds=args.max_scout_rounds,
+            max_empty_scout_rounds=args.max_empty_scout_rounds,
             run_codex=not args.no_codex,
         )
     )
@@ -60,37 +62,35 @@ def _cmd_set_split(args: argparse.Namespace) -> None:
 
 def _cmd_assign_splits(args: argparse.Namespace) -> None:
     store = DatasetStore(args.data_root)
-    manifest = store.load()
-    summary = store.assign_train_test_splits(
-        manifest,
-        test_fraction=args.test_fraction,
-        temporary=True,
-        include_unset=not args.no_include_unset,
-        overwrite_permanent=False,
+    summary = store.update_manifest(
+        lambda manifest: store.assign_train_test_splits(
+            manifest,
+            test_fraction=args.test_fraction,
+            temporary=True,
+            include_unset=not args.no_include_unset,
+            overwrite_permanent=False,
+        )
     )
-    store.save(manifest)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
 def _cmd_assign_final_splits(args: argparse.Namespace) -> None:
     store = DatasetStore(args.data_root)
-    manifest = store.load()
-    summary = store.assign_train_test_splits(
-        manifest,
-        test_fraction=args.test_fraction,
-        temporary=False,
-        include_unset=True,
-        overwrite_permanent=True,
+    summary = store.update_manifest(
+        lambda manifest: store.assign_train_test_splits(
+            manifest,
+            test_fraction=args.test_fraction,
+            temporary=False,
+            include_unset=True,
+            overwrite_permanent=True,
+        )
     )
-    store.save(manifest)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
 def _cmd_finalize_tmp_splits(args: argparse.Namespace) -> None:
     store = DatasetStore(args.data_root)
-    manifest = store.load()
-    summary = store.finalize_tmp_splits(manifest)
-    store.save(manifest)
+    summary = store.update_manifest(store.finalize_tmp_splits)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
@@ -101,9 +101,7 @@ def _cmd_split_summary(args: argparse.Namespace) -> None:
 
 def _cmd_drop_paper_prompts(args: argparse.Namespace) -> None:
     store = DatasetStore(args.data_root)
-    manifest = load_json_object(store.manifest_path) or store.empty_manifest()
-    summary = store.drop_paper_prompts(manifest)
-    store.save(manifest)
+    summary = store.update_manifest(store.drop_paper_prompts)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
@@ -117,6 +115,15 @@ def _cmd_make_run_batch(args: argparse.Namespace) -> None:
         mark_trained=not args.no_mark_trained,
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
+def _cmd_mark_train_results(args: argparse.Namespace) -> None:
+    store = DatasetStore(args.data_root)
+    summary = load_json_object(args.summary)
+    if not isinstance(summary, dict):
+        raise SystemExit(f"Unable to load suite summary JSON object: {args.summary}")
+    result = store.mark_train_results_from_suite(summary, summary_path=args.summary)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 def _cmd_delete_duplicate(args: argparse.Namespace) -> None:
@@ -180,6 +187,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     build.add_argument("--max-candidates", type=int, default=None)
     build.add_argument("--max-downloads", type=int, default=None)
+    build.add_argument(
+        "--max-scout-rounds",
+        type=int,
+        default=None,
+        help=(
+            "Maximum Codex scout rounds before stopping. By default this scales with remaining target size "
+            "and is capped at 20."
+        ),
+    )
+    build.add_argument(
+        "--max-empty-scout-rounds",
+        type=int,
+        default=3,
+        help="Stop after this many consecutive rounds with no fresh candidate URLs to try.",
+    )
     build.add_argument("--no-codex", action="store_true", help="Use only explicit sources and deterministic fallbacks.")
     build.set_defaults(func=_cmd_build)
 
@@ -263,9 +285,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_batch.add_argument(
         "--no-mark-trained",
         action="store_true",
-        help="Do not mark selected train clips as trained after exporting.",
+        help="Deprecated compatibility flag; train clips are now marked only after pass results are synced.",
     )
     run_batch.set_defaults(func=_cmd_make_run_batch)
+
+    mark_train_results = sub.add_parser(
+        "mark-train-results",
+        help="Mark train clips as trained only for cases that pass in a run-suite summary.",
+    )
+    mark_train_results.add_argument("--summary", type=Path, required=True)
+    mark_train_results.set_defaults(func=_cmd_mark_train_results)
 
     delete_duplicate = sub.add_parser(
         "delete-duplicate",

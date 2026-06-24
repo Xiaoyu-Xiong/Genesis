@@ -1,6 +1,7 @@
 import math
 from contextlib import nullcontext
 from itertools import permutations
+from pathlib import Path
 from typing import TYPE_CHECKING, cast, Any
 
 import numpy as np
@@ -83,6 +84,203 @@ def get_ipc_rigid_links_idx(scene, env_idx):
         if solver_type_ == "rigid" and env_idx_ == env_idx:
             links_idx.append(idx_)
     return links_idx
+
+
+def write_tiny_cloth_obj(tmp_path: Path) -> Path:
+    cloth_path = tmp_path / "tiny_cloth.obj"
+    cloth_path.write_text(
+        "\n".join(
+            (
+                "v -0.05 -0.05 0.0",
+                "v 0.05 -0.05 0.0",
+                "v 0.05 0.05 0.0",
+                "v -0.05 0.05 0.0",
+                "f 1 2 3",
+                "f 1 3 4",
+            )
+        )
+    )
+    return cloth_path
+
+
+def make_ipc_soft_entity(scene, kind: str, *, tmp_path: Path | None = None, pos=(0.0, 0.0, 0.3)):
+    if kind == "cloth":
+        assert tmp_path is not None
+        return scene.add_entity(
+            morph=gs.morphs.Mesh(
+                file=str(write_tiny_cloth_obj(tmp_path)),
+                pos=pos,
+            ),
+            material=gs.materials.FEM.Cloth(
+                E=1e4,
+                nu=0.3,
+                rho=50.0,
+                thickness=0.001,
+                bending_stiffness=None,
+            ),
+        )
+    if kind == "fem":
+        return scene.add_entity(
+            morph=gs.morphs.Box(
+                size=(0.08, 0.08, 0.08),
+                pos=pos,
+            ),
+            material=gs.materials.FEM.Elastic(
+                E=2e4,
+                nu=0.3,
+                rho=200.0,
+                model="stable_neohookean",
+            ),
+        )
+    raise ValueError(kind)
+
+
+@pytest.mark.parametrize("kind", ["fem", "cloth"])
+def test_ipc_fem_vertex_constraint_fixed_point(kind, tmp_path):
+    scene = gs.Scene(
+        sim_options=gs.options.SimOptions(
+            dt=0.01,
+            gravity=(0.0, 0.0, -9.8),
+        ),
+        fem_options=gs.options.FEMOptions(
+            enable_vertex_constraints=True,
+        ),
+        coupler_options=gs.options.IPCCouplerOptions(
+            contact_enable=False,
+            newton_max_iterations=64,
+        ),
+        show_viewer=False,
+    )
+    entity = make_ipc_soft_entity(scene, kind, tmp_path=tmp_path)
+    scene.build()
+
+    positions_0 = tensor_to_array(entity.get_state().pos)
+    pin_idx = int(np.argmax(positions_0[0, :, 2]))
+    target = positions_0[0, pin_idx].copy()
+    entity.set_vertex_constraints([pin_idx], target, stiffness=1e5)
+
+    for _ in range(8):
+        scene.step()
+
+    positions_f = tensor_to_array(entity.get_state().pos)
+    assert_allclose(positions_f[:, pin_idx], target, tol=5e-3)
+
+
+def test_ipc_fem_vertex_constraint_moving_world_target():
+    scene = gs.Scene(
+        sim_options=gs.options.SimOptions(
+            dt=0.01,
+            gravity=(0.0, 0.0, 0.0),
+        ),
+        fem_options=gs.options.FEMOptions(
+            enable_vertex_constraints=True,
+        ),
+        coupler_options=gs.options.IPCCouplerOptions(
+            contact_enable=False,
+            newton_max_iterations=64,
+        ),
+        show_viewer=False,
+    )
+    entity = make_ipc_soft_entity(scene, "fem")
+    scene.build()
+
+    positions_0 = tensor_to_array(entity.get_state().pos)
+    pin_idx = int(np.argmax(positions_0[0, :, 0]))
+    target = positions_0[0, pin_idx].copy()
+    entity.set_vertex_constraints([pin_idx], target, stiffness=1e5)
+
+    for i in range(10):
+        target_i = target + np.array([0.004 * (i + 1), 0.0, 0.0], dtype=target.dtype)
+        entity.update_constraint_targets([pin_idx], target_i)
+        scene.step()
+
+    positions_f = tensor_to_array(entity.get_state().pos)
+    assert_allclose(positions_f[:, pin_idx], target_i, tol=8e-3)
+
+
+def test_ipc_fem_vertex_constraint_follows_rigid_link():
+    scene = gs.Scene(
+        sim_options=gs.options.SimOptions(
+            dt=0.01,
+            gravity=(0.0, 0.0, 0.0),
+        ),
+        fem_options=gs.options.FEMOptions(
+            enable_vertex_constraints=True,
+        ),
+        coupler_options=gs.options.IPCCouplerOptions(
+            contact_enable=False,
+            newton_max_iterations=64,
+        ),
+        show_viewer=False,
+    )
+    follower = make_ipc_soft_entity(scene, "fem", pos=(0.0, 0.0, 0.3))
+    driver = scene.add_entity(
+        gs.morphs.Box(
+            size=(0.05, 0.05, 0.05),
+            pos=(0.0, 0.0, 0.3),
+            fixed=True,
+        ),
+        material=gs.materials.Rigid(
+            needs_coup=False,
+        ),
+    )
+    scene.build()
+
+    positions_0 = tensor_to_array(follower.get_state().pos)
+    pin_idx = int(np.argmax(positions_0[0, :, 0]))
+    target_0 = positions_0[0, pin_idx].copy()
+    follower.set_vertex_constraints([pin_idx], link=driver.base_link, stiffness=1e5)
+
+    for i in range(10):
+        driver.set_pos((0.005 * (i + 1), 0.0, 0.3), zero_velocity=True)
+        scene.step()
+
+    positions_f = tensor_to_array(follower.get_state().pos)
+    assert_allclose(positions_f[:, pin_idx], target_0 + (0.05, 0.0, 0.0), tol=1.5e-2)
+
+
+def test_ipc_fem_vertex_constraint_follows_deformable_vertex():
+    scene = gs.Scene(
+        sim_options=gs.options.SimOptions(
+            dt=0.01,
+            gravity=(0.0, 0.0, 0.0),
+        ),
+        fem_options=gs.options.FEMOptions(
+            enable_vertex_constraints=True,
+        ),
+        coupler_options=gs.options.IPCCouplerOptions(
+            contact_enable=False,
+            newton_max_iterations=64,
+        ),
+        show_viewer=False,
+    )
+    driver = make_ipc_soft_entity(scene, "fem", pos=(0.0, 0.0, 0.35))
+    follower = make_ipc_soft_entity(scene, "fem", pos=(0.0, 0.0, 0.2))
+    scene.build()
+
+    driver_pos_0 = tensor_to_array(driver.get_state().pos)
+    follower_pos_0 = tensor_to_array(follower.get_state().pos)
+    driver_idx = int(np.argmax(driver_pos_0[0, :, 0]))
+    follower_idx = int(np.argmax(follower_pos_0[0, :, 0]))
+    driver_target_0 = driver_pos_0[0, driver_idx].copy()
+    offset_0 = follower_pos_0[0, follower_idx] - driver_pos_0[0, driver_idx]
+
+    driver.set_vertex_constraints([driver_idx], driver_target_0, stiffness=1e5)
+    follower.set_vertex_constraints(
+        [follower_idx],
+        target_entity=driver,
+        target_verts_idx_local=[driver_idx],
+        stiffness=1e5,
+    )
+
+    for i in range(12):
+        target_i = driver_target_0 + np.array([0.003 * (i + 1), 0.0, 0.0], dtype=driver_target_0.dtype)
+        driver.update_constraint_targets([driver_idx], target_i)
+        scene.step()
+
+    driver_pos_f = tensor_to_array(driver.get_state().pos)
+    follower_pos_f = tensor_to_array(follower.get_state().pos)
+    assert_allclose(follower_pos_f[:, follower_idx], driver_pos_f[:, driver_idx] + offset_0, tol=1.5e-2)
 
 
 @pytest.mark.parametrize("enable_rigid_rigid_contact", [False, True])

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
+import os
 import random
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +93,7 @@ class DatasetStore:
     def __init__(self, root: Path = DEFAULT_DATA_ROOT):
         self.root = root.resolve()
         self.manifest_path = self.root / "manifest.json"
+        self.lock_path = self.root / ".manifest.lock"
 
     @property
     def videos_dir(self) -> Path:
@@ -122,16 +127,56 @@ class DatasetStore:
             path.mkdir(parents=True, exist_ok=True)
 
     def load(self) -> dict[str, Any]:
+        return self._load_unlocked()
+
+    def _load_unlocked(self) -> dict[str, Any]:
         manifest = load_json_object(self.manifest_path)
         if manifest is None:
             return self.empty_manifest()
         return self.normalize_manifest(manifest)
 
     def save(self, manifest: dict[str, Any]) -> None:
+        with self.manifest_lock():
+            self._save_unlocked(manifest)
+
+    def save_merged(self, manifest: dict[str, Any]) -> dict[str, Any]:
+        """Merge a long-lived in-memory manifest into the latest on-disk manifest.
+
+        Dataset builds hold a manifest object while slow Codex/download/ffmpeg work happens. Before writing, this method
+        locks the manifest, reloads the current file, and merges records by stable ids so review/train updates made by
+        other processes are not overwritten by the build's stale copy.
+        """
+
+        with self.manifest_lock():
+            current = self._load_unlocked()
+            merged = merge_manifests(current, manifest)
+            self._save_unlocked(merged)
+        manifest.clear()
+        manifest.update(merged)
+        return manifest
+
+    def update_manifest(self, updater: Callable[[dict[str, Any]], Any]) -> Any:
+        with self.manifest_lock():
+            manifest = self._load_unlocked()
+            result = updater(manifest)
+            self._save_unlocked(manifest)
+            return result
+
+    @contextlib.contextmanager
+    def manifest_lock(self):
+        self.root.mkdir(parents=True, exist_ok=True)
+        with self.lock_path.open("a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    def _save_unlocked(self, manifest: dict[str, Any]) -> None:
         manifest = self.normalize_manifest(manifest)
         manifest["updated_at"] = now_iso()
         self.ensure_dirs()
-        temp_path = self.manifest_path.with_suffix(".json.tmp")
+        temp_path = self.manifest_path.with_suffix(f".json.{os.getpid()}.tmp")
         dump_json(manifest, temp_path)
         temp_path.replace(self.manifest_path)
 
@@ -256,128 +301,136 @@ class DatasetStore:
         return record
 
     def accept_clip(self, clip_id: str, *, reason: str | None = None) -> dict[str, Any]:
-        manifest = self.load()
-        clip = self._find_clip(manifest, clip_id)
-        before_status = clip.get("status")
-        clip["status"] = "accepted"
-        clip["accept_reason"] = reason or "accepted"
-        clip["reviewed_at"] = now_iso()
-        clip["updated_at"] = now_iso()
-        event = self._review_event(
-            clip_id,
-            "accept",
-            reason=reason or "accepted",
-            before_status=before_status,
-            before_prompt=clip.get("prompt"),
-        )
-        manifest["review_events"].append(event)
-        self.save(manifest)
-        return event
+        def updater(manifest: dict[str, Any]) -> dict[str, Any]:
+            clip = self._find_clip(manifest, clip_id)
+            before_status = clip.get("status")
+            clip["status"] = "accepted"
+            clip["accept_reason"] = reason or "accepted"
+            clip["reviewed_at"] = now_iso()
+            clip["updated_at"] = now_iso()
+            event = self._review_event(
+                clip_id,
+                "accept",
+                reason=reason or "accepted",
+                before_status=before_status,
+                before_prompt=clip.get("prompt"),
+            )
+            manifest["review_events"].append(event)
+            return event
+
+        return self.update_manifest(updater)
 
     def reject_clip(self, clip_id: str, *, reason: str, avoid_similarity_note: str | None = None) -> dict[str, Any]:
-        manifest = self.load()
-        clip = self._find_clip(manifest, clip_id)
-        before_status = clip.get("status")
-        clip["status"] = "rejected"
-        clip["rejection_reason"] = reason
-        clip["updated_at"] = now_iso()
-        event = self._review_event(
-            clip_id,
-            "reject",
-            reason=reason,
-            before_status=before_status,
-            before_prompt=clip.get("prompt"),
-            avoid_similarity_note=avoid_similarity_note or reason,
-        )
-        manifest["review_events"].append(event)
-        self.save(manifest)
-        return event
+        def updater(manifest: dict[str, Any]) -> dict[str, Any]:
+            clip = self._find_clip(manifest, clip_id)
+            before_status = clip.get("status")
+            clip["status"] = "rejected"
+            clip["rejection_reason"] = reason
+            clip["updated_at"] = now_iso()
+            event = self._review_event(
+                clip_id,
+                "reject",
+                reason=reason,
+                before_status=before_status,
+                before_prompt=clip.get("prompt"),
+                avoid_similarity_note=avoid_similarity_note or reason,
+            )
+            manifest["review_events"].append(event)
+            return event
+
+        return self.update_manifest(updater)
 
     def edit_clip(self, clip_id: str, *, prompt: str, reason: str | None = None) -> dict[str, Any]:
         case_id, case_prompt = split_case_prompt(prompt)
-        manifest = self.load()
-        clip = self._find_clip(manifest, clip_id)
-        before_prompt = clip.get("prompt")
-        before_case_id = clip.get("case_id")
-        before_status = clip.get("status")
-        revision = {
-            "timestamp": now_iso(),
-            "before_case_id": before_case_id,
-            "before_prompt": before_prompt,
-            "after_case_id": case_id,
-            "after_prompt": case_prompt,
-            "reason": reason,
-        }
-        clip.setdefault("prompt_revisions", []).append(revision)
-        clip["case_id"] = case_id
-        clip["prompt"] = case_prompt
-        clip["status"] = "accepted"
-        clip["updated_at"] = now_iso()
-        event = self._review_event(
-            clip_id,
-            "edit",
-            reason=reason,
-            before_status=before_status,
-            before_prompt=before_prompt,
-            after_prompt=case_prompt,
-        )
-        manifest["review_events"].append(event)
-        manifest["style_memory"].append(
-            {
-                "clip_id": clip_id,
-                "case_id": case_id,
-                "prompt": case_prompt,
-                "reason": reason,
+
+        def updater(manifest: dict[str, Any]) -> dict[str, Any]:
+            clip = self._find_clip(manifest, clip_id)
+            before_prompt = clip.get("prompt")
+            before_case_id = clip.get("case_id")
+            before_status = clip.get("status")
+            revision = {
                 "timestamp": now_iso(),
+                "before_case_id": before_case_id,
+                "before_prompt": before_prompt,
+                "after_case_id": case_id,
+                "after_prompt": case_prompt,
+                "reason": reason,
             }
-        )
-        self.save(manifest)
-        return event
+            clip.setdefault("prompt_revisions", []).append(revision)
+            clip["case_id"] = case_id
+            clip["prompt"] = case_prompt
+            clip["status"] = "accepted"
+            clip["updated_at"] = now_iso()
+            event = self._review_event(
+                clip_id,
+                "edit",
+                reason=reason,
+                before_status=before_status,
+                before_prompt=before_prompt,
+                after_prompt=case_prompt,
+            )
+            manifest["review_events"].append(event)
+            manifest["style_memory"].append(
+                {
+                    "clip_id": clip_id,
+                    "case_id": case_id,
+                    "prompt": case_prompt,
+                    "reason": reason,
+                    "timestamp": now_iso(),
+                }
+            )
+            return event
+
+        return self.update_manifest(updater)
 
     def set_clip_category(self, clip_id: str, *, category: str, reason: str | None = None) -> dict[str, Any]:
         normalized_category = normalize_clip_category(category)
-        manifest = self.load()
-        clip = self._find_clip(manifest, clip_id)
-        before_category = clip.get("category")
-        before_status = clip.get("status")
-        clip["category"] = normalized_category
-        clip["updated_at"] = now_iso()
-        event = self._review_event(
-            clip_id,
-            "set_category",
-            reason=reason or "human category label",
-            before_status=before_status,
-            before_prompt=clip.get("prompt"),
-        )
-        event["before_category"] = before_category
-        event["after_category"] = normalized_category
-        clip["category_source"] = "human"
-        manifest["review_events"].append(event)
-        self.save(manifest)
-        return event
+
+        def updater(manifest: dict[str, Any]) -> dict[str, Any]:
+            clip = self._find_clip(manifest, clip_id)
+            before_category = clip.get("category")
+            before_status = clip.get("status")
+            clip["category"] = normalized_category
+            clip["updated_at"] = now_iso()
+            event = self._review_event(
+                clip_id,
+                "set_category",
+                reason=reason or "human category label",
+                before_status=before_status,
+                before_prompt=clip.get("prompt"),
+            )
+            event["before_category"] = before_category
+            event["after_category"] = normalized_category
+            clip["category_source"] = "human"
+            manifest["review_events"].append(event)
+            return event
+
+        return self.update_manifest(updater)
 
     def set_clip_split(self, clip_id: str, *, split: str, reason: str | None = None) -> dict[str, Any]:
         normalized_split = normalize_dataset_split(split)
-        manifest = self.load()
-        clip = self._find_clip(manifest, clip_id)
-        before_split = clip.get("split")
-        before_status = clip.get("status")
-        clip["split"] = normalized_split
-        clip["split_source"] = "human"
-        clip["split_assigned_at"] = now_iso()
-        clip["updated_at"] = now_iso()
-        event = self._review_event(
-            clip_id,
-            "set_split",
-            reason=reason or "human split label",
-            before_status=before_status,
-            before_prompt=clip.get("prompt"),
-        )
-        event["before_split"] = before_split
-        event["after_split"] = normalized_split
-        manifest["review_events"].append(event)
-        self.save(manifest)
-        return event
+
+        def updater(manifest: dict[str, Any]) -> dict[str, Any]:
+            clip = self._find_clip(manifest, clip_id)
+            before_split = clip.get("split")
+            before_status = clip.get("status")
+            clip["split"] = normalized_split
+            clip["split_source"] = "human"
+            clip["split_assigned_at"] = now_iso()
+            clip["updated_at"] = now_iso()
+            event = self._review_event(
+                clip_id,
+                "set_split",
+                reason=reason or "human split label",
+                before_status=before_status,
+                before_prompt=clip.get("prompt"),
+            )
+            event["before_split"] = before_split
+            event["after_split"] = normalized_split
+            manifest["review_events"].append(event)
+            return event
+
+        return self.update_manifest(updater)
 
     def backfill_auto_categories(self, manifest: dict[str, Any]) -> int:
         changed = 0
@@ -409,9 +462,7 @@ class DatasetStore:
             if isinstance(source, dict) and source.get("id") is not None
         }
         accepted = [
-            clip
-            for clip in manifest.get("clips", [])
-            if isinstance(clip, dict) and clip.get("status") == "accepted"
+            clip for clip in manifest.get("clips", []) if isinstance(clip, dict) and clip.get("status") == "accepted"
         ]
         if temporary:
             target_train, target_test = "train-tmp", "test-tmp"
@@ -533,9 +584,7 @@ class DatasetStore:
             if isinstance(source, dict) and source.get("id") is not None
         }
         accepted = [
-            clip
-            for clip in manifest.get("clips", [])
-            if isinstance(clip, dict) and clip.get("status") == "accepted"
+            clip for clip in manifest.get("clips", []) if isinstance(clip, dict) and clip.get("status") == "accepted"
         ]
         counts: dict[str, dict[str, int]] = {
             split: {category: 0 for category in CLIP_CATEGORIES} | {"unknown": 0, "total": 0}
@@ -617,27 +666,6 @@ class DatasetStore:
         out_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
         run_id = f"{normalized_mode}_{now_iso().replace(':', '').replace('-', '').replace('+', '_')}"
-        timestamp = now_iso()
-        if normalized_mode == "train" and mark_trained and selected:
-            selected_ids = {clip.get("id") for clip in selected}
-            for clip in manifest.get("clips", []):
-                if not isinstance(clip, dict) or clip.get("id") not in selected_ids:
-                    continue
-                clip["trained"] = True
-                clip["trained_at"] = timestamp
-                clip["trained_run_id"] = run_id
-                history = clip.setdefault("training_history", [])
-                if isinstance(history, list):
-                    history.append(
-                        {
-                            "run_id": run_id,
-                            "timestamp": timestamp,
-                            "mode": "train",
-                            "out_path": str(out_path),
-                        }
-                    )
-                clip["updated_at"] = timestamp
-            self.save(manifest)
 
         return {
             "mode": normalized_mode,
@@ -646,10 +674,123 @@ class DatasetStore:
             "eligible": len(eligible),
             "out": str(out_path),
             "seed": seed,
-            "marked_trained": bool(normalized_mode == "train" and mark_trained),
+            "marked_trained": False,
+            "mark_trained_requested": bool(normalized_mode == "train" and mark_trained),
+            "training_marker_policy": "pass_only",
             "run_id": run_id if selected else None,
             "clip_ids": [clip.get("id") for clip in selected],
         }
+
+    def mark_train_results_from_suite(
+        self,
+        summary: dict[str, Any],
+        *,
+        summary_path: Path | None = None,
+    ) -> dict[str, Any]:
+        """Mark train clips as trained only after their suite result passes."""
+
+        results = summary.get("results")
+        if not isinstance(results, list):
+            return {
+                "changed": 0,
+                "passed_cases": 0,
+                "matched_train_clips": 0,
+                "already_marked": 0,
+                "blocked_by_retrain_request": 0,
+                "missing_train_case_ids": [],
+                "run_id": _suite_train_run_id(summary, summary_path),
+            }
+
+        passed_by_case: dict[str, dict[str, Any]] = {}
+        for item in results:
+            if not isinstance(item, dict) or not _suite_result_passed(item):
+                continue
+            case_id = item.get("case_id")
+            if isinstance(case_id, str) and case_id.strip():
+                passed_by_case[case_id.strip()] = item
+
+        run_id = _suite_train_run_id(summary, summary_path)
+        if not passed_by_case:
+            return {
+                "changed": 0,
+                "passed_cases": 0,
+                "matched_train_clips": 0,
+                "already_marked": 0,
+                "blocked_by_retrain_request": 0,
+                "missing_train_case_ids": [],
+                "run_id": run_id,
+            }
+
+        def updater(manifest: dict[str, Any]) -> dict[str, Any]:
+            timestamp = now_iso()
+            changed = 0
+            matched_train_case_ids: set[str] = set()
+            already_marked = 0
+            blocked_by_retrain_request = 0
+
+            for clip in manifest.get("clips", []):
+                if not isinstance(clip, dict) or clip.get("status") != "accepted" or clip.get("split") != "train":
+                    continue
+                case_id = clip.get("case_id")
+                if not isinstance(case_id, str) or case_id not in passed_by_case:
+                    continue
+                matched_train_case_ids.add(case_id)
+                result = passed_by_case[case_id]
+                history = clip.get("training_history")
+                if not isinstance(history, list):
+                    history = []
+                    clip["training_history"] = history
+                if _clip_has_retrain_block_for_run(history, run_id):
+                    blocked_by_retrain_request += 1
+                    continue
+                already_has_history = isinstance(history, list) and any(
+                    isinstance(item, dict) and item.get("mode") == "train_passed" and item.get("run_id") == run_id
+                    for item in history
+                )
+                fields_already_marked = (
+                    clip.get("trained") is True
+                    and clip.get("trained_run_id") == run_id
+                    and clip.get("trained_at") is not None
+                )
+                if fields_already_marked and already_has_history:
+                    already_marked += 1
+                    continue
+
+                before = {
+                    "trained": clip.get("trained"),
+                    "trained_at": clip.get("trained_at"),
+                    "trained_run_id": clip.get("trained_run_id"),
+                }
+                clip["trained"] = True
+                clip["trained_at"] = timestamp
+                clip["trained_run_id"] = run_id
+                clip["updated_at"] = timestamp
+                if isinstance(history, list) and not already_has_history:
+                    history.append(
+                        {
+                            "run_id": run_id,
+                            "timestamp": timestamp,
+                            "mode": "train_passed",
+                            "suite_summary_path": None if summary_path is None else str(summary_path),
+                            "case_dir": result.get("case_dir"),
+                            "status": result.get("status"),
+                            "verdict": result.get("verdict"),
+                            "before": before,
+                        }
+                    )
+                changed += 1
+
+            return {
+                "changed": changed,
+                "passed_cases": len(passed_by_case),
+                "matched_train_clips": len(matched_train_case_ids),
+                "already_marked": already_marked,
+                "blocked_by_retrain_request": blocked_by_retrain_request,
+                "missing_train_case_ids": sorted(set(passed_by_case) - matched_train_case_ids),
+                "run_id": run_id,
+            }
+
+        return self.update_manifest(updater)
 
     def delete_duplicate_clip(
         self,
@@ -694,27 +835,29 @@ class DatasetStore:
         reason: str,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        manifest = self.load()
-        clip = self._find_clip(manifest, clip_id)
-        before_status = clip.get("status")
         metadata = metadata or {}
-        clip["status"] = status
-        clip["delete_reason"] = reason
-        for key, value in metadata.items():
-            clip[key] = value
-        clip["updated_at"] = now_iso()
-        event = self._review_event(
-            clip_id,
-            event_type,
-            reason=reason,
-            before_status=before_status,
-            before_prompt=clip.get("prompt"),
-        )
-        event.update(metadata)
-        event["negative_memory"] = False
-        manifest["review_events"].append(event)
-        self.save(manifest)
-        return event
+
+        def updater(manifest: dict[str, Any]) -> dict[str, Any]:
+            clip = self._find_clip(manifest, clip_id)
+            before_status = clip.get("status")
+            clip["status"] = status
+            clip["delete_reason"] = reason
+            for key, value in metadata.items():
+                clip[key] = value
+            clip["updated_at"] = now_iso()
+            event = self._review_event(
+                clip_id,
+                event_type,
+                reason=reason,
+                before_status=before_status,
+                before_prompt=clip.get("prompt"),
+            )
+            event.update(metadata)
+            event["negative_memory"] = False
+            manifest["review_events"].append(event)
+            return event
+
+        return self.update_manifest(updater)
 
     def record_review_position(
         self,
@@ -723,17 +866,18 @@ class DatasetStore:
         manifest_index: int,
         note: str | None = None,
     ) -> dict[str, Any]:
-        manifest = self.load()
-        state = {
-            "last_reviewed_clip_id": clip_id,
-            "last_reviewed_manifest_index": manifest_index,
-            "updated_at": now_iso(),
-        }
-        if note:
-            state["note"] = note
-        manifest["review_state"] = state
-        self.save(manifest)
-        return state
+        def updater(manifest: dict[str, Any]) -> dict[str, Any]:
+            state = {
+                "last_reviewed_clip_id": clip_id,
+                "last_reviewed_manifest_index": manifest_index,
+                "updated_at": now_iso(),
+            }
+            if note:
+                state["note"] = note
+            manifest["review_state"] = state
+            return state
+
+        return self.update_manifest(updater)
 
     def export_cases(self, out_path: Path) -> int:
         manifest = self.load()
@@ -841,6 +985,166 @@ def case_line_for_clip(clip: dict[str, Any]) -> str:
     return f"{case_id}|{prompt}" if prompt else ""
 
 
+def merge_manifests(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(current)
+    merged["source_videos"] = _merge_records_by_id(
+        current.get("source_videos", []),
+        incoming.get("source_videos", []),
+        incoming_wins=True,
+    )
+    merged["clips"] = _merge_clips_by_id(current.get("clips", []), incoming.get("clips", []))
+    merged["review_events"] = _merge_unique_records(current.get("review_events", []), incoming.get("review_events", []))
+    merged["style_memory"] = _merge_unique_records(current.get("style_memory", []), incoming.get("style_memory", []))
+    if not isinstance(merged.get("review_state"), dict):
+        merged["review_state"] = incoming.get("review_state") if isinstance(incoming.get("review_state"), dict) else {}
+    return merged
+
+
+def _merge_records_by_id(
+    current_records: object,
+    incoming_records: object,
+    *,
+    incoming_wins: bool,
+) -> list[Any]:
+    current_list = list(current_records) if isinstance(current_records, list) else []
+    incoming_list = list(incoming_records) if isinstance(incoming_records, list) else []
+    merged = [dict(item) if isinstance(item, dict) else item for item in current_list]
+    by_id = {
+        str(item.get("id")): index
+        for index, item in enumerate(merged)
+        if isinstance(item, dict) and item.get("id") is not None
+    }
+    seen_idless = {_record_identity(item) for item in merged if not (isinstance(item, dict) and item.get("id"))}
+    for item in incoming_list:
+        if not isinstance(item, dict) or item.get("id") is None:
+            identity = _record_identity(item)
+            if identity not in seen_idless:
+                seen_idless.add(identity)
+                merged.append(item)
+            continue
+        record_id = str(item.get("id"))
+        if record_id in by_id:
+            if incoming_wins:
+                merged[by_id[record_id]] = dict(item)
+            continue
+        by_id[record_id] = len(merged)
+        merged.append(dict(item))
+    return merged
+
+
+def _merge_clips_by_id(current_records: object, incoming_records: object) -> list[Any]:
+    current_list = list(current_records) if isinstance(current_records, list) else []
+    incoming_list = list(incoming_records) if isinstance(incoming_records, list) else []
+    merged = [dict(item) if isinstance(item, dict) else item for item in current_list]
+    by_id = {
+        str(item.get("id")): index
+        for index, item in enumerate(merged)
+        if isinstance(item, dict) and item.get("id") is not None
+    }
+    for item in incoming_list:
+        if not isinstance(item, dict) or item.get("id") is None:
+            continue
+        clip_id = str(item.get("id"))
+        if clip_id in by_id:
+            current = merged[by_id[clip_id]]
+            if isinstance(current, dict):
+                merged[by_id[clip_id]] = _merge_existing_clip(current, item)
+            continue
+        by_id[clip_id] = len(merged)
+        merged.append(dict(item))
+    return merged
+
+
+def _merge_existing_clip(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(current)
+    for key, value in incoming.items():
+        if key not in merged or _is_empty_manifest_value(merged.get(key)):
+            merged[key] = value
+
+    if _can_accept_incoming_auto_category(current, incoming):
+        for key in ("category", "category_source"):
+            if key in incoming:
+                merged[key] = incoming[key]
+
+    if _can_accept_incoming_tmp_split(current, incoming):
+        for key in ("split", "split_source", "split_group_id", "split_group_title", "split_assigned_at"):
+            if key in incoming:
+                merged[key] = incoming[key]
+        if incoming.get("split") == "train" and "trained" not in merged:
+            merged["trained"] = False
+
+    if _record_timestamp(incoming) > _record_timestamp(current):
+        merged["updated_at"] = incoming.get("updated_at")
+    return merged
+
+
+def _can_accept_incoming_auto_category(current: dict[str, Any], incoming: dict[str, Any]) -> bool:
+    if incoming.get("category") not in CLIP_CATEGORIES:
+        return False
+    current_source = current.get("category_source")
+    return current.get("category") not in CLIP_CATEGORIES or current_source in {None, "", "auto_prompt_heuristic"}
+
+
+def _can_accept_incoming_tmp_split(current: dict[str, Any], incoming: dict[str, Any]) -> bool:
+    if incoming.get("split") not in TMP_DATASET_SPLITS:
+        return False
+    current_split = current.get("split")
+    current_source = current.get("split_source")
+    return current_split not in PERMANENT_DATASET_SPLITS and current_source != "human"
+
+
+def _merge_unique_records(current_records: object, incoming_records: object) -> list[Any]:
+    merged = list(current_records) if isinstance(current_records, list) else []
+    seen = {_record_identity(item) for item in merged}
+    for item in incoming_records if isinstance(incoming_records, list) else []:
+        identity = _record_identity(item)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        merged.append(item)
+    return merged
+
+
+def _record_identity(record: object) -> str:
+    return json.dumps(record, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def _record_timestamp(record: dict[str, Any]) -> str:
+    value = record.get("updated_at") or record.get("created_at")
+    return str(value) if value is not None else ""
+
+
+def _is_empty_manifest_value(value: object) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
+def _suite_result_passed(result: dict[str, Any]) -> bool:
+    return result.get("verdict") == "pass" or result.get("status") == "pass"
+
+
+def _suite_train_run_id(summary: dict[str, Any], summary_path: Path | None = None) -> str:
+    out_dir = summary.get("out_dir")
+    if isinstance(out_dir, str) and out_dir.strip():
+        return f"train_suite_{Path(out_dir).name}"
+    if summary_path is not None:
+        return f"train_suite_{summary_path.resolve().parent.name}"
+    tasks_file = summary.get("tasks_file")
+    if isinstance(tasks_file, str) and tasks_file.strip():
+        return f"train_suite_{Path(tasks_file).resolve().parent.name}"
+    return "train_suite_unknown"
+
+
+def _clip_has_retrain_block_for_run(history: list[Any], run_id: str) -> bool:
+    for item in reversed(history):
+        if not isinstance(item, dict):
+            continue
+        if item.get("mode") != "retrain_requested":
+            continue
+        if item.get("block_train_passed_run_id") == run_id:
+            return True
+    return False
+
+
 def _choose_test_group_ids(
     groups: list[dict[str, Any]],
     *,
@@ -928,8 +1232,7 @@ def normalize_dataset_split(split: str) -> str:
 
 def infer_clip_category(clip: dict[str, Any]) -> str:
     text = " ".join(
-        str(clip.get(key) or "")
-        for key in ("case_id", "prompt", "title", "visual_summary", "segment_reason")
+        str(clip.get(key) or "") for key in ("case_id", "prompt", "title", "visual_summary", "segment_reason")
     )
     text = text.lower()
     scores = {
