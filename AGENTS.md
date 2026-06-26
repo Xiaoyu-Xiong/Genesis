@@ -6,7 +6,7 @@ Guide for AI coding assistants working with the Genesis physics simulation codeb
 
 These rules are mandatory for this repository.
 
-- **Use the repository uv environment to run python script.** Do not dircectly run `python`, `python -m ...`, `pytest`, but run `uv run ...`, `uv sync`, `uv pip ...` instead.
+- **Use the repository uv environment to run python script.** Do not dircectly run `python`, `python -m ...`, `pytest`, but run `uv run --no-sync ...`, `uv sync`, `uv pip ...` instead.
 - **Be careful when mutating `.venv`.** Do not recreate or bulk repair the environment unless the user asks for environment work.
 - **Use the host shell for git.** Use ordinary `git status`, `git diff`, `git checkout`, `git commit`, `git restore`, and similar repository operations.
 - **If execution context is unclear, stop and clarify before running commands that mutate environments or launch expensive simulations.**
@@ -32,21 +32,21 @@ uv sync
 uv pip install torch --index-url https://download.pytorch.org/whl/cu128  # or cpu/metal
 
 # Run tests
-uv run pytest tests/
-uv run pytest tests/ -m required  # minimal set
+uv run --no-sync pytest tests/
+uv run --no-sync pytest tests/ -m required  # minimal set
 
 # Run examples
-uv run examples/tutorials/hello_genesis.py
+uv run --no-sync examples/tutorials/hello_genesis.py
 ```
 
 ## How to Run Tests
 
 ```bash
-uv run pytest tests/                      # All tests
-uv run pytest tests/test_file.py          # Specific file
-uv run pytest tests/ --backend=gpu        # GPU backend, default for GPU-capable validation
-uv run pytest tests/ -m required          # Required tests only
-uv run pytest tests/ -m "not slow"        # Skip slow tests
+uv run --no-sync pytest tests/                      # All tests
+uv run --no-sync pytest tests/test_file.py          # Specific file
+uv run --no-sync pytest tests/ --backend=gpu        # GPU backend, default for GPU-capable validation
+uv run --no-sync pytest tests/ -m required          # Required tests only
+uv run --no-sync pytest tests/ -m "not slow"        # Skip slow tests
 ```
 
 See [TESTING.md](.github/contributing/TESTING.md) for details.

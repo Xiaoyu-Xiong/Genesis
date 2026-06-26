@@ -10,6 +10,8 @@ from code_agent.configs import CONFIGS
 from code_agent.context.genesis import build_genesis_context_pack
 from code_agent.dataset.store import DEFAULT_DATA_ROOT, DatasetStore
 from code_agent.opt.runner import RunOptConfig, run_optimization
+from code_agent.scores.physical.agent import PhysicalScoreRequest, run_physical_score
+from code_agent.scores.physical.suite import score_physical_suite
 from code_agent.utils.suite import run_suite
 
 
@@ -95,6 +97,68 @@ def _cmd_run_opt(args: argparse.Namespace) -> None:
     print(f"Opt {report['status']}. Best score: {best_score_text}. Report: {report_path}")
 
 
+def _cmd_score_physical_case(args: argparse.Namespace) -> None:
+    report = run_physical_score(
+        PhysicalScoreRequest(
+            run_dir=args.run_dir.resolve(),
+            prompt=args.prompt,
+            prompt_file=args.prompt_file.resolve() if args.prompt_file else None,
+            code_root=args.code_root.resolve() if args.code_root else None,
+            case_id=args.case_id,
+            output_path=args.output.resolve() if args.output else None,
+            model=args.model,
+            timeout_sec=args.timeout_sec,
+            force=args.force,
+        )
+    )
+    report_path = (
+        args.output.resolve()
+        if args.output
+        else args.run_dir.resolve() / "reports" / "physical_score_report.json"
+    )
+    print(
+        "SBAR-v1 "
+        f"{report.get('scorer_status', 'unknown')}: "
+        f"overall={_format_score(report.get('overall_score'))}, "
+        f"scene={_format_score(report.get('scene_score'))}, "
+        f"body={_format_score(report.get('body_score'))}, "
+        f"action={_format_score(report.get('action_score'))}, "
+        f"render={_format_score(report.get('render_score'))}. "
+        f"Report: {report_path}"
+    )
+
+
+def _cmd_score_physical_suite(args: argparse.Namespace) -> None:
+    summary = score_physical_suite(
+        suite_dir=args.suite_dir.resolve(),
+        tasks_file=args.tasks_file.resolve() if args.tasks_file else None,
+        output_dir=args.output_dir.resolve() if args.output_dir else None,
+        max_workers=args.max_workers,
+        max_cases=args.max_cases,
+        model=args.model,
+        timeout_sec=args.timeout_sec,
+        force=args.force,
+    )
+    summary_path = (
+        args.output_dir.resolve()
+        if args.output_dir
+        else args.suite_dir.resolve() / "physical_scores"
+    ) / "summary.json"
+    averages = summary.get("averages") if isinstance(summary.get("averages"), dict) else {}
+    print(
+        "SBAR-v1 suite "
+        f"{summary.get('num_succeeded', 0)}/{summary.get('num_cases', 0)} scored. "
+        f"avg_overall={_format_score(averages.get('overall_score'))}. "
+        f"Summary: {summary_path}"
+    )
+
+
+def _format_score(value: object) -> str:
+    if isinstance(value, int | float):
+        return f"{float(value):.2f}"
+    return "n/a"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m code_agent.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -155,6 +219,30 @@ def build_parser() -> argparse.ArgumentParser:
     render_best_group.add_argument("--render-best", action="store_true", dest="render_best", default=None)
     render_best_group.add_argument("--no-render-best", action="store_false", dest="render_best")
     run_opt_parser.set_defaults(func=_cmd_run_opt)
+
+    physical_case_parser = sub.add_parser("score-physical-case", help="Run SBAR-v1 on one generated case folder.")
+    physical_case_parser.add_argument("--run-dir", type=Path, required=True)
+    physical_case_parser.add_argument("--code-root", type=Path, default=None)
+    physical_case_parser.add_argument("--case-id", default=None)
+    prompt_group = physical_case_parser.add_mutually_exclusive_group()
+    prompt_group.add_argument("--prompt", default=None)
+    prompt_group.add_argument("--prompt-file", type=Path, default=None)
+    physical_case_parser.add_argument("--output", type=Path, default=None)
+    physical_case_parser.add_argument("--model", default=CONFIGS.codex.critic_model)
+    physical_case_parser.add_argument("--timeout-sec", type=float, default=CONFIGS.codex.critic_timeout_sec)
+    physical_case_parser.add_argument("--force", action="store_true")
+    physical_case_parser.set_defaults(func=_cmd_score_physical_case)
+
+    physical_suite_parser = sub.add_parser("score-physical-suite", help="Run SBAR-v1 over a suite in parallel.")
+    physical_suite_parser.add_argument("--suite-dir", type=Path, required=True)
+    physical_suite_parser.add_argument("--tasks-file", type=Path, default=None)
+    physical_suite_parser.add_argument("--output-dir", type=Path, default=None)
+    physical_suite_parser.add_argument("--max-workers", type=int, default=2)
+    physical_suite_parser.add_argument("--max-cases", type=int, default=None)
+    physical_suite_parser.add_argument("--model", default=CONFIGS.codex.critic_model)
+    physical_suite_parser.add_argument("--timeout-sec", type=float, default=CONFIGS.codex.critic_timeout_sec)
+    physical_suite_parser.add_argument("--force", action="store_true")
+    physical_suite_parser.set_defaults(func=_cmd_score_physical_suite)
     return parser
 
 

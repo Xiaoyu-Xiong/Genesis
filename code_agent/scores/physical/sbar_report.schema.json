@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sbar_report.schema.json",
+  "title": "SBAR-v1 Physical Score Report",
+  "type": "object",
+  "required": [
+    "metric",
+    "schema_version",
+    "overall_score",
+    "scene_score",
+    "body_score",
+    "action_score",
+    "render_score",
+    "render_faithfulness",
+    "render_aesthetic_quality",
+    "violation_penalty",
+    "caps_applied",
+    "fatal_violations",
+    "rubric",
+    "category_summaries",
+    "missing_evidence",
+    "confidence",
+    "summary"
+  ],
+  "properties": {
+    "metric": { "type": "string", "const": "SBAR-v1" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "overall_score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "scene_score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "body_score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "action_score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "render_score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "render_faithfulness": { "type": "number", "minimum": 0, "maximum": 100 },
+    "render_aesthetic_quality": { "type": "number", "minimum": 0, "maximum": 100 },
+    "violation_penalty": { "type": "number", "minimum": 0, "maximum": 100 },
+    "caps_applied": { "type": "array", "items": { "type": "string" } },
+    "fatal_violations": { "type": "array", "items": { "type": "string" } },
+    "rubric": {
+      "type": "object",
+      "required": ["scene", "body", "action", "render", "forbidden"],
+      "properties": {
+        "scene": { "type": "array", "items": { "$ref": "#/$defs/rubric_item" } },
+        "body": { "type": "array", "items": { "$ref": "#/$defs/rubric_item" } },
+        "action": { "type": "array", "items": { "$ref": "#/$defs/rubric_item" } },
+        "render": { "type": "array", "items": { "$ref": "#/$defs/rubric_item" } },
+        "forbidden": { "type": "array", "items": { "$ref": "#/$defs/forbidden_item" } }
+      },
+      "additionalProperties": false
+    },
+    "category_summaries": {
+      "type": "object",
+      "required": ["scene", "body", "action", "render"],
+      "properties": {
+        "scene": { "$ref": "#/$defs/category_summary" },
+        "body": { "$ref": "#/$defs/category_summary" },
+        "action": { "$ref": "#/$defs/category_summary" },
+        "render": { "$ref": "#/$defs/category_summary" }
+      },
+      "additionalProperties": false
+    },
+    "missing_evidence": { "type": "array", "items": { "type": "string" } },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "summary": { "type": "string" }
+  },
+  "$defs": {
+    "rubric_item": {
+      "type": "object",
+      "required": ["requirement", "weight", "score", "evidence", "confidence"],
+      "properties": {
+        "requirement": { "type": "string" },
+        "weight": { "type": "number", "minimum": 0 },
+        "score": { "type": "number", "enum": [0, 0.5, 1] },
+        "evidence": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "forbidden_item": {
+      "type": "object",
+      "required": ["requirement", "weight", "violation", "evidence", "confidence"],
+      "properties": {
+        "requirement": { "type": "string" },
+        "weight": { "type": "number", "minimum": 0 },
+        "violation": { "type": "boolean" },
+        "evidence": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "category_summary": {
+      "type": "object",
+      "required": ["strengths", "weaknesses"],
+      "properties": {
+        "strengths": { "type": "array", "items": { "type": "string" } },
+        "weaknesses": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
+
