@@ -29,10 +29,15 @@
     "missing_video"
   ],
   "guidance": [
-    "When the task does not specify a background or environment, prefer a plain pure-white background for ordinary evidence renders so objects, contacts, and motion stay easy to inspect.",
-    "For Genesis Rasterizer camera renders, set the default light background in scene.py when constructing gs.Scene: pass vis_options=gs.options.VisOptions(background_color=(1.0, 1.0, 1.0), ambient_light=(0.55, 0.55, 0.55), lights=(...)) or a similarly bright near-white background.",
-    "Do not rely on scene.add_light to create the white background. scene.add_light only adds explicit lights for supported renderers and does not replace VisOptions.background_color; with the default Rasterizer it may be unsupported.",
-    "If the case needs non-white environmental context, document that choice in the plan and render_stats.json; otherwise scene.py should explicitly set VisOptions.background_color rather than inheriting the Genesis dark default."
+    "During intermediate physics debugging, ordinary rasterized or low-cost evidence renders are preferred. Their goal is to judge physical behavior quickly, not to achieve final path-traced quality.",
+    "After physics is accepted, final visual polish must be handled by a separate final path-tracing pass rather than by slowing every debug iteration.",
+    "Do not treat a debug raster video as the final accepted render when rendering is requested. It is evidence for physics, not the final deliverable.",
+    "When the task does not specify a background or environment, ordinary debug evidence renders should use an explicit readable high-key background: light gray, pale blue-gray, near-white, or pure white are all acceptable. Pure white is a fallback for fast inspection, not a hard requirement.",
+    "For Genesis Rasterizer debug camera renders, set the default light background in scene.py when constructing gs.Scene: pass vis_options=gs.options.VisOptions(background_color=(1.0, 1.0, 1.0), ambient_light=(0.55, 0.55, 0.55), lights=(...)) or a similarly bright light-gray/near-white background.",
+    "Do not rely on scene.add_light to create the debug background. scene.add_light only adds explicit lights for supported renderers and does not replace VisOptions.background_color; with the default Rasterizer it may be unsupported.",
+    "For final_path_traced or replay_render outputs, do not inherit the debug evidence pure-white fallback. Choose the final background, floor, lighting, and material look from final_path_tracing_siggraph_guideline, and record render_profile, background_style, floor_material, and lighting metadata in render_stats.json.",
+    "For final_path_traced outputs, keep iterating if the image is flat, over-lit, noisy, cropped, or materially bland; first successful RayTracer execution is not enough by itself.",
+    "If the case needs non-white environmental context, document that choice in the plan and render_stats.json; otherwise scene.py should explicitly set a readable background rather than inheriting the Genesis dark default."
   ],
   "restrictions": [
     "Do not treat unclear rendering as acceptable when the simulation behavior cannot be judged.",
@@ -42,7 +47,10 @@
   ],
   "checks": [
     "Inspect sampled frames or video before accepting success.",
-    "When no non-white environment is requested, check generated scene.py for gs.options.VisOptions with an explicit bright background_color and ambient_light passed into gs.Scene.",
+    "Check whether the current render is a debug evidence render or a final render, and judge it against the appropriate standard.",
+    "For debug raster evidence, check generated scene.py for gs.options.VisOptions with an explicit readable high-key background_color and ambient_light passed into gs.Scene.",
+    "For final or replay rendering, check that background, floor, lighting, and material choices follow final_path_tracing_siggraph_guideline rather than this debug evidence fallback.",
+    "For final rendering, check render_stats.path_tracing.enabled is true before accepting the result as final visual evidence.",
     "Record final camera and rendering choices in render_stats.json when the generated case supports it.",
     "If meshes or textures are involved, check whether orientation, scale, material binding, and rendered texture appearance are consistent with the source and manifest."
   ],

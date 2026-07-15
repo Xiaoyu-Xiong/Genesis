@@ -33,13 +33,22 @@
     "default_gray_objects",
     "oversaturated_palette",
     "poor_color_separation",
-    "muddy_palette"
+    "muddy_palette",
+    "all_white_scene_lock_in",
+    "low_contrast_palette_retry_loop"
   ],
   "guidance": [
     "Planner, asset decisions, scene/body/rendering workers, and Critic should inspect not only semantic and physics correctness, but also whether the video is visually readable and easy to review.",
+    "When Critic has accepted physical behavior, visual-readability work may escalate to a final render pass governed by final_path_tracing_siggraph_guideline.",
+    "When final rendering is required, visual-readability work must continue through an accepted final_path_traced pass; a debug raster pass only validates the physics.",
+    "During final path-traced look-dev, encourage semantic material variety and visible lighting hierarchy so the image reads as a polished path-traced render rather than a flat diffuse preview.",
+    "For final path-traced visuals, semantic visual geometry should be authored before physics/cache acceptance. Render-only look-dev must not add, hide, or replace collision helper tiles, proxy cages, supports, or shells to improve appearance.",
     "Treat subject size, ground/background contrast, viewing angle, occlusion, color separation, lighting, and one-glance motion legibility as soft quality goals.",
     "Visual readability is not normally a hard pass/fail condition by itself, but repair advice and generated visual choices should push the result toward clearer, more polished, and easier-to-review output when semantics are otherwise close.",
     "When the prompt does not specify object colors, avoid defaulting all important objects to gray. Assign distinct, role-aware colors so different actors, obstacles, targets, supports, and actuators are easy to distinguish.",
+    "Do not put every important actor, wall, window, support, floor, and background in the same white or near-white value range. A preferred light studio background still needs hue or value separation from light-colored subjects.",
+    "Preserve prompt-specified colors. If the prompt requires a white main actor, keep it white and create separation through the background, floor, window, fixtures, roughness, and lighting rather than recoloring the required actor.",
+    "If two consecutive final-render attempts are rejected for low contrast or disappearing subjects, the next repair must make a substantive palette, background-value, material-roughness, exposure, or key/fill hierarchy change instead of repeating tiny exposure adjustments.",
     "Prefer soft, low-to-medium saturation colors with clear value contrast: muted teal, soft blue, gentle green, warm orange, dusty rose, lavender, pale yellow, or warm clay. Use gray mainly for neutral supports, floors, metal fixtures, or intentionally background objects.",
     "Use a clean character-animation visualization style: simple readable shapes, uncluttered backgrounds, subtle floor cues, soft shadows, and a small number of coordinated colors that clarify motion rather than distract from it.",
     "Use color semantically: the main dynamic actor gets the strongest readable color; passive obstacles and supports get quieter colors; goals, handles, or actuators may receive a consistent accent color.",
@@ -50,14 +59,19 @@
     "Do not recommend purely cosmetic changes that would break physical semantics or hide failure evidence.",
     "Do not leave multiple important prompt-unspecified objects as the same gray material when color separation would make the behavior easier to inspect.",
     "Do not use highly saturated, neon, or rainbow palettes as the default style; reserve them for prompts that explicitly ask for bright, toy-like, or stylized colors.",
-    "Do not choose colors that make contact, deformation, or relative motion harder to see against the ground/background."
+    "Do not choose colors that make contact, deformation, or relative motion harder to see against the ground/background.",
+    "Do not approve an all-white or near-white scene merely because individual material declarations differ numerically; the final rendered subjects must remain visually separable."
   ],
   "checks": [
     "Review sampled frames and video, not only metrics and event logs.",
+    "For final renders, check start, mid, and end frames under the final camera/lights/materials rather than approving only the first frame.",
+    "For final renders, check that material choices include task-appropriate metal, rough plastic/rubber/cloth, or refractive glass/transmission where those semantics appear in the prompt.",
+    "For final renders, check that transparent objects use renderer-native refractive materials and that any required hollow shell/container geometry already exists in the accepted scene rather than being introduced during render-only replay.",
     "When proposing repair, separate hard correctness failures from soft visual-readability improvements.",
     "Check whether the main actor, passive objects, obstacles, supports, and targets are visually separable in sampled frames.",
     "Check whether unspecified colors were chosen intentionally rather than falling back to gray/default materials.",
-    "Check that the palette is coordinated and low-to-medium saturation unless the prompt asked for vivid colors."
+    "Check that the palette is coordinated and low-to-medium saturation unless the prompt asked for vivid colors.",
+    "Check render_stats.json records palette_roles and the material/background changes made after repeated low-contrast repair attempts."
   ],
   "dispatch_hints": [
     "Send to planner when visual styling, asset requests, or worker dispatch may affect readability.",

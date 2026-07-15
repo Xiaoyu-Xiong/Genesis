@@ -1,6 +1,7 @@
 # Mesh Pipeline
 
-`assets/mesh/` turns Planner `generated_mesh` requests into Genesis-ready manifest entries.
+`assets/mesh/` turns Planner `generated_mesh` requests and procedural `cloth_mesh*` requests into Genesis-ready
+manifest entries.
 
 Flow:
 
@@ -10,6 +11,10 @@ Flow:
 3. `pipeline.py` downloads, repairs, validates manifold geometry, transfers texture metadata, and records profiles.
 4. `validation.py` checks whether the repaired mesh can be imported as Genesis FEM geometry.
 5. `manifest.py` writes the canonical entry consumed by Scene/Body workers.
+
+When a `generated_mesh` request explicitly describes a `FEM.Cloth closed manifold shell` or `cloth shell`, the Meshy
+pipeline still performs the standard manifold repair/checks but writes the final manifest entry as
+`source_type="cloth_mesh"` and validates it through the FEM.Cloth import path instead of the volumetric FEM import path.
 
 Important manifest fields:
 

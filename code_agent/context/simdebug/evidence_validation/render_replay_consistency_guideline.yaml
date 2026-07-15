@@ -1,0 +1,43 @@
+schema_version: 1
+id: render_replay_consistency_guideline
+title: Validate render-only replay against accepted physics cache
+summary: A replayed final video must cite a fresh, validated state cache from an accepted physical run and must not silently step or alter physics.
+scopes: [planner, rendering, critic, opt]
+physics_modes: [any]
+task_tags:
+  - replay
+  - render_only
+  - final_render
+  - state_cache
+  - artifact
+failure_tags:
+  - replay_without_cache
+  - replay_stepped_physics
+  - cache_mismatch
+  - stale_replay
+  - missing_replay_metadata
+  - articulated_motion_missing_from_replay
+  - replay_actor_state_incomplete
+guidance:
+  - Render-only replay should use a cache manifest produced by the latest accepted physical run.
+  - Replay code must apply cached states and render frames without calling scene.step().
+  - Final render_stats.json should record replay_only=true, physics_cache_manifest, cache frame count, source hashes, and source run result when available.
+  - If cache validation fails or source hashes mismatch, rerun physics or repair the cache before final rendering.
+  - Compare the manifest actor contracts with the rebuilt scene before rendering. Final replay must fail when an articulated actor lacks qpos/DOF state, a deformable actor lacks vertex state, or a required setter cannot apply the cached state.
+  - Compare task-critical cached motion with rendered motion. Joint-driven rollers, drums, paddles, robot links, gates, and similar articulated actors must visibly follow their cached generalized coordinates rather than remaining at their initial pose.
+restrictions:
+  - Do not accept a final replay video that lacks cache provenance in render_stats.json.
+  - Do not accept replay output if it was generated after physics source changes without a new cache.
+  - Do not use stale videos or frame directories to mask replay failures.
+  - Do not accept replay_valid=true from file existence alone; every required actor-state array must be present, finite, shape-consistent, and successfully applied.
+checks:
+  - Check replay_only and physics_cache_manifest fields in render_stats.json.
+  - Check frame count and video duration match the validated cache and requested fps.
+  - Check cache manifest freshness against execution_report and source hashes.
+  - Check actor_contracts and per-frame required arrays, then inspect task-critical articulated and deformable motion in start/mid/end replay frames.
+dispatch_hints:
+  - Send to rendering when replay mode is requested.
+  - Send to Critic when judging final path-traced replay evidence.
+provenance:
+  source: path_tracing_debug_card_workflow
+  motivation: Make final render replay auditable and resistant to stale artifacts.

@@ -35,6 +35,10 @@ def test_simdebug_catalog_loads_prompt_derived_cards():
     assert "fem_ipc_initial_geometry_restriction" in ids
     assert "planner_card_dispatch_guideline" in ids
     assert "rigid_contact_metrics_guideline" in ids
+    assert "two_stage_rendering_workflow_guideline" in ids
+    assert "final_path_tracing_siggraph_guideline" in ids
+    assert "physics_state_cache_replay_guideline" in ids
+    assert "render_replay_consistency_guideline" in ids
     assert "controller_schedule_guideline" in ids
     assert "actuation_stress_relief_guideline" in ids
     assert "soft_body_robust_layout_guideline" in ids
@@ -56,8 +60,63 @@ def test_simdebug_catalog_loads_prompt_derived_cards():
         "diagnosis_repair",
         "evidence_validation",
         "optimization",
+        "rendering_quality",
         "workflow_orchestration",
     }
+
+
+def test_render_background_cards_distinguish_debug_and_final_profiles():
+    catalog = build_simdebug_catalog()
+    cards = {card["id"]: card for card in catalog["cards"]}
+
+    evidence_text = json.dumps(cards["render_visual_evidence_restriction"], ensure_ascii=False)
+    final_text = json.dumps(cards["final_path_tracing_siggraph_guideline"], ensure_ascii=False)
+    workflow_text = json.dumps(cards["two_stage_rendering_workflow_guideline"], ensure_ascii=False)
+    ground_text = json.dumps(cards["non_white_ground_on_white_background_guideline"], ensure_ascii=False)
+
+    assert "Pure white is a fallback for fast inspection, not a hard requirement" in evidence_text
+    assert "final_path_traced or replay_render" in evidence_text
+    assert "do not inherit the debug evidence pure-white fallback" in evidence_text
+    assert "Prefer light studio backdrops" in final_text
+    assert "soft off-white" in final_text
+    assert "Do not inherit the debug raster pure-white background fallback" in final_text
+    assert "background_style" in final_text
+    assert "path_tracing.enabled=false" in final_text
+    assert "iterative look-dev" in final_text
+    assert "RGBA alpha" in final_text
+    assert "soft contact shadows" in final_text
+    assert "RayTracer sphere lights as renderable geometry" in final_text
+    assert "light_visibility_checks" in final_text
+    assert "white background does not waive this check" in final_text
+    assert "Glass(color=(1.0, 1.0, 1.0)" in final_text
+    assert "Render-only replay must not add, hide, delete, or replace geometry" in final_text
+    assert "single Glass sphere renders as a solid glass volume" in final_text
+    assert "screen, window pane, or transparent plate" in final_text
+    assert "alpha_rgba_used=false" in final_text
+    assert "replay_only=true" in final_text
+    assert "does not mean the case can finish" in workflow_text
+    assert "first RayTracer output" in workflow_text
+    assert "This card does not require a white background" in ground_text
+
+
+def test_camera_palette_geometry_and_cache_cards_include_hard_replay_checks():
+    cards = {card["id"]: card for card in build_simdebug_catalog()["cards"]}
+    camera_text = json.dumps(cards["camera_framing_subject_fill_guideline"], ensure_ascii=False)
+    style_text = json.dumps(cards["visual_style_readability_guideline"], ensure_ascii=False)
+    geometry_text = json.dumps(cards["generated_asset_shape_fidelity_guideline"], ensure_ascii=False)
+    cache_text = json.dumps(cards["physics_state_cache_replay_guideline"], ensure_ascii=False)
+    replay_text = json.dumps(cards["render_replay_consistency_guideline"], ensure_ascii=False)
+
+    assert "whole-body center of mass" in camera_text
+    assert "Do not follow a selected vertex" in camera_text
+    assert "Do not apply unsmoothed per-frame COM" in camera_text
+    assert "two consecutive final-render attempts" in style_text
+    assert "Preserve prompt-specified colors" in style_text
+    assert "bounded thin layer" in geometry_text
+    assert "Articulated rigid bodies must save" in cache_text
+    assert "Root pose alone is insufficient" in cache_text
+    assert "actor contract" in cache_text
+    assert "articulated actor lacks qpos/DOF state" in replay_text
 
 
 def test_simdebug_selector_picks_fem_material_cards_for_soft_ipc_task():

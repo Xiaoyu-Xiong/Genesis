@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "fem_cloth_shell_guideline",
   "title": "FEM cloth uses IPC shell meshes, not PBD or volumetric tets",
-  "summary": "Thin cloth tasks should use gs.materials.FEM.Cloth with ready procedural cloth_mesh surface assets and IPC contact; PBD cloth and volumetric FEM substitutes remain out of scope unless the task is explicitly rewritten.",
+  "summary": "Thin cloth tasks should use gs.materials.FEM.Cloth with ready cloth_mesh surface assets and IPC contact. Procedural cloth_mesh only supports four basic shape families: square sheet, rectangle/ribbon/strip sheet, cylinder/tube/sleeve shell, and sphere/balloon shell; it does not generate arbitrary silhouettes, logos, icons, animals, or other complex open cloth outlines. Complex closed manifold cloth shells may use Meshy generated_mesh requests routed back to cloth_mesh. PBD cloth and volumetric FEM substitutes remain out of scope unless the task is explicitly rewritten.",
   "scopes": ["planner", "scene", "body", "action", "critic", "opt"],
   "physics_modes": ["fem_ipc"],
   "task_tags": [
@@ -22,14 +22,18 @@
     "volumetric_substitute",
     "tet_resolution_for_cloth",
     "cloth_asset_missing",
-    "cloth_initial_intersection"
+    "cloth_initial_intersection",
+    "unsupported_cloth_mesh_shape",
+    "complex_open_cloth_silhouette"
   ],
   "guidance": [
-    "Request cloth geometry as asset_type cloth_mesh or one of cloth_mesh_square, cloth_mesh_rectangle, cloth_mesh_cylinder, or cloth_mesh_sphere; use the resulting asset_manifest entry with source_type cloth_mesh.",
+    "For procedural FEM.Cloth geometry, request asset_type cloth_mesh_square, cloth_mesh_rectangle, cloth_mesh_cylinder, cloth_mesh_sphere, or generic cloth_mesh only when one of the four supported basic shapes is acceptable: square sheet, rectangle/ribbon/strip sheet, cylinder/tube/sleeve shell, or sphere/balloon shell. Generic cloth_mesh is not an arbitrary contour generator.",
+    "Do not request arbitrary 2D silhouettes, icons, logos, letters, animals, character profiles, custom cutouts, or complex open cloth outlines through procedural cloth_mesh. The procedural generator must hard-fail these requests as unsupported instead of silently approximating them as a square or rectangle.",
+    "For complex closed manifold FEM.Cloth shells whose visual shape matters more than regular grid control, request asset_type generated_mesh and make purpose/simulation_role explicitly say FEM.Cloth closed manifold shell or cloth shell; the Meshy-generated manifold surface is written back as source_type cloth_mesh.",
     "For cloth asset_request bbox, all three components must be positive; use a small positive thickness dimension such as 0.001 for flat square or rectangle sheets instead of 0.0.",
-    "Every asset_request includes cloth_target_edge_length; set it to null for non-cloth assets or default cloth resolution, or set a positive meter value to control cloth primitive mesh resolution per asset.",
+    "Every asset_request includes cloth_target_edge_length; set it to null for non-cloth assets, Meshy-generated cloth shells, or default procedural cloth resolution, or set a positive meter value to control cloth primitive mesh resolution per asset.",
     "Choose cloth_target_edge_length relative to bbox size and contact needs, then check validation.cloth_mesh.target_edge_length, median_edge_length, and face_count; the generator may coarsen relative to the target when the configured max face budget would be exceeded.",
-    "Instantiate cloth with gs.morphs.Mesh(file=runtime_path, scale=scale or 1.0, file_meshes_are_zup=True) and gs.materials.FEM.Cloth.",
+    "Instantiate cloth with gs.morphs.Mesh(file=runtime_path, scale=scale or 1.0, file_meshes_are_zup=entry.get(\"file_meshes_are_zup\")) and gs.materials.FEM.Cloth.",
     "Choose E, nu, rho, thickness, bending_stiffness, and friction_mu from deformable_cfg cloth defaults/ranges; do not use tet_resolution for FEM.Cloth.",
     "For square and rectangle cloth, start with moderate grid resolution and positive clearance from rigid colliders.",
     "For cylindrical and spherical cloth shells, keep the mesh coarse enough for IPC contact and avoid initial self-intersection or near-coincident folds.",
@@ -38,12 +42,14 @@
   "restrictions": [
     "Do not instantiate gs.materials.PBD.Cloth or gs.options.PBDOptions in code_agent cloth tasks.",
     "Do not use Genesis built-in meshes/cloth.obj; use ready cloth_mesh assets generated into the case workspace.",
-    "Do not pass tet_resolution to cloth morphs or route cloth meshes through the generated_mesh watertight/tetgen repair path.",
+    "Do not ask procedural cloth_mesh to create complex silhouettes or recognizable graphic outlines. If the prompt fundamentally requires an unsupported open cloth silhouette, Planner should revise the task to a supported basic cloth shape with an explicit limitation or finish fail/inconclusive rather than looping on asset retries.",
+    "Do not pass tet_resolution to cloth morphs. Only complex closed manifold cloth shells should route through the Meshy watertight/manifold repair path, and the final manifest entry must still be source_type cloth_mesh.",
     "Do not fake cloth motion with rigid sheets, direct vertex pose edits after stepping starts, hidden constraints, or keyframed folding."
   ],
   "checks": [
     "Check generated source for gs.materials.FEM.Cloth and absence of PBD cloth APIs.",
-    "Check asset_manifest for a ready source_type cloth_mesh entry whose runtime_path exists and whose face count is within budget.",
+    "Check asset_manifest for a ready source_type cloth_mesh entry whose runtime_path exists, whose validation.cloth_mesh.shape is one of square, rectangle, cylinder, or sphere for procedural cloth, and whose face count is within budget.",
+    "If asset generation reports cloth_mesh.unsupported_shape or validation.cloth_mesh.error mentions unsupported procedural cloth_mesh shape, route the failure to Planner task/asset request revision instead of body/action repair.",
     "Check initial layout for positive clearance relative to cloth thickness and ipc_contact_d_hat.",
     "Check video and metrics for visible bending, draping, folding, or shell deformation rather than rigid-sheet motion."
   ],

@@ -13,6 +13,11 @@
     "repair_brief",
     "backend",
     "render",
+    "render_profile",
+    "save_state_cache",
+    "require_state_cache",
+    "replay_cache",
+    "render_only",
     "timeout_sec",
     "cwd",
     "python_args",
@@ -231,6 +236,27 @@
     "repair_brief": { "type": ["string", "null"] },
     "backend": { "type": ["string", "null"], "enum": ["gpu", "cpu", null] },
     "render": { "type": ["boolean", "null"] },
+    "render_profile": {
+      "type": ["string", "null"],
+      "enum": ["debug_raster", "final_path_traced", null],
+      "description": "Execution render mode. Use debug_raster for physics evidence; use final_path_traced for the mandatory final GPU RayTracer look-dev pass."
+    },
+    "save_state_cache": {
+      "type": ["boolean", "null"],
+      "description": "Normal physics executions always write artifacts/state_cache manifest and frame npz files. This field is kept for explicit planner intent but false is ignored outside render-only replay."
+    },
+    "require_state_cache": {
+      "type": ["boolean", "null"],
+      "description": "Normal physics executions always fail if the state cache manifest or referenced npz files are missing. This field is kept for explicit planner intent but false is ignored outside render-only replay."
+    },
+    "replay_cache": {
+      "type": ["string", "null"],
+      "description": "Path to an accepted state_cache/manifest.json for render-only replay."
+    },
+    "render_only": {
+      "type": ["boolean", "null"],
+      "description": "When true, render from replay_cache without stepping physics."
+    },
     "timeout_sec": { "type": ["number", "null"], "exclusiveMinimum": 0 },
     "cwd": { "type": ["string", "null"], "enum": ["repo", "case", null] },
     "python_args": { "type": ["array", "null"], "items": { "type": "string" } },

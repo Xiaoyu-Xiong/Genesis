@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "generated_asset_shape_fidelity_guideline",
   "title": "Generated assets must match the requested shape before source-level tuning",
-  "summary": "Planner should verify generated mesh/XML assets for semantic shape, scale, aspect ratio, thickness, texture placement, and complexity before asking body or action workers to tune around them.",
+  "summary": "Planner should verify generated mesh/XML assets for semantic shape, scale, aspect ratio, thickness, texture placement, and complexity before asking body or action workers to tune around them. Volumetric deformable-body shape/thickness rules do not apply to FEM.Cloth cloth_mesh assets, which are expected to be thin surface meshes.",
   "scopes": ["planner", "body", "rendering", "critic"],
   "physics_modes": ["any"],
   "task_tags": [
@@ -25,25 +25,34 @@
     "thin_spiky_protrusions",
     "bbox_mismatch",
     "texture_underrepresented",
-    "unusable_morphology"
+    "unusable_morphology",
+    "solid_glass_volume_for_thin_screen",
+    "transparent_shell_wrong_thickness"
   ],
   "guidance": [
     "Use procedural primitives or simple CAD-like geometry for plain boxes, cuboids, cylinders, rods, plates, pads, blocks, cups, gauges, and other simple shapes instead of generating decorative meshes.",
     "For generated mesh assets, inspect preview images, manifest bbox, aspect ratios, orientation, thickness, semantic silhouette, texture visibility, and mesh complexity before body/action tuning.",
-    "For FEM assets, reject assets that pass manifold or FEM import checks but are too thin, too small, overcomplex, spiky, high-element-count, or semantically unlike the requested object.",
+    "For volumetric FEM/deformable-body generated mesh assets, reject assets that pass manifold or FEM import checks but are too thin, too small, overcomplex, spiky, high-element-count, or semantically unlike the requested object.",
+    "For FEM.Cloth assets, defer shape capability and validation rules to fem_cloth_shell_guideline. Procedural cloth_mesh assets are allowed to be thin/open surfaces when their shape is one of square, rectangle, cylinder, or sphere; do not apply volumetric deformable-body thickness rejection to them.",
     "For XML/MJCF mechanisms, inspect whether the generated morphology exposes the required joints, actuators, collision affordances, grasp surfaces, and contact geometry.",
+    "For transparent screens, windows, panes, and plates, inspect all primitive or mesh dimensions and require a bounded thin layer. A cylinder primitive is acceptable for a circular screen only when its axial half-height is small relative to its radius and does not fill the enclosing mechanism depth.",
+    "For transparent shells, tubes, drums, and containers, distinguish a real thin shell or authored inner/outer surfaces from a solid transparent primitive occupying the interior volume.",
     "If the asset's intrinsic shape is wrong, revise the Planner asset request and regenerate; if only scale metadata is wrong and the shape is otherwise correct, use metadata update rather than source-level workarounds."
   ],
   "restrictions": [
     "Do not ask body.py to procedurally reshape, non-uniformly scale, or hide an intrinsically wrong generated mesh.",
     "Do not accept an asset just because manifold validation, FEM import, or XML parsing passed; semantic shape and task affordance must also match.",
-    "Do not use thin spikes, hair-like details, decorative protrusions, or high-complexity surfaces for tasks that need robust FEM contact or simple rigid collision."
+    "Do not use thin spikes, hair-like details, decorative protrusions, or high-complexity surfaces for tasks that need robust volumetric FEM contact or simple rigid collision.",
+    "Do not reject FEM.Cloth cloth_mesh assets solely because they are thin or open; cloth is a surface simulation path, not a volumetric deformable-body asset path.",
+    "Do not accept a solid transparent volume when the prompt semantically requests only a screen, pane, wall, shell, or container boundary."
   ],
   "checks": [
     "Check requested dimensions against asset_manifest bbox and final runtime scale.",
     "Check preview/contact-sheet appearance for recognizable semantic shape and requested color or texture markers.",
     "Check mesh vertex/face/tet counts and whether complexity is appropriate for the task and runtime budget.",
-    "Check whether the failure should route to Planner asset regeneration, metadata update, or local body/action repair."
+    "For source_type cloth_mesh, check validation.cloth_mesh.shape or validation.cloth_mesh.generation using fem_cloth_shell_guideline instead of applying volumetric generated-body thickness criteria.",
+    "Check whether the failure should route to Planner asset regeneration, metadata update, or local body/action repair.",
+    "Check screen/window/shell thickness against overall span and enclosing-mechanism depth before physics/cache acceptance; geometry defects discovered after acceptance require a new source/cache run, not render-only replacement."
   ],
   "dispatch_hints": [
     "Send to Planner before start_mesh_assets or start_xml_assets when a task depends on generated morphology.",

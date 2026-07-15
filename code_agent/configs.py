@@ -8,10 +8,10 @@ from typing import Literal
 class CodexConfigs:
     """Static defaults for Codex-backed planner, worker, and critic calls."""
 
-    planner_model: str = "gpt-5.5"
-    worker_model: str = "gpt-5.5"
-    critic_model: str = "gpt-5.5"
-    opt_model: str = "gpt-5.5"
+    planner_model: str = "gpt-5.6-sol"
+    worker_model: str = "gpt-5.6-sol"
+    critic_model: str = "gpt-5.6-sol"
+    opt_model: str = "gpt-5.6-sol"
     reasoning_effort: str = "xhigh"
     service_tier: Literal["fast", "standard"] | None = "standard"
     planner_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "read-only"
@@ -40,7 +40,7 @@ class HarnessConfigs:
     max_parallel_cases: int | None = None
     max_parallel_workers: int | None = None
     max_repair_rounds: int = 20
-    execution_timeout_sec: float = 3600.0
+    execution_timeout_sec: float = 7200.0
     command_timeout_sec: float = 1000.0
     default_backend: str = "gpu"
 
@@ -128,7 +128,7 @@ class DeformableConfigs:
     cloth_thickness_max: float = 0.01
     cloth_bending_stiffness_default: float | None = 3.0
     cloth_bending_stiffness_min: float = 0.0
-    cloth_bending_stiffness_max: float = 100.0
+    cloth_bending_stiffness_max: float = 300.0
     cloth_friction_mu_default: float = 0.5
     cloth_grid_resolution_default: int = 20
     cloth_target_edge_length_default: float = 0.01

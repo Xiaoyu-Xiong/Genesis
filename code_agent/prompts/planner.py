@@ -73,14 +73,22 @@ Available actions:
   rendering=`setup_rendering(..., render_every_n_steps, render_res)`, `capture_frame`, and `finalize_rendering`.
 - start_mesh_assets: start Planner-requested generated mesh assets and procedural FEM cloth mesh assets in the
   background and return immediately. Use `asset_names` to restrict generation to specific asset request names, or
-  null/[] to generate all generated_mesh and cloth_mesh requests. Use asset_type `cloth_mesh_square`,
-  `cloth_mesh_rectangle`, `cloth_mesh_cylinder`, `cloth_mesh_sphere`, or `cloth_mesh` for predefined FEM.Cloth surface
-  meshes. Every asset_request must include `cloth_target_edge_length`; set it to null for non-cloth assets or when the
-  default is acceptable. For cloth_mesh assets, it is a per-asset target triangle edge length in meters: smaller values
-  create denser cloth meshes for folds/contact detail, larger values create cheaper coarser meshes; the generator still
-  enforces the configured max face budget. Asset request `bbox` components must all be positive; for flat cloth sheets
-  use a small positive thickness dimension such as 0.001, not 0.0. If retrying with changed mesh prompts, include a
-  complete revised
+  null/[] to generate all generated_mesh and cloth_mesh requests. Procedural FEM.Cloth cloth_mesh assets only support
+  four basic shape families: square sheet, rectangle/ribbon/strip sheet, cylinder/tube/sleeve shell, and sphere/balloon
+  shell. Use asset_type `cloth_mesh_square`, `cloth_mesh_rectangle`, `cloth_mesh_cylinder`, `cloth_mesh_sphere`, or
+  generic `cloth_mesh` only when one of those basic shapes is acceptable; generic `cloth_mesh` is not an arbitrary
+  contour generator. Do not request icons, logos, animals, character profiles, custom cutouts, or complex open cloth
+  silhouettes through procedural cloth_mesh, because the generator will hard-fail unsupported shapes instead of silently
+  approximating them. For complex closed manifold FEM.Cloth shells whose visual shape matters more than regular grid
+  control, use asset_type `generated_mesh` and make `purpose`/`simulation_role` explicitly say `FEM.Cloth closed
+  manifold shell` or `cloth shell`; the mesh pipeline will route that Meshy-generated manifold surface back into the
+  cloth_mesh manifest path. Every asset_request must include `cloth_target_edge_length`; set it to null for non-cloth
+  assets, Meshy-generated cloth shells, or when the procedural cloth default is acceptable. For procedural cloth_mesh
+  assets, it is a per-asset target triangle edge length in meters:
+  smaller values create denser cloth meshes for folds/contact detail, larger values create cheaper coarser meshes; the
+  generator still enforces the configured max face budget. Asset request `bbox` components must all be positive; for
+  flat cloth sheets use a small positive thickness dimension such as 0.001, not 0.0. If retrying with changed mesh
+  prompts, include a complete revised
   `planner_output`.
 - wait_mesh_assets: wait for a previously started background mesh asset job to finish and validate
   assets/asset_manifest.json.
@@ -100,6 +108,10 @@ Available actions:
   Put role-specific card ids in `simdebug_cards` when a worker should receive a focused subset.
 - run_integrator: wire generated modules into src/main.py.
 - run_execution: run generated code through the harness on the local GPU.
+  Use `render_profile="debug_raster"` for physics evidence runs. These runs should save and require the standard state
+  cache unless there is a clear reason not to. After physics passes, use `render_profile="final_path_traced"` for the
+  mandatory final GPU RayTracer look-dev pass; when an accepted cache manifest exists, set `replay_cache` to that
+  manifest and `render_only=true` so final rendering does not step physics again.
 - run_critic: ask the read-only critic to evaluate execution artifacts.
 - run_opt: invoke the dedicated Opt Codex subagent. Current CONFIGS.opt.enabled={opt_enabled}. Use the SimDebug Opt
   cards to decide whether the case is parameter-limited rather than structurally broken.
@@ -127,9 +139,13 @@ Action policy:
 - Only choose run_integrator after scene/body/action/rendering are all ok.
 - Only choose run_execution after integration is current.
 - Only choose run_critic after execution is current.
+- A physics/debug-raster critic pass is not sufficient for final success. When rendering is required, final pass also
+  requires an accepted `final_path_traced` execution and critic review. Continue routing rendering/body/scene repairs
+  and rerunning final_path_traced until the final image is path-traced and visually polished.
 - Use SimDebug Opt cards when deciding run_opt vs repair/regeneration. After a useful Opt result, choose run_execution
   next so root artifacts reflect selected current opt params.
-- Only choose finish pass after the latest critic verdict is pass.
+- Only choose finish pass after the latest critic verdict is pass and the episode state reports final_render.status=passed
+  when final rendering is required.
 - If critic infrastructure failed after configured retries, choose finish with verdict inconclusive; do not request code
   repair from a missing or blocked critic review.
 - Prefer run_execution over generic run_python for generated simulations.

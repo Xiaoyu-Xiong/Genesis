@@ -40,6 +40,7 @@ def write_main(
         textwrap.dedent(
             f"""
             import argparse
+            import inspect
             import json
             import sys
             from pathlib import Path
@@ -49,6 +50,12 @@ def write_main(
                 sys.path.insert(0, str(REPO_ROOT))
 
             from code_agent.utils.adaptive_ipc import adaptive_contact_d_hat_report, apply_adaptive_contact_d_hat
+            from code_agent.utils.render_replay import run_render_only_replay
+            from code_agent.utils.state_cache import (
+                StateCacheWriter,
+                attach_state_cache_capture,
+                verify_state_cache_manifest,
+            )
 
             from action import run_actions
             from body import create_bodies
@@ -82,6 +89,16 @@ def write_main(
                 )
 
 
+            def _call_with_optional_render_profile(func, *args, render_profile: str, **kwargs):
+                try:
+                    parameters = inspect.signature(func).parameters
+                except (TypeError, ValueError):
+                    parameters = {{}}
+                if "render_profile" in parameters:
+                    kwargs["render_profile"] = render_profile
+                return func(*args, **kwargs)
+
+
             def main():
                 parser = argparse.ArgumentParser()
                 parser.add_argument("--backend", choices=("cpu", "gpu"), default={default_backend!r})
@@ -95,43 +112,132 @@ def write_main(
                 parser.add_argument("--render-every-n-steps", type=int, default={int(resolved_render_every_n_steps)!r})
                 parser.add_argument("--render-res", type=int, nargs=2, default={list(resolved_render_res)!r})
                 parser.add_argument("--deformable-config", type=Path, default=None)
+                parser.add_argument(
+                    "--render-profile",
+                    choices=("debug_raster", "final_path_traced"),
+                    default="debug_raster",
+                )
+                parser.add_argument("--save-state-cache", action="store_true", default=True)
+                parser.add_argument("--require-state-cache", action="store_true", default=True)
+                parser.add_argument("--replay-cache", type=Path, default=None)
+                parser.add_argument("--render-only", action="store_true", default=False)
                 parser.add_argument("--render", action="store_true", default=True)
                 parser.add_argument("--no-render", action="store_false", dest="render")
                 args = parser.parse_args()
+
+                if args.render_only and args.replay_cache is None:
+                    parser.error("--render-only requires --replay-cache")
+                if args.render_only and not args.render:
+                    parser.error("--render-only requires rendering to be enabled")
+
+                replay_manifest = None
+                if args.replay_cache is not None:
+                    replay_manifest = verify_state_cache_manifest(
+                        args.replay_cache,
+                        require_npz=True,
+                        require_complete_actor_state=True,
+                    )
+                run_steps = int(replay_manifest.get("steps", args.steps)) if isinstance(replay_manifest, dict) else args.steps
+                replay_frame_count = (
+                    len(replay_manifest.get("frames", [])) if isinstance(replay_manifest, dict) else None
+                )
+                target_video_frames = replay_frame_count if args.render_only else args.target_video_frames
 
                 deformable_cfg = dict(DEFAULT_DEFORMABLE_CFG)
                 if args.deformable_config is not None:
                     deformable_cfg.update(json.loads(args.deformable_config.read_text(encoding="utf-8")))
                 _apply_adaptive_contact_d_hat(deformable_cfg, args.out_dir)
 
-                scene = create_scene(
+                scene = _call_with_optional_render_profile(
+                    create_scene,
                     args.backend,
                     sim_dt=args.sim_dt,
                     sim_substeps=args.sim_substeps,
                     deformable_cfg=deformable_cfg,
+                    render_profile=args.render_profile,
                 )
-                actors = create_bodies(scene, TASK, deformable_cfg=deformable_cfg)
+                actors = _call_with_optional_render_profile(
+                    create_bodies,
+                    scene,
+                    TASK,
+                    deformable_cfg=deformable_cfg,
+                    render_profile=args.render_profile,
+                )
                 render_state = None
                 if args.render:
-                    render_state = setup_rendering(
+                    render_state = _call_with_optional_render_profile(
+                        setup_rendering,
                         scene,
                         actors,
                         out_dir=args.out_dir,
-                        steps=args.steps,
+                        steps=run_steps,
                         fps=args.fps,
                         duration_sec=args.duration_sec,
-                        target_video_frames=args.target_video_frames,
+                        target_video_frames=target_video_frames,
                         render_every_n_steps=args.render_every_n_steps,
                         render_res=tuple(args.render_res),
+                        render_profile=args.render_profile,
                     )
+
+                if args.render_only:
+                    replay_report = run_render_only_replay(
+                        scene=scene,
+                        actors=actors,
+                        render_state=render_state,
+                        cache_manifest=args.replay_cache,
+                    )
+                    if args.render:
+                        stats = finalize_rendering(
+                            render_state,
+                            event_log_path=None,
+                            metrics_path=None,
+                        )
+                        stats.update(replay_report)
+                        stats["render_profile"] = args.render_profile
+                        stats_path = args.out_dir / "render_stats.json"
+                        stats_path.write_text(json.dumps(stats, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+                    return
+
+                state_cache_writer = None
+                if args.save_state_cache or args.require_state_cache:
+                    state_cache_writer = StateCacheWriter.create(
+                        out_dir=args.out_dir,
+                        scene=scene,
+                        actors=actors,
+                        steps=args.steps,
+                        render_state=render_state,
+                        sim_dt=args.sim_dt,
+                        sim_substeps=args.sim_substeps,
+                        backend=args.backend,
+                        render_profile=args.render_profile,
+                    )
+                    if render_state is None:
+                        render_state = state_cache_writer.make_capture_state()
+                    else:
+                        render_state = attach_state_cache_capture(render_state, state_cache_writer)
                 scene.build()
                 run_actions(scene, actors, out_dir=args.out_dir, steps=args.steps, render_state=render_state)
+                state_cache_manifest = None
+                if state_cache_writer is not None:
+                    state_cache_manifest = state_cache_writer.finalize()
+                if args.require_state_cache:
+                    verify_state_cache_manifest(
+                        state_cache_manifest or args.out_dir / "state_cache" / "manifest.json",
+                        require_npz=True,
+                        require_complete_actor_state=True,
+                    )
                 if args.render:
-                    finalize_rendering(
+                    stats = finalize_rendering(
                         render_state,
                         event_log_path=args.out_dir / "event_log.json",
                         metrics_path=args.out_dir / "metrics.json",
                     )
+                    stats["render_profile"] = args.render_profile
+                    if state_cache_manifest is not None:
+                        stats["state_cache_manifest"] = str(state_cache_manifest)
+                        stats["state_cache_required"] = bool(args.require_state_cache)
+                    stats_path = args.out_dir / "render_stats.json"
+                    stats_path.write_text(json.dumps(stats, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
 
 
             if __name__ == "__main__":

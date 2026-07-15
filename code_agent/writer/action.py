@@ -48,6 +48,16 @@ SPEC = WorkerSpec(
       `render_state["capture_frame"](render_state, step)` when that key exists. Pass the exact simulation step index and
       let rendering.py downsample to the requested video fps/frame budget; do not create cameras or renderers in
       `action.py`
+    - do not skip the capture hook when a state cache is requested. The main entrypoint may wrap the normal rendering
+      hook so the same call writes `artifacts/state_cache/states/frame_*.npz`; missing these npz files is a hard
+      execution failure when `--require-state-cache` is active.
+    - expose every dynamic and articulated task entity through the returned `actors` structure with a stable unique
+      name and its Genesis entity handle. The shared cache writer discovers qpos, DOF positions, rigid pose, and
+      deformable vertex state from these handles; hiding an articulated entity inside opaque metadata makes complete
+      replay impossible.
+    - articulated state cache is a hard contract: every captured frame must contain replayable qpos or DOF positions
+      for every actor with DOFs. Root position/quaternion alone is not sufficient for rollers, drums, robot links,
+      gates, paddles, or other joint-driven mechanisms.
     - sample actor positions into `event_log.json` with shape
       `{"steps": int, "samples": [{"step": int, "actors": {"name": [x,y,z]}}]}`
     - for FEM/deformable actors, sample `entity.get_state().pos` when available and record center of mass, bbox min/max,

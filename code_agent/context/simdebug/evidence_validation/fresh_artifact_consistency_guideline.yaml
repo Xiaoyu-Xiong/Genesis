@@ -28,6 +28,8 @@
   ],
   "guidance": [
     "Treat execution_report.json as the source of truth for the latest run status, start time, exit code, timeout flag, and workspace directory.",
+    "When final video is produced from a state cache, treat artifacts/state_cache/manifest.json and its frame npz files as part of the freshness contract.",
+    "Final replay render_stats.json must cite the cache manifest, source hashes, and replay_only status so Critic can distinguish fresh replay from stale physical evidence.",
     "Use metrics.json, event_log.json, run_result.json, summary.json, render_stats.json, frames, and render.mp4 only if they were produced by the latest completed execution.",
     "Before rerunning a failed or repaired case, clean or clearly version output artifacts so Critic cannot confuse stale successful artifacts with current failed execution.",
     "When the latest execution times out or exits nonzero, require a clean successful rerun before accepting task success even if old video or metrics files still exist.",
@@ -35,13 +37,16 @@
   ],
   "restrictions": [
     "Do not pass an episode using metrics, render_stats, frames, or video whose timestamps or run identifiers predate the latest execution_report started_at time.",
+    "Do not accept a replay render whose cache manifest or referenced npz files predate the accepted physics run or no longer match source hashes.",
     "Do not use stale completed video to mask a later timeout, nonzero exit, or source repair that never finished.",
     "Do not let a success flag in an old summary override a current execution failure."
   ],
   "checks": [
     "Check execution_report.status, exit_code, timed_out, started_at_unix, and duration_sec before inspecting semantic success.",
+    "If render_stats.json records a replay cache, check that the manifest and all referenced npz files are present and fresh.",
     "Check artifact timestamps, run identifiers, frame counts, render_stats frame totals, and video presence against the latest execution.",
     "Check whether current frames cover the requested duration and whether render.mp4 exists for the latest run.",
+    "For rendered evidence, do not accept a merely non-empty render.mp4. Its probed frame count and duration must agree with render_stats.json and the saved frame_*.png sequence; a single-frame camera-recording MP4 is not valid evidence for a multi-frame render.",
     "Check whether summary/run_result success agrees with the latest metrics and execution status."
   ],
   "dispatch_hints": [

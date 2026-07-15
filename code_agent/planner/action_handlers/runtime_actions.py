@@ -107,6 +107,17 @@ class RuntimeActionHandler:
         backend = str(action.get("backend") or self.session.config.backend)
         render = self.session.config.render if action.get("render") is None else bool(action.get("render"))
         timeout_sec = float(self.session.config.timeout_sec)
+        render_profile = self._render_profile_from_action(action)
+        replay_cache = self._replay_cache_from_action(action, render_profile=render_profile)
+        render_only = self._bool_from_action(
+            action.get("render_only"),
+            default=render_profile == "final_path_traced" and replay_cache is not None,
+        )
+        # Physics executions must always leave a replayable cache. Do not let a
+        # planner action disable this; only render-only replay skips writing a
+        # new physics cache because it does not step physics.
+        save_state_cache = not render_only
+        require_state_cache = not render_only
         execution = run_generated_simulation(
             main_py=main_py,
             run_dir=self.session.case_dir,
@@ -121,9 +132,24 @@ class RuntimeActionHandler:
             render_res=timing.render_res,
             duration_sec=timing.duration_sec,
             target_video_frames=timing.target_video_frames,
+            render_profile=render_profile,
+            save_state_cache=save_state_cache,
+            require_state_cache=require_state_cache,
+            replay_cache=replay_cache,
+            render_only=render_only,
         )
         execution_report = execution.to_dict()
+        execution_report["render_profile"] = render_profile
+        execution_report["save_state_cache"] = save_state_cache
+        execution_report["require_state_cache"] = require_state_cache
+        execution_report["replay_cache"] = None if replay_cache is None else str(replay_cache)
+        execution_report["render_only"] = render_only
         self.session.state["execution"] = execution_report
+        self._record_render_execution(
+            render_profile=render_profile,
+            replay_cache=replay_cache,
+            render_only=render_only,
+        )
         self.session.state["control"]["needs_execution"] = False
         self.session.state["control"]["needs_critic"] = True
         return {"ok": execution.ok, "status": "executed", "execution": self.session.state["execution"]}
@@ -147,6 +173,7 @@ class RuntimeActionHandler:
             ),
         )
         self.session.state["critic"] = critic
+        self._record_render_critic_result(critic=critic, execution=execution)
         self.session.state["control"]["needs_critic"] = False
         return {"ok": critic.get("verdict") == "pass", "status": "critic_evaluated", "critic": critic}
 
@@ -347,6 +374,12 @@ class RuntimeActionHandler:
             critic = self.session.state.get("critic")
             if not isinstance(critic, dict) or critic.get("verdict") != "pass":
                 return {"ok": False, "status": "precondition_failed", "message": "finish pass requires critic pass."}
+            if not self._final_render_passed():
+                return {
+                    "ok": False,
+                    "status": "precondition_failed",
+                    "message": "finish pass requires an accepted final_path_traced render, not only debug physics evidence.",
+                }
         if verdict not in {"pass", "fail", "inconclusive"}:
             verdict = "inconclusive"
         self.session.state["status"] = verdict
@@ -381,6 +414,136 @@ class RuntimeActionHandler:
 
     def _sync_best_opt_params_to_current(self) -> str | None:
         return self.session.sync_best_opt_params_to_current(selected_by="planner.run_opt")
+
+    def _render_profile_from_action(self, action: dict[str, Any]) -> str:
+        value = action.get("render_profile")
+        if value in {"debug_raster", "final_path_traced"}:
+            return str(value)
+        return "debug_raster"
+
+    def _bool_from_action(self, value: object, *, default: bool) -> bool:
+        if value is None:
+            return bool(default)
+        return bool(value)
+
+    def _replay_cache_from_action(self, action: dict[str, Any], *, render_profile: str) -> Path | None:
+        raw = action.get("replay_cache")
+        if isinstance(raw, str) and raw.strip():
+            return self._case_relative_path(raw.strip())
+        if render_profile == "final_path_traced":
+            return self._accepted_state_cache_manifest()
+        return None
+
+    def _case_relative_path(self, value: str) -> Path:
+        path = Path(value)
+        if path.is_absolute():
+            return path
+        return self.session.case_dir / path
+
+    def _accepted_state_cache_manifest(self) -> Path | None:
+        physics = self.session.state.get("physics_validation")
+        if not isinstance(physics, dict):
+            return None
+        manifest = physics.get("accepted_state_cache_manifest")
+        if not isinstance(manifest, str) or not manifest:
+            return None
+        path = Path(manifest)
+        return path if path.is_absolute() else self.session.case_dir / path
+
+    def _record_render_execution(
+        self,
+        *,
+        render_profile: str,
+        replay_cache: Path | None,
+        render_only: bool,
+    ) -> None:
+        if render_profile != "final_path_traced":
+            return
+        final = self.session.state.setdefault("final_render", {})
+        if not isinstance(final, dict):
+            final = {}
+            self.session.state["final_render"] = final
+        final["required"] = bool(self.session.config.render)
+        final["status"] = "executed"
+        final["attempts"] = int(final.get("attempts") or 0) + 1
+        final["latest_render_profile"] = render_profile
+        final["latest_replay_cache"] = None if replay_cache is None else str(replay_cache)
+        final["latest_render_only"] = render_only
+        final["latest_issue"] = None
+
+    def _record_render_critic_result(self, *, critic: dict[str, Any], execution: dict[str, Any]) -> None:
+        render_profile = str(execution.get("render_profile") or "debug_raster")
+        render_stats_path = self.session.case_dir / "artifacts" / "render_stats.json"
+        render_stats = self.session.load_json(render_stats_path) or {}
+        if render_profile == "final_path_traced":
+            self._record_final_render_critic_result(
+                critic=critic,
+                render_stats=render_stats,
+                render_stats_path=render_stats_path,
+            )
+            return
+
+        if critic.get("verdict") == "pass":
+            physics = self.session.state.setdefault("physics_validation", {})
+            if not isinstance(physics, dict):
+                physics = {}
+                self.session.state["physics_validation"] = physics
+            physics["status"] = "passed"
+            physics["accepted_at_unix"] = time.time()
+            cache_manifest = render_stats.get("state_cache_manifest")
+            physics["accepted_state_cache_manifest"] = cache_manifest if isinstance(cache_manifest, str) else None
+            physics["accepted_render_stats_path"] = str(render_stats_path)
+            final = self.session.state.setdefault("final_render", {})
+            if isinstance(final, dict) and final.get("required") and final.get("status") in {None, "pending"}:
+                final["status"] = "needed"
+
+    def _record_final_render_critic_result(
+        self,
+        *,
+        critic: dict[str, Any],
+        render_stats: dict[str, Any],
+        render_stats_path: Path,
+    ) -> None:
+        final = self.session.state.setdefault("final_render", {})
+        if not isinstance(final, dict):
+            final = {}
+            self.session.state["final_render"] = final
+        final["required"] = bool(self.session.config.render)
+        final["latest_render_stats_path"] = str(render_stats_path)
+        final["latest_render_profile"] = "final_path_traced"
+        path_tracing = render_stats.get("path_tracing") if isinstance(render_stats, dict) else None
+        path_tracing_enabled = isinstance(path_tracing, dict) and path_tracing.get("enabled") is True
+        rendered = bool(render_stats.get("rendered")) if isinstance(render_stats, dict) else False
+        if not path_tracing_enabled:
+            critic["verdict"] = "fail"
+            critic["recommended_owner"] = "rendering"
+            critic["summary"] = (
+                "Final render was requested with render_profile=final_path_traced, but render_stats.json does not "
+                "confirm path_tracing.enabled=true. Repair scene/rendering so Genesis RayTracer is actually used."
+            )
+            final["status"] = "needs_repair"
+            final["latest_issue"] = "path_tracing_not_enabled"
+            return
+        if not rendered:
+            critic["verdict"] = "fail"
+            critic["recommended_owner"] = "rendering"
+            critic["summary"] = "Final path-traced render did not produce a non-empty video."
+            final["status"] = "needs_repair"
+            final["latest_issue"] = "final_video_missing_or_empty"
+            return
+        if critic.get("verdict") == "pass":
+            final["status"] = "passed"
+            final["passed_at_unix"] = time.time()
+            final["latest_issue"] = None
+        else:
+            final["status"] = "needs_repair"
+            final["latest_issue"] = "critic_rejected_final_render_quality"
+
+    def _final_render_passed(self) -> bool:
+        final = self.session.state.get("final_render")
+        if not isinstance(final, dict) or not final.get("required"):
+            return True
+        return final.get("status") == "passed"
 
 
 def planner_requires_asset_manifest(planner_output: dict[str, Any] | None) -> bool:

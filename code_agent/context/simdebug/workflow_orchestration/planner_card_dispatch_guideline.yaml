@@ -22,6 +22,14 @@
   ],
   "guidance": [
     "Use simdebug_cards when the current action has clear task- or evidence-specific needs; leave it null only when all role/physics-compatible candidates are useful.",
+    "When physics is still failing, dispatch ordinary visual evidence and camera cards for debug renders; do not default to final path tracing.",
+    "After Critic accepts physics, dispatch two_stage_rendering_workflow_guideline, final_path_tracing_siggraph_guideline, physics_state_cache_replay_guideline, and render_replay_consistency_guideline as relevant to final rendering.",
+    "After Critic accepts physics, do not finish the case from debug raster evidence. Request or execute the mandatory final_path_traced pass, then keep dispatching final render repair cards until final_render.status is passed.",
+    "When dispatching final render work, treat final_path_tracing_siggraph_guideline as the owner of background, floor, lighting, and material look-dev. Do not let debug evidence background fallbacks override the final light studio style.",
+    "Dispatch camera_framing_subject_fill_guideline whenever final rendering uses a following camera or per-frame camera updates; require whole-body COM targeting and temporal-continuity evidence, not only subject fill.",
+    "Dispatch final_path_tracing_siggraph_guideline to rendering and Critic whenever sphere, mesh, or emissive lights are present; final acceptance requires parameter-based light-frustum checks even on white backgrounds.",
+    "If a requested screen, window, pane, plate, shell, tube, or transparent container has semantically wrong thickness or filled geometry, dispatch generated_asset_shape_fidelity_guideline and xml_asset_request_contract_guideline to Planner/body before physics acceptance. Do not defer geometry repair to render-only replay.",
+    "After repeated low-contrast final-render rejection, dispatch visual_style_readability_guideline and require a substantive palette, background, material, or lighting change while preserving prompt-specified colors.",
     "Before placing a card id under simdebug_cards.<role>, check the candidate card's declared scopes and only assign it to that role when scopes includes that role or all.",
     "If a card is conceptually useful but its declared scopes do not include the target role, route the evidence through a scoped owner such as planner or critic, or update the card library before relying on it.",
     "For generated mesh use, dispatch generated_mesh_manifest_usage_guideline, planner_asset_retry_guideline, scale_policy_restriction, and render_visual_evidence_restriction as relevant.",
@@ -32,6 +40,9 @@
   ],
   "checks": [
     "Before spawn_workers, check whether each role receives cards matching its actual ownership and each selected card's declared scope.",
+    "Before final render dispatch, check whether a state cache is required and whether render-only replay should be requested instead of rerunning physics.",
+    "Before final render dispatch, check that final_path_tracing_siggraph_guideline is present when background, floor, lighting, or material look-dev is being changed.",
+    "Before finish pass, check final_render.status and render_stats.path_tracing.enabled; a physics-only debug raster pass is insufficient.",
     "Before request_repair, check whether the selected cards reflect the latest failure evidence.",
     "Before request_repair, check that every simdebug_cards.<role> entry is scoped to that role; Python will filter incompatible cards, but Planner should avoid sending them.",
     "Before run_opt, check that the selected cards distinguish parameter-limited failures from structural failures."

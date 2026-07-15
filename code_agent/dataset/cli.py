@@ -9,9 +9,12 @@ from code_agent.dataset.models import BuildConfig
 from code_agent.dataset.review_tui import run_review_tui
 from code_agent.dataset.store import DEFAULT_DATA_ROOT, DatasetStore
 from code_agent.io_utils import load_json_object
+from code_agent.utils.codex import CodexAuthFreshnessError, ensure_configured_codex_accounts_fresh
 
 
 def _cmd_build(args: argparse.Namespace) -> None:
+    if not args.no_codex:
+        _ensure_codex_auth_fresh()
     summary = build_dataset(
         BuildConfig(
             target_clips=args.target_clips,
@@ -34,6 +37,13 @@ def _cmd_build(args: argparse.Namespace) -> None:
 def _cmd_status(args: argparse.Namespace) -> None:
     store = DatasetStore(args.data_root)
     print(json.dumps(store.status_summary(), indent=2, ensure_ascii=False))
+
+
+def _ensure_codex_auth_fresh() -> None:
+    try:
+        ensure_configured_codex_accounts_fresh()
+    except CodexAuthFreshnessError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def _cmd_reject(args: argparse.Namespace) -> None:

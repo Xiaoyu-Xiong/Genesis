@@ -9,7 +9,7 @@ SPEC = WorkerSpec(
     required_export="create_bodies",
     responsibility="movable rigid, FEM primitive/cloth, generated-mesh, XML/MJCF, and task-participating bodies",
     prompt_body="""
-    Write `create_bodies(scene, task: str, *, deformable_cfg: dict)`.
+    Write `create_bodies(scene, task: str, *, deformable_cfg: dict, render_profile: str = "debug_raster")`.
     Return a list of dictionaries. Each dictionary must include:
     - `name`: string
     - `entity`: the Genesis entity returned by `scene.add_entity(...)`
@@ -27,7 +27,8 @@ SPEC = WorkerSpec(
     render mesh attached through `gs.morphs.Mesh(..., visual_file=entry["visual_path"], ...)`, not an independent
     simulation body.
     For ready entries with `source_type == "cloth_mesh"`, create FEM shell cloth with
-    `gs.morphs.Mesh(file=entry["runtime_path"], scale=entry["scale"] or 1.0, file_meshes_are_zup=True, ...)` and
+    `gs.morphs.Mesh(file=entry["runtime_path"], scale=entry["scale"] or 1.0,
+    file_meshes_are_zup=entry.get("file_meshes_are_zup"), ...)` and
     `gs.materials.FEM.Cloth(...)`. Use explicit cloth E, nu, rho, thickness, bending_stiffness, and friction_mu values
     from deformable_cfg cloth defaults/ranges. Do not tetrahedralize cloth meshes and do not pass tet_resolution for
     cloth morphs.
@@ -71,6 +72,23 @@ SPEC = WorkerSpec(
     the rasterizer path may drop the alpha channel. Use a rasterizer-blended surface such as
     `gs.surfaces.Smooth(color=(r, g, b), opacity=alpha, double_sided=True)` or another Plastic-derived surface with
     explicit `opacity`; keep the collision material/morph rigid and fixed as needed.
+    For final path-traced renders, do the opposite for transparent or semi-transparent task objects: do not fake glass
+    by only lowering RGBA alpha or Smooth.opacity. Use path-tracing materials with physical transmission/refraction,
+    preferably `gs.surfaces.Glass(color=(...), roughness=..., ior=...)` or a task-appropriate Glass/Water-derived
+    surface, so shells, windows, plates, tubes, and transparent containers show refractive highlights and internal
+    object distortion. Reserve opacity-only surfaces for debug raster evidence or intentionally non-refractive ghost
+    overlays.
+    Author prompt-requested transparent screens, window panes, and plates as bounded thin layers before the physics run.
+    A cylinder is acceptable for a circular screen only when its axial thickness is small relative to its radius and
+    does not fill the enclosing drum/container depth. Hollow shells, tubes, and containers need semantically hollow
+    geometry or authored inner/outer surfaces; a Glass material cannot turn a solid filled primitive into a shell.
+    These are body/asset geometry decisions and must not be deferred to render-only replay.
+    For final path-traced renders, choose semantically varied materials: metals should use Metal/Iron/Aluminium or
+    suitably low-roughness reflective surfaces, rubber/cloth/soft toys should use rougher diffuse or BSDF-like
+    materials, and glass/plastic/transparent barriers should use transmission/IOR rather than plain diffuse colors.
+    Preserve prompt-specified colors. For unspecified supports, fixtures, floors, and secondary actors, choose
+    coordinated colors with enough hue or value separation that a light or white main actor does not disappear into
+    an all-white final scene.
     All bodies participating in initial FEM+IPC contact must start without penetrations, self-intersections,
     coincident collision surfaces, or intentional overlap. This includes FEM primitives, generated FEM meshes, rigid
     collision props, fixed tubes/walls/floors, and articulated collision links. Use asset-manifest bbox/scale,

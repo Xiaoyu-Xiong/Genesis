@@ -436,6 +436,8 @@ class FEMEntity(Entity):
                 import trimesh
 
                 mesh = trimesh.load_mesh(self._morph.file)
+                if self._morph.file_meshes_are_zup is False:
+                    mesh.apply_transform(mu.Y_UP_TRANSFORM.T)
                 verts = mesh.vertices * self._morph.scale + np.array(self._morph.pos)
                 faces = mesh.faces
                 # For cloth, we store faces as "elements" (treating them as surface elements)

@@ -702,6 +702,26 @@ def _assert_execution_environment_report(report: dict[str, Any], *, backend: str
         assert str(cuda_lib) in environment["LD_LIBRARY_PATH"].split(":")
 
 
+def test_local_execution_env_defaults_to_primary_cuda_device(monkeypatch):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.delenv("QD_VISIBLE_DEVICE", raising=False)
+
+    env = build_local_execution_env({"GENESIS_BACKEND": "gpu"})
+
+    assert env["CUDA_VISIBLE_DEVICES"] == "0"
+    assert env["QD_VISIBLE_DEVICE"] == "0"
+
+
+def test_local_execution_env_preserves_explicit_cuda_device(monkeypatch):
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2")
+    monkeypatch.setenv("QD_VISIBLE_DEVICE", "2")
+
+    env = build_local_execution_env({"GENESIS_BACKEND": "gpu"})
+
+    assert env["CUDA_VISIBLE_DEVICES"] == "2"
+    assert env["QD_VISIBLE_DEVICE"] == "2"
+
+
 def _write_fake_opt_case(
     tmp_path: Path,
     *,

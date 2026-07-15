@@ -16,6 +16,7 @@ from code_agent.utils.local_execution import LocalRunConfig, build_local_executi
 
 
 _GENESIS_EXECUTION_THREAD_LOCK = threading.Lock()
+GENESIS_EXECUTION_LOCK_PATH_ENV = "GENESIS_EXECUTION_LOCK_PATH"
 
 
 @dataclass(slots=True)
@@ -64,6 +65,12 @@ def run_generated_simulation(
     render: bool = True,
     duration_sec: float | None = None,
     target_video_frames: int | None = None,
+    render_profile: str = "debug_raster",
+    save_state_cache: bool = True,
+    require_state_cache: bool = True,
+    replay_cache: Path | None = None,
+    render_only: bool = False,
+    execution_lock_path: Path | None = None,
 ) -> ExecutionReport:
     reports_dir = run_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -98,11 +105,23 @@ def run_generated_simulation(
         extra_args.extend(("--duration-sec", str(float(duration_sec))))
     if target_video_frames is not None:
         extra_args.extend(("--target-video-frames", str(int(target_video_frames))))
+    extra_args.extend(("--render-profile", str(render_profile)))
+    effective_save_state_cache = bool(save_state_cache) and not render_only
+    effective_require_state_cache = bool(require_state_cache) and not render_only
+    if effective_save_state_cache:
+        extra_args.append("--save-state-cache")
+    if effective_require_state_cache:
+        extra_args.append("--require-state-cache")
+    if replay_cache is not None:
+        extra_args.extend(("--replay-cache", str(replay_cache)))
+    if render_only:
+        extra_args.append("--render-only")
     deformable_config_path = run_dir / "contracts" / "deformable_config.json"
     if deformable_config_path.exists():
         extra_args.extend(("--deformable-config", str(deformable_config_path.relative_to(run_dir))))
     extra_args.append(render_arg)
-    with _exclusive_genesis_execution_lock() as lock_info:
+    with _exclusive_genesis_execution_lock(execution_lock_path) as lock_info:
+        env_overrides = _execution_env_overrides(backend=backend, render_profile=render_profile, replay_cache=replay_cache)
         raw_report = run_local(
             LocalRunConfig(
                 workspace_dir=run_dir,
@@ -112,7 +131,7 @@ def run_generated_simulation(
                 python_executable="uv run --no-sync python",
                 extra_args=tuple(extra_args),
                 extra_artifact_paths=("artifacts",),
-                env={"GENESIS_BACKEND": backend},
+                env=env_overrides,
             )
         )
         diagnostic_report = _maybe_render_initial_without_ipc(
@@ -142,6 +161,48 @@ def run_generated_simulation(
         lock_wait_sec=float(lock_info["wait_sec"]),
         lock_path=str(lock_info["path"]),
     )
+
+
+def _execution_env_overrides(
+    *,
+    backend: str,
+    render_profile: str,
+    replay_cache: Path | None,
+) -> dict[str, str]:
+    env: dict[str, str] = {
+        "GENESIS_BACKEND": backend,
+        "GENESIS_RENDER_PROFILE": render_profile,
+    }
+    if render_profile == "final_path_traced" or replay_cache is not None:
+        env.update(_path_tracing_env_overrides())
+    return env
+
+
+def _path_tracing_env_overrides() -> dict[str, str]:
+    repo_root = Path(__file__).resolve().parents[2]
+    cuda_home = repo_root / ".venv" / "cuda-12.8"
+    ld_candidates = (
+        "/opt/nvidia-optix-595/lib",
+        str(repo_root / "genesis" / "ext" / "LuisaRender" / "build" / "bin"),
+        str(cuda_home / "lib"),
+        "/usr/lib/wsl/lib",
+    )
+    path_candidates = (
+        str(cuda_home / "bin"),
+        str(repo_root / ".venv" / "bin"),
+        str(Path.home() / ".local" / "bin"),
+    )
+    return {
+        "LD_LIBRARY_PATH": _join_existing_paths(ld_candidates, os.environ.get("LD_LIBRARY_PATH", "")),
+        "PATH": _join_existing_paths(path_candidates, os.environ.get("PATH", "")),
+        "GENESIS_PATH_TRACING_OPTIX_DIR": "/opt/nvidia-optix-595/lib",
+    }
+
+
+def _join_existing_paths(candidates: tuple[str, ...], current: str) -> str:
+    existing = [path for path in candidates if Path(path).exists()]
+    current_parts = [path for path in current.split(os.pathsep) if path]
+    return os.pathsep.join([*existing, *[path for path in current_parts if path not in existing]])
 
 
 def _maybe_render_initial_without_ipc(
@@ -314,10 +375,10 @@ def _sim_substeps_from_timing(run_dir: Path) -> int:
 
 
 @contextlib.contextmanager
-def _exclusive_genesis_execution_lock():
+def _exclusive_genesis_execution_lock(lock_path: Path | None = None):
     """Serialize local Genesis simulation subprocesses across parallel suite cases."""
 
-    lock_path = Path(tempfile.gettempdir()) / f"genesis_code_agent_{os.getuid()}_execution.lock"
+    lock_path = _resolve_genesis_execution_lock_path(lock_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.time()
     with _GENESIS_EXECUTION_THREAD_LOCK, lock_path.open("a+", encoding="utf-8") as lock_file:
@@ -327,3 +388,12 @@ def _exclusive_genesis_execution_lock():
             yield {"path": lock_path, "wait_sec": wait_sec}
         finally:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _resolve_genesis_execution_lock_path(lock_path: Path | None = None) -> Path:
+    if lock_path is not None:
+        return lock_path.expanduser().resolve()
+    env_path = os.environ.get(GENESIS_EXECUTION_LOCK_PATH_ENV)
+    if env_path:
+        return Path(env_path).expanduser().resolve()
+    return Path(tempfile.gettempdir()) / f"genesis_code_agent_{os.getuid()}_execution.lock"

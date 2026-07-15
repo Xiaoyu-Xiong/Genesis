@@ -1,0 +1,36 @@
+schema_version: 1
+id: two_stage_rendering_workflow_guideline
+title: Split physics debugging from final path-traced rendering
+summary: Use cheap readable raster evidence while physics is being repaired, then switch to a final GPU path-traced render pass only after physical behavior is accepted.
+scopes: [planner, scene, rendering, critic, opt]
+physics_modes: [any]
+task_tags:
+  - render
+  - path_tracing
+  - final_render
+  - debug_render
+  - replay_render
+  - workflow
+failure_tags:
+  - slow_debug_loop
+  - premature_path_tracing
+  - final_render_changed_physics
+  - missing_final_render
+guidance:
+  - During physics repair, prefer ordinary rasterized or low-cost evidence renders whose purpose is behavioral diagnosis, not final visual quality.
+  - After Critic accepts physical behavior, enter a separate final render pass that must use GPU path tracing, studio lighting, material look-dev, and replay from cache when available.
+  - A debug raster Critic pass means the physics is accepted; it does not mean the case can finish when rendering is requested.
+  - The final path-traced render stage is iterative look-dev. If the first RayTracer output is flat, over-lit, noisy, materially bland, or poorly framed, repair rendering/body/scene and rerun final_path_traced until Critic accepts the final image.
+  - Planner should distinguish debug_render, final_render, and replay_render in its worker dispatch and execution mode.
+  - Final rendering must preserve physical semantics. Do not move bodies, hide collisions, or change solver behavior merely to improve composition.
+checks:
+  - Check whether the latest task state is still in physics repair or has passed physical validation before requesting final path tracing.
+  - Check that finish pass is blocked until an execution with render_profile=final_path_traced has path_tracing.enabled=true and the final Critic pass accepts visual quality.
+  - Check that final render changes are limited to renderer, camera, lighting, materials, background, and replay mechanics unless Planner explicitly opens a physics repair.
+dispatch_hints:
+  - Send to Planner when deciding which render mode to request.
+  - Send to rendering when upgrading from evidence render to final render.
+  - Send to Critic when judging whether final render changes invalidated physical evidence.
+provenance:
+  source: path_tracing_debug_card_workflow
+  motivation: Separate fast physics debugging from SIGGRAPH-quality final rendering.

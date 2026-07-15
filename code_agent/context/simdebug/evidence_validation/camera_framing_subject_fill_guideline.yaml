@@ -20,21 +20,36 @@
     "bad_camera_target",
     "overwide_fov",
     "unreadable_video",
-    "object_leaves_frame"
+    "object_leaves_frame",
+    "vertex_follow_camera",
+    "unstable_camera_target",
+    "raw_bbox_zoom",
+    "camera_temporal_jitter",
+    "replay_camera_smoothing_disabled"
   ],
   "guidance": [
     "When generating or repairing rendering, estimate the main dynamic objects' initial, mid-run, and final bounding boxes, then choose camera target, distance, and FOV so the main behavior occupies about 55%-80% of the image.",
+    "For final path-traced replay, use the full trajectory bbox from the state cache manifest when available, not only actor positions from the first frame.",
+    "Prefer a fixed final camera fitted to the full trajectory bbox. Enable a following camera only when the main subject translates far enough that a fixed camera cannot keep the behavior readable.",
+    "When camera following is necessary, target the main object's whole-body center of mass. Prefer a physics-reported mass-weighted center of mass; otherwise use a stable area-, volume-, or vertex-weighted centroid over the complete visible object.",
+    "For multi-actor interactions, define a stable primary actor set and follow its aggregate center of mass. Do not switch the target identity between actors as contacts or extrema change.",
+    "Smooth follow target and camera distance over time with a dead zone, low-pass filter, and bounded per-frame movement. Use the full-trajectory envelope or a smoothed extent for distance fitting rather than raw per-frame bbox size.",
     "Do not let the main subjects shrink into a small corner or a tiny central region.",
     "For objects with large travel, prefer a better camera center, elevated oblique view, and moderate distance over blindly looking at the world origin.",
     "Use a slightly wider view only when the action would otherwise leave the frame, and keep the behavior readable rather than merely visible."
   ],
   "restrictions": [
     "Do not accept a physically correct render if the requested contact, deformation, motion, or interaction cannot be judged because the subjects are too small.",
-    "Do not optimize camera framing by cropping away necessary start, impact, or final-settle context."
+    "Do not optimize camera framing by cropping away necessary start, impact, or final-settle context.",
+    "Do not follow a selected vertex, contact point, bbox corner, highest point, farthest point, or another instantaneous geometric extremum.",
+    "Do not apply unsmoothed per-frame COM, bbox, distance, or FOV updates, and do not disable camera smoothing during render-only replay."
   ],
   "checks": [
     "Inspect sampled frames or contact sheets for subject fill ratio, centering, and whether the main action remains in frame.",
-    "Check render_stats.json records camera position, lookat, FOV, and resolution when available."
+    "For replay renders, check the cache frame bboxes or start/mid/end cached states before locking the final camera.",
+    "Check render_stats.json records camera position, lookat, FOV, and resolution when available.",
+    "When following is enabled, require render_stats.json to record camera_follow.enabled, target_source, com_source, smoothing parameters, per-frame position/lookat/distance, and maximum adjacent-frame deltas.",
+    "Review camera position, target, and distance trajectories for temporal jumps or breathing zoom; a subject remaining in frame is not sufficient when the camera motion is unstable."
   ],
   "dispatch_hints": [
     "Send to rendering for camera setup and repair.",

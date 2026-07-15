@@ -8,9 +8,19 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import trimesh
+
 from code_agent.assets.mesh import episode as mesh_episode
 from code_agent.assets.mesh.manifest import _scale_to_bbox, _uniform_scale_factor
-from code_agent.assets.mesh.models import MeshGenesisFEMImportResult
+from code_agent.assets.mesh.models import (
+    MeshGenesisClothImportResult,
+    MeshGenesisFEMImportResult,
+    MeshManifoldCheckResult,
+    MeshRepairResult,
+    MeshyGenerationResult,
+    MeshyRequestError,
+    TextToMeshBundle,
+)
 from code_agent.assets.mesh.request_adapter import request_size
 from code_agent.assets.builtin_guard import builtin_asset_violations
 from code_agent.assets.xml.validation import _validate_mesh_asset_paths, validate_xml_asset
@@ -52,6 +62,23 @@ def _codex_test_result(
         codex_account_name=request.codex_account_name,
         started_at_unix=now,
         ended_at_unix=now + 0.01,
+    )
+
+
+def _write_codex_auth_for_test(codex_home: Path, *, age_days: float) -> None:
+    codex_home.mkdir(parents=True, exist_ok=True)
+    (codex_home / "auth.json").write_text(
+        json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "last_refresh": time.time() - age_days * 24 * 60 * 60,
+                "tokens": {
+                    "access_token": "test",
+                    "refresh_token": "test",
+                },
+            }
+        ),
+        encoding="utf-8",
     )
 
 
@@ -122,6 +149,108 @@ def test_run_codex_exec_rotates_accounts_on_usage_limit(tmp_path, monkeypatch):
     assert "account_usage_limited" in quota_log.read_text(encoding="utf-8")
 
 
+def test_run_codex_exec_retries_transient_model_capacity(tmp_path, monkeypatch):
+    codex._reset_codex_account_state_for_tests()
+    monkeypatch.setenv("CODE_AGENT_CODEX_CAPACITY_RETRY_ATTEMPTS", "3")
+    monkeypatch.setenv("CODE_AGENT_CODEX_CAPACITY_RETRY_DELAY_SEC", "0")
+    calls = 0
+
+    def fake_run_once(request: codex.CodexExecRequest) -> codex.CodexExecResult:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return _codex_test_result(
+                request,
+                success=False,
+                error_type="codex_capacity",
+                error_message="Selected model is at capacity. Please try a different model.",
+            )
+        return _codex_test_result(request, success=True)
+
+    monkeypatch.setattr(codex, "_run_codex_exec_request_once", fake_run_once)
+
+    result = codex.run_codex_exec(
+        codex.CodexExecRequest(
+            role="planner",
+            prompt="test",
+            cwd=tmp_path,
+            output_jsonl_path=tmp_path / "logs" / "planner.jsonl",
+            final_message_path=tmp_path / "logs" / "planner.final.txt",
+        )
+    )
+
+    assert result.success is True
+    assert calls == 2
+    retry_log = tmp_path / "logs" / "planner.jsonl.quota.jsonl"
+    assert "capacity_retry_scheduled" in retry_log.read_text(encoding="utf-8")
+
+
+def test_codex_failure_classification_detects_model_capacity(tmp_path):
+    jsonl_path = tmp_path / "codex.jsonl"
+    stderr_path = tmp_path / "codex.jsonl.stderr"
+    jsonl_path.write_text(
+        json.dumps({"type": "error", "message": "Selected model is at capacity. Please try a different model."}) + "\n",
+        encoding="utf-8",
+    )
+    stderr_path.write_text("", encoding="utf-8")
+
+    error_type, message = codex._classify_codex_failure(jsonl_path=jsonl_path, stderr_path=stderr_path)
+
+    assert error_type == "codex_capacity"
+    assert message is not None
+    assert "capacity" in message
+
+
+def test_codex_failure_classification_detects_nested_bwrap_sandbox_failure(tmp_path):
+    jsonl_path = tmp_path / "codex.jsonl"
+    stderr_path = tmp_path / "codex.jsonl.stderr"
+    jsonl_path.write_text(json.dumps({"type": "turn.completed"}) + "\n", encoding="utf-8")
+    stderr_path.write_text(
+        "apply_patch verification failed: fs sandbox helper failed: "
+        "bwrap: Can't mkdir /repo/.agents: Read-only file system\n",
+        encoding="utf-8",
+    )
+
+    error_type, message = codex._classify_codex_failure(jsonl_path=jsonl_path, stderr_path=stderr_path)
+
+    assert error_type == "codex_sandbox_failed"
+    assert message is not None
+    assert ".agents" in message
+
+
+def test_run_codex_exec_treats_exit_zero_sandbox_failure_as_error(tmp_path):
+    fake_repo = tmp_path / "repo"
+    fake_repo.mkdir()
+    fake_codex = tmp_path / "fake-codex"
+    fake_codex.write_text(
+        "#!/bin/sh\n"
+        'echo "fs sandbox helper failed: bwrap: Can\'t mkdir $PWD/.agents: Read-only file system" >&2\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake_codex.chmod(0o755)
+    codex_home = tmp_path / "codex-home"
+    _write_codex_auth_for_test(codex_home, age_days=0)
+
+    result = codex._run_codex_exec_request_once(
+        codex.CodexExecRequest(
+            role="worker",
+            prompt="test",
+            cwd=fake_repo,
+            output_jsonl_path=fake_repo / "events.jsonl",
+            final_message_path=fake_repo / "final.txt",
+            codex_bin=str(fake_codex),
+            codex_home=codex_home,
+            hide_builtin_assets=False,
+        )
+    )
+
+    assert result.exit_code == 0
+    assert result.success is False
+    assert result.error_type == "codex_sandbox_failed"
+    assert "codex_sandbox_failed" in (fake_repo / "final.txt").read_text(encoding="utf-8")
+
+
 def test_run_codex_exec_waits_until_any_account_quota_recovers(tmp_path, monkeypatch):
     codex._reset_codex_account_state_for_tests()
     monkeypatch.setenv(
@@ -178,6 +307,140 @@ def test_run_codex_exec_waits_until_any_account_quota_recovers(tmp_path, monkeyp
     assert "quota_recovered" in text
 
 
+def test_codex_failure_classification_uses_diagnostic_jsonl_message(tmp_path):
+    jsonl_path = tmp_path / "codex.jsonl"
+    stderr_path = tmp_path / "codex.jsonl.stderr"
+    jsonl_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "thread.started", "thread_id": "thread"}),
+                json.dumps({"type": "turn.started"}),
+                json.dumps(
+                    {
+                        "type": "error",
+                        "message": (
+                            "Your access token could not be refreshed because your refresh token was revoked. "
+                            "Please log out and sign in again."
+                        ),
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    stderr_path.write_text(
+        "failed to refresh token: 401 Unauthorized: refresh_token_invalidated\n",
+        encoding="utf-8",
+    )
+
+    error_type, message = codex._classify_codex_failure(jsonl_path=jsonl_path, stderr_path=stderr_path)
+
+    assert error_type == "codex_auth_failed"
+    assert message is not None
+    assert "refresh token was revoked" in message
+    assert "thread.started" not in message
+
+
+def test_run_codex_exec_aborts_quota_wait_when_probes_are_auth_failed(tmp_path, monkeypatch):
+    codex._reset_codex_account_state_for_tests()
+    monkeypatch.setenv(
+        "CODE_AGENT_CODEX_ACCOUNTS",
+        f"first={tmp_path / 'codex-first'};second={tmp_path / 'codex-second'}",
+    )
+    monkeypatch.setenv("CODE_AGENT_CODEX_QUOTA_PROBE_INITIAL_DELAY_SEC", "0")
+    monkeypatch.setenv("CODE_AGENT_CODEX_QUOTA_PROBE_INTERVAL_SEC", "0")
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_run_once(request: codex.CodexExecRequest) -> codex.CodexExecResult:
+        calls.append((request.role, request.codex_account_name))
+        if request.role.startswith("quota_probe_"):
+            return _codex_test_result(
+                request,
+                success=False,
+                error_type="codex_auth_failed",
+                error_message="refresh token was revoked",
+            )
+        if calls.count((request.role, request.codex_account_name)) == 1:
+            return _codex_test_result(
+                request,
+                success=False,
+                error_type="codex_usage_limit",
+                error_message="usage limit; try again later",
+            )
+        return _codex_test_result(
+            request,
+            success=False,
+            error_type="codex_auth_failed",
+            error_message="refresh token was revoked",
+        )
+
+    monkeypatch.setattr(codex, "_run_codex_exec_request_once", fake_run_once)
+
+    result = codex.run_codex_exec(
+        codex.CodexExecRequest(
+            role="planner",
+            prompt="test",
+            cwd=tmp_path,
+            output_jsonl_path=tmp_path / "logs" / "planner.jsonl",
+            final_message_path=tmp_path / "logs" / "planner.final.txt",
+        )
+    )
+
+    assert result.success is False
+    assert result.error_type == "codex_auth_failed"
+    assert len(calls) < 8
+    quota_log = tmp_path / "logs" / "planner.jsonl.quota.jsonl"
+    assert "quota_pause_aborted" in quota_log.read_text(encoding="utf-8")
+
+
+def test_run_codex_exec_fails_before_subprocess_when_login_is_stale(tmp_path, monkeypatch):
+    codex_home = tmp_path / "codex-stale"
+    _write_codex_auth_for_test(codex_home, age_days=8)
+    monkeypatch.setenv("CODE_AGENT_CODEX_AUTH_MAX_AGE_DAYS", "7")
+
+    result = codex._run_codex_exec_request_once(
+        codex.CodexExecRequest(
+            role="planner",
+            prompt="test",
+            cwd=tmp_path,
+            output_jsonl_path=tmp_path / "logs" / "planner.jsonl",
+            final_message_path=tmp_path / "logs" / "planner.final.txt",
+            codex_bin="/bin/true",
+            codex_home=codex_home,
+            codex_account_name="stale",
+            hide_builtin_assets=False,
+        )
+    )
+
+    assert result.success is False
+    assert result.error_type == "codex_auth_failed"
+    assert result.error_message is not None
+    assert "older than 7 days" in result.error_message
+    assert f"CODEX_HOME={codex_home.resolve()} codex login" in result.error_message
+    assert "account_auth_stale" in (tmp_path / "logs" / "planner.jsonl.quota.jsonl").read_text(encoding="utf-8")
+
+
+def test_ensure_configured_codex_accounts_fresh_rejects_stale_accounts(tmp_path, monkeypatch):
+    stale_home = tmp_path / "codex-stale"
+    fresh_home = tmp_path / "codex-fresh"
+    _write_codex_auth_for_test(stale_home, age_days=8)
+    _write_codex_auth_for_test(fresh_home, age_days=1)
+    monkeypatch.setenv("CODE_AGENT_CODEX_AUTH_MAX_AGE_DAYS", "7")
+    monkeypatch.setenv("CODE_AGENT_CODEX_ACCOUNTS", f"stale={stale_home};fresh={fresh_home}")
+
+    try:
+        codex.ensure_configured_codex_accounts_fresh()
+    except codex.CodexAuthFreshnessError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("stale Codex auth should block task startup")
+
+    assert "stale" in message
+    assert "fresh" not in message
+    assert f"CODEX_HOME={stale_home.resolve()} codex login" in message
+
+
 def test_codex_command_hides_genesis_builtin_assets(tmp_path):
     final_path = tmp_path / "logs" / "final.json"
     jsonl_path = tmp_path / "logs" / "events.jsonl"
@@ -197,6 +460,18 @@ def test_codex_command_hides_genesis_builtin_assets(tmp_path):
         assert "--tmpfs" in command
         assert str((codex.DEFAULT_REPO_ROOT / "genesis" / "assets").resolve()) in command
         assert str(tmp_path.resolve()) in command
+
+
+def test_codex_asset_sandbox_prepares_project_agents_mountpoint(tmp_path):
+    repo = tmp_path / "repo"
+    nested = repo / "nested"
+    (repo / ".git").mkdir(parents=True)
+    nested.mkdir()
+
+    skills_root = codex._ensure_codex_project_sandbox_mountpoints(nested)
+
+    assert skills_root == repo / ".agents" / "skills"
+    assert skills_root.is_dir()
 
 
 def test_codex_command_places_top_level_args_before_exec(tmp_path):
@@ -575,6 +850,32 @@ def test_planner_summary_reconciles_late_opt_success_report(tmp_path):
     assert session.state["control"]["needs_execution"] is True
     current_params = json.loads((case_dir / "contracts" / "current_opt_params.json").read_text(encoding="utf-8"))
     assert current_params["metadata"]["selected_by"] == "planner.opt_disk_reconcile"
+
+
+def test_planner_summary_marks_worker_sandbox_failure_as_retryable_infra(tmp_path):
+    session = PlannerSession(
+        PlannerSessionConfig(
+            case_id="case",
+            task="task",
+            case_dir=tmp_path / "case",
+            backend="gpu",
+            timeout_sec=1.0,
+            render=True,
+            repair_rounds=0,
+        )
+    )
+    session.state["status"] = "inconclusive"
+    session.state["workers"]["body"] = {
+        "status": "failed",
+        "ok": False,
+        "codex": {"error_type": "codex_sandbox_failed", "error_message": "bwrap failed"},
+    }
+
+    summary = session.build_summary()
+
+    assert summary["outcome_class"] == "infra_blocked"
+    assert summary["infra_blocked_reason"] == "body_worker:codex_sandbox_failed"
+    assert summary["retry_recommended"] is True
 
 
 def test_opt_contract_rejects_rendering_owner(tmp_path):
@@ -1298,6 +1599,156 @@ def test_generate_procedural_cloth_mesh_assets(tmp_path):
             assert validation["face_count"] == 200
 
 
+def test_procedural_cloth_mesh_rejects_complex_open_silhouette(tmp_path):
+    case_dir = tmp_path / "case"
+    request = {
+        "name": "blue_armadillo_patch",
+        "asset_type": "cloth_mesh",
+        "purpose": "armadillo-shaped open FEM cloth patch silhouette",
+        "scale": 1.0,
+        "bbox": [0.6, 0.3, 0.001],
+        "cloth_target_edge_length": 0.04,
+        "texture_needs": "blue knitted fabric",
+        "simulation_role": "dynamic FEM.Cloth animal-shaped thin open cloth patch",
+    }
+
+    report = mesh_episode.generate_mesh_assets_for_episode(
+        case_dir=case_dir,
+        task="Create an armadillo-shaped open FEM.Cloth patch.",
+        planner_output=_planner_output_with_asset(request),
+    )
+
+    assert report["ok"] is False
+    assert report["status"] == "cloth_mesh_unsupported_shape"
+    assert report["recommended_owner"] == "planner"
+    assert report["failure_classes"] == ["cloth_mesh.unsupported_shape"]
+    assert "unsupported arbitrary open cloth silhouette" in report["repair_summary"]
+    manifest = json.loads((case_dir / "assets" / "asset_manifest.json").read_text(encoding="utf-8"))
+    entry = manifest["assets"][0]
+    assert entry["logical_name"] == "blue_armadillo_patch"
+    assert entry["source_type"] == "cloth_mesh"
+    assert entry["status"] == "failed"
+    assert entry["runtime_path"] == "unavailable"
+    assert "Unsupported procedural cloth_mesh shape" in entry["validation"]["cloth_mesh"]["error"]
+
+
+def test_meshy_api_download_retries_transient_dns_failure(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODE_AGENT_MESHY_API_RETRY_ATTEMPTS", "2")
+    monkeypatch.setenv("CODE_AGENT_MESHY_API_RETRY_DELAY_SEC", "0")
+    calls = 0
+
+    class FakeDownloadedMeshyAsset:
+        def to_dict(self):
+            return {"provider": "fake"}
+
+    def fake_download_meshy_mesh_from_text(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise MeshyRequestError("Meshy submit request failed: [Errno -3] Temporary failure in name resolution")
+        return FakeDownloadedMeshyAsset()
+
+    monkeypatch.setattr(mesh_episode, "download_meshy_mesh_from_text", fake_download_meshy_mesh_from_text)
+
+    result = mesh_episode._download_one_mesh_asset(
+        index=0,
+        request={
+            "name": "soft_bunny",
+            "asset_type": "generated_mesh",
+            "purpose": "soft bunny mesh",
+            "scale": None,
+            "bbox": [0.2, 0.2, 0.2],
+            "cloth_target_edge_length": None,
+            "texture_needs": None,
+            "simulation_role": "dynamic soft body",
+        },
+        task="Create a soft bunny.",
+        output_root=tmp_path,
+        api_config=mesh_episode.MeshyApiConfig(api_key="test"),
+    )
+
+    assert result["ok"] is True
+    assert calls == 2
+
+
+def test_meshy_generated_cloth_request_writes_cloth_manifest(tmp_path, monkeypatch):
+    request = {
+        "name": "ruffled_closed_cloth_shell",
+        "asset_type": "generated_mesh",
+        "purpose": "complex ruffled FEM.Cloth closed manifold shell surface",
+        "scale": 1.0,
+        "bbox": [0.5, 0.3, 0.4],
+        "cloth_target_edge_length": None,
+        "texture_needs": None,
+        "simulation_role": "dynamic FEM.Cloth closed manifold shell",
+    }
+    mesh_path = tmp_path / "repaired.obj"
+    trimesh.creation.icosphere(subdivisions=1, radius=0.5).export(mesh_path)
+    bundle = _text_to_mesh_bundle_for_test(mesh_path)
+
+    def fake_process_downloaded_meshy_mesh(*, downloaded, repair_config):
+        _ = downloaded, repair_config
+        return bundle
+
+    def fake_cloth_validation(entry):
+        return MeshGenesisClothImportResult(
+            ok=True,
+            runtime_path=Path(entry["runtime_path"]),
+            visual_path=Path(entry["visual_path"]) if entry.get("visual_path") else None,
+            scale=(1.0, 1.0, 1.0),
+            file_meshes_are_zup=False,
+            vertex_count=42,
+            element_count=80,
+            surface_vertex_count=42,
+            surface_face_count=80,
+        )
+
+    def fail_fem_validation(_entry):
+        raise AssertionError("Meshy-generated FEM.Cloth shells must not use volumetric FEM import validation.")
+
+    monkeypatch.setattr(mesh_episode, "process_downloaded_meshy_mesh", fake_process_downloaded_meshy_mesh)
+    monkeypatch.setattr(mesh_episode, "run_genesis_cloth_import_validation", fake_cloth_validation)
+    monkeypatch.setattr(mesh_episode, "run_genesis_fem_import_validation", fail_fem_validation)
+
+    result = mesh_episode._process_one_mesh_asset(
+        {
+            "ok": True,
+            "request": request,
+            "mesh_prompt": "Create one FEM.Cloth closed manifold shell.",
+            "downloaded": object(),
+        }
+    )
+
+    assert result["ok"] is True
+    entry = result["manifest_entry"]
+    assert entry["source_type"] == "cloth_mesh"
+    assert entry["file_meshes_are_zup"] is False
+    assert entry["status"] == "ready"
+    cloth_validation = entry["validation"]["cloth_mesh"]
+    assert cloth_validation["generation"] == "meshy"
+    assert cloth_validation["manifold"]["ok"] is True
+    assert cloth_validation["genesis_cloth_import"]["ok"] is True
+
+
+def test_meshy_generated_cloth_prompt_uses_cloth_shell_language():
+    request = {
+        "name": "fabric_creature_skin",
+        "asset_type": "generated_mesh",
+        "purpose": "complex FEM.Cloth closed manifold shell with an organic silhouette",
+        "scale": 1.0,
+        "bbox": [0.4, 0.3, 0.2],
+        "cloth_target_edge_length": None,
+        "texture_needs": "woven red fabric",
+        "simulation_role": "dynamic cloth shell",
+    }
+
+    prompt = mesh_episode.mesh_prompt_from_request(request, "task")
+
+    assert "FEM.Cloth closed manifold surface mesh" in prompt
+    assert "not as a volumetric FEM soft body" in prompt
+    assert "closed watertight manifold surface" in prompt
+
+
 def test_planner_start_mesh_assets_action_generates_cloth_mesh(tmp_path):
     case_dir = tmp_path / "case"
     request = {
@@ -1345,14 +1796,67 @@ def test_planner_start_mesh_assets_action_generates_cloth_mesh(tmp_path):
     assert Path(entry["runtime_path"]).is_file()
 
 
+def _text_to_mesh_bundle_for_test(mesh_path: Path) -> TextToMeshBundle:
+    output_dir = mesh_path.parent
+    generation = MeshyGenerationResult(
+        provider="meshy",
+        prompt="Create one FEM.Cloth closed manifold shell.",
+        output_dir=output_dir,
+        mesh_path=mesh_path,
+        prompt_path=output_dir / "prompt.txt",
+        submit_response_path=output_dir / "meshy_submit_response.json",
+        final_response_path=output_dir / "meshy_final_response.json",
+        metadata_path=output_dir / "metadata.json",
+        preview_task_id="preview-task",
+        final_status="SUCCEEDED",
+        submit_response={},
+        final_response={},
+    )
+    repair = MeshRepairResult(
+        ok=True,
+        input_mesh_path=mesh_path,
+        output_mesh_path=mesh_path,
+        attempt_index=1,
+        strategy_name="test",
+        operations=("test_repair",),
+        vertex_count_before=42,
+        face_count_before=80,
+        component_count_before=1,
+        vertex_count_after=42,
+        face_count_after=80,
+        component_count_after=1,
+        bbox_min=(-0.5, -0.5, -0.5),
+        bbox_max=(0.5, 0.5, 0.5),
+        bbox_size=(1.0, 1.0, 1.0),
+        centroid_at_origin=True,
+    )
+    manifold = MeshManifoldCheckResult(
+        ok=True,
+        mesh_path=mesh_path,
+        vertex_count=42,
+        face_count=80,
+        component_count=1,
+        is_watertight=True,
+        is_winding_consistent=True,
+        volume=1.0,
+        tetgen_ready=True,
+    )
+    return TextToMeshBundle(
+        generation=generation,
+        repair=repair,
+        raw_manifold=manifold,
+        manifold=manifold,
+        profile_sec={},
+    )
+
+
 def _planner_output_with_asset(asset_request: dict[str, object]) -> dict[str, object]:
     return _planner_output_with_asset_requests([asset_request])
 
 
 def _planner_output_with_asset_requests(asset_requests: list[dict[str, object]]) -> dict[str, object]:
     normalized_asset_requests = [
-        {"cloth_target_edge_length": None, **asset_request}
-        for asset_request in asset_requests
+        {"cloth_target_edge_length": None, **asset_request} for asset_request in asset_requests
     ]
     return {
         "scene_brief": {
@@ -1430,6 +1934,11 @@ def _planner_action(
         "repair_brief": None,
         "backend": None,
         "render": None,
+        "render_profile": None,
+        "save_state_cache": None,
+        "require_state_cache": None,
+        "replay_cache": None,
+        "render_only": None,
         "timeout_sec": None,
         "cwd": None,
         "python_args": None,
@@ -1592,6 +2101,49 @@ def create_bodies(scene, task, *, deformable_cfg):
     assert math.isclose(report["median_feature_length"], 0.44 / 5.0, rel_tol=1e-9)
     assert math.isclose(report["global_bbox_diag"], expected_diag, rel_tol=1e-9)
     assert math.isclose(report["selected_bbox_diag"], expected_diag, rel_tol=1e-9)
+    assert math.isclose(report["ipc_contact_d_hat"], 2e-3 * expected_diag, rel_tol=1e-9)
+
+
+def test_adaptive_d_hat_includes_direct_main_primitives_with_local_constants(tmp_path):
+    from code_agent.utils.adaptive_ipc import adaptive_contact_d_hat_report
+
+    case_root = tmp_path / "case"
+    src_dir = case_root / "src"
+    src_dir.mkdir(parents=True)
+    (src_dir / "main.py").write_text(
+        """
+import genesis as gs
+
+
+def main():
+    rod_radius = 0.042
+    rod_height = 1.36
+    tet_resolution = 2
+    scene.add_entity(
+        morph=gs.morphs.Cylinder(
+            radius=rod_radius,
+            height=rod_height,
+            tet_resolution=tet_resolution,
+        ),
+        material=None,
+    )
+""",
+        encoding="utf-8",
+    )
+
+    report = adaptive_contact_d_hat_report(
+        case_root=case_root,
+        default_deformable_cfg={"ipc_contact_d_hat_adaptive": True, "tet_resolution": 2},
+        repo_root=tmp_path,
+    )
+
+    expected_diag = math.sqrt(0.084**2 + 0.084**2 + 1.36**2)
+    assert report is not None
+    assert report["source"] == "generated source primitive morphs"
+    assert report["selected_asset"] == "src/main.py:Cylinder"
+    assert report["selected_source_kind"] == "direct_primitive_morph"
+    assert math.isclose(report["median_feature_length"], 0.084 / 5.0, rel_tol=1e-9)
+    assert math.isclose(report["global_bbox_diag"], expected_diag, rel_tol=1e-9)
     assert math.isclose(report["ipc_contact_d_hat"], 2e-3 * expected_diag, rel_tol=1e-9)
 
 

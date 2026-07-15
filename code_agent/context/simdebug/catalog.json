@@ -3,7 +3,7 @@
   "library": "simdebug",
   "description": "Planner-selected human debugging experience cards for Genesis simulation generation.",
   "library_dir": "code_agent/context/simdebug",
-  "card_count": 47,
+  "card_count": 51,
   "cards": [
     {
       "schema_version": 1,
@@ -178,7 +178,7 @@
       "schema_version": 1,
       "id": "generated_asset_shape_fidelity_guideline",
       "title": "Generated assets must match the requested shape before source-level tuning",
-      "summary": "Planner should verify generated mesh/XML assets for semantic shape, scale, aspect ratio, thickness, texture placement, and complexity before asking body or action workers to tune around them.",
+      "summary": "Planner should verify generated mesh/XML assets for semantic shape, scale, aspect ratio, thickness, texture placement, and complexity before asking body or action workers to tune around them. Volumetric deformable-body shape/thickness rules do not apply to FEM.Cloth cloth_mesh assets, which are expected to be thin surface meshes.",
       "scopes": [
         "planner",
         "body",
@@ -208,25 +208,34 @@
         "thin_spiky_protrusions",
         "bbox_mismatch",
         "texture_underrepresented",
-        "unusable_morphology"
+        "unusable_morphology",
+        "solid_glass_volume_for_thin_screen",
+        "transparent_shell_wrong_thickness"
       ],
       "guidance": [
         "Use procedural primitives or simple CAD-like geometry for plain boxes, cuboids, cylinders, rods, plates, pads, blocks, cups, gauges, and other simple shapes instead of generating decorative meshes.",
         "For generated mesh assets, inspect preview images, manifest bbox, aspect ratios, orientation, thickness, semantic silhouette, texture visibility, and mesh complexity before body/action tuning.",
-        "For FEM assets, reject assets that pass manifold or FEM import checks but are too thin, too small, overcomplex, spiky, high-element-count, or semantically unlike the requested object.",
+        "For volumetric FEM/deformable-body generated mesh assets, reject assets that pass manifold or FEM import checks but are too thin, too small, overcomplex, spiky, high-element-count, or semantically unlike the requested object.",
+        "For FEM.Cloth assets, defer shape capability and validation rules to fem_cloth_shell_guideline. Procedural cloth_mesh assets are allowed to be thin/open surfaces when their shape is one of square, rectangle, cylinder, or sphere; do not apply volumetric deformable-body thickness rejection to them.",
         "For XML/MJCF mechanisms, inspect whether the generated morphology exposes the required joints, actuators, collision affordances, grasp surfaces, and contact geometry.",
+        "For transparent screens, windows, panes, and plates, inspect all primitive or mesh dimensions and require a bounded thin layer. A cylinder primitive is acceptable for a circular screen only when its axial half-height is small relative to its radius and does not fill the enclosing mechanism depth.",
+        "For transparent shells, tubes, drums, and containers, distinguish a real thin shell or authored inner/outer surfaces from a solid transparent primitive occupying the interior volume.",
         "If the asset's intrinsic shape is wrong, revise the Planner asset request and regenerate; if only scale metadata is wrong and the shape is otherwise correct, use metadata update rather than source-level workarounds."
       ],
       "restrictions": [
         "Do not ask body.py to procedurally reshape, non-uniformly scale, or hide an intrinsically wrong generated mesh.",
         "Do not accept an asset just because manifold validation, FEM import, or XML parsing passed; semantic shape and task affordance must also match.",
-        "Do not use thin spikes, hair-like details, decorative protrusions, or high-complexity surfaces for tasks that need robust FEM contact or simple rigid collision."
+        "Do not use thin spikes, hair-like details, decorative protrusions, or high-complexity surfaces for tasks that need robust volumetric FEM contact or simple rigid collision.",
+        "Do not reject FEM.Cloth cloth_mesh assets solely because they are thin or open; cloth is a surface simulation path, not a volumetric deformable-body asset path.",
+        "Do not accept a solid transparent volume when the prompt semantically requests only a screen, pane, wall, shell, or container boundary."
       ],
       "checks": [
         "Check requested dimensions against asset_manifest bbox and final runtime scale.",
         "Check preview/contact-sheet appearance for recognizable semantic shape and requested color or texture markers.",
         "Check mesh vertex/face/tet counts and whether complexity is appropriate for the task and runtime budget.",
-        "Check whether the failure should route to Planner asset regeneration, metadata update, or local body/action repair."
+        "For source_type cloth_mesh, check validation.cloth_mesh.shape or validation.cloth_mesh.generation using fem_cloth_shell_guideline instead of applying volumetric generated-body thickness criteria.",
+        "Check whether the failure should route to Planner asset regeneration, metadata update, or local body/action repair.",
+        "Check screen/window/shell thickness against overall span and enclosing-mechanism depth before physics/cache acceptance; geometry defects discovered after acceptance require a new source/cache run, not render-only replacement."
       ],
       "dispatch_hints": [
         "Send to Planner before start_mesh_assets or start_xml_assets when a task depends on generated morphology.",
@@ -249,7 +258,7 @@
       "schema_version": 1,
       "id": "generated_mesh_manifest_usage_guideline",
       "title": "Generated mesh workers should use the asset manifest, not guessed paths or ad hoc replacements",
-      "summary": "Generated mesh and procedural cloth mesh assets must be instantiated from ready asset_manifest entries with their runtime mesh, scale, coordinate metadata, texture metadata, and simulation role preserved.",
+      "summary": "Generated mesh and cloth mesh assets must be instantiated from ready asset_manifest entries with their runtime mesh, scale, coordinate metadata, texture metadata, and simulation role preserved.",
       "scopes": [
         "planner",
         "body",
@@ -281,8 +290,9 @@
       ],
       "guidance": [
         "For generated mesh assets, read assets/asset_manifest.json and use entries with source_type == generated_mesh and status == ready.",
-        "For FEM cloth assets, read entries with source_type == cloth_mesh and status == ready; these are surface meshes for gs.materials.FEM.Cloth and are not required to be watertight.",
+        "For FEM cloth assets, read entries with source_type == cloth_mesh and status == ready; these are surface meshes for gs.materials.FEM.Cloth. Procedural sheet/ribbon assets may be open surfaces; Meshy-generated cloth shells are closed manifold surfaces.",
         "For procedural FEM cloth assets, inspect validation.cloth_mesh.target_edge_length, median_edge_length, and face_count to verify the Planner's requested cloth_target_edge_length produced an appropriate resolution.",
+        "For Meshy-generated FEM cloth shells, inspect validation.cloth_mesh.generation == meshy, validation.cloth_mesh.manifold, and validation.cloth_mesh.genesis_cloth_import before instantiating the asset.",
         "Instantiate runtime geometry from entry.runtime_path using the manifest scale, file_meshes_are_zup metadata, visual_path, and intended fixed/dynamic role.",
         "runtime_path is the strict-manifold simulation/collision mesh.",
         "visual_path is a seam-aware textured render mesh attached to the same rigid entity, not a separate object to instantiate as an independent simulation body.",
@@ -371,7 +381,7 @@
       "schema_version": 1,
       "id": "visual_texture_asset_request_guideline",
       "title": "Use generated mesh assets for textured or complex static objects",
-      "summary": "When requested appearance depends on texture, pattern, ornamentation, or complex non-articulated object structure, Planner should prefer Meshy-generated mesh assets over primitive approximations.",
+      "summary": "When requested appearance depends on texture, pattern, ornamentation, or complex non-articulated object structure, Planner should prefer Meshy-generated mesh assets over primitive approximations. This preference applies to non-cloth objects and volumetric/generated assets; it must not override FEM.Cloth cloth_mesh shape limits.",
       "scopes": [
         "planner",
         "body",
@@ -397,13 +407,15 @@
         "texture_warning"
       ],
       "guidance": [
-        "Any object whose requested appearance depends on texture, patterned surface detail, decorative material variation, image-like surface content, or nontrivial visual ornamentation should be represented by a Meshy-generated asset request, even when the task does not explicitly say mesh.",
-        "If an object has a complex recognizable shape, organic silhouette, decorative pattern, or texture, and it does not need joints, actuators, or articulation, prefer a Meshy generated_mesh asset instead of approximating it with many primitives or plain colors.",
+        "Any non-cloth object whose requested appearance depends on texture, patterned surface detail, decorative material variation, image-like surface content, or nontrivial visual ornamentation should be represented by a Meshy-generated asset request, even when the task does not explicitly say mesh.",
+        "If a non-cloth object has a complex recognizable shape, organic silhouette, decorative pattern, or texture, and it does not need joints, actuators, or articulation, prefer a Meshy generated_mesh asset instead of approximating it with many primitives or plain colors.",
+        "For FEM.Cloth assets, follow fem_cloth_shell_guideline first: procedural cloth_mesh is limited to square, rectangle/ribbon/strip, cylinder/tube/sleeve, and sphere/balloon shapes; Meshy generated_mesh is only for complex closed manifold cloth shells explicitly requested as cloth shells.",
         "Do not ask writers to fake texture-dependent objects with plain primitive colors or simple Genesis surfaces.",
         "When visual appearance matters, include texture needs and simulation role in the asset request so downstream workers can use manifest texture metadata and critic can verify rendered texture evidence."
       ],
       "restrictions": [
-        "Do not use Meshy for objects that need controllable joints, hinges, sliders, or articulated mechanisms; route those to XML/MJCF asset requests instead."
+        "Do not use Meshy for objects that need controllable joints, hinges, sliders, or articulated mechanisms; route those to XML/MJCF asset requests instead.",
+        "Do not use this card to justify arbitrary open FEM.Cloth silhouettes, icons, logos, animal-shaped cloth patches, or other complex procedural cloth_mesh outlines."
       ],
       "dispatch_hints": [
         "Send to planner when writing planner_output asset_requests.",
@@ -452,7 +464,8 @@
         "root_pose_motion",
         "underspecified_mechanism",
         "dummy_mount_interference",
-        "hidden_mount_obstacle"
+        "hidden_mount_obstacle",
+        "transparent_screen_wrong_thickness"
       ],
       "guidance": [
         "For articulated robots, grippers, gates, latches, actuated mechanisms, or any task object best represented as one self-contained MJCF body tree with joints and actuators, add an XML/MJCF asset request with asset_type generated_xml or mjcf.",
@@ -464,13 +477,16 @@
         "If a dummy mount/base geom is needed so IPC treats the articulation as well-formed, request it as tiny, named, reported, and far outside the active interaction volume with positive initial clearance from all task objects. It should use the smallest practical nonzero size that satisfies importer/IPC bookkeeping, and it should not sit in a roller gap, gripper cage, containment opening, slot, chute, support path, object trajectory, or exit path.",
         "For roller, spool, paddle, press, or gripper mechanisms, do not allow a single mount at one end of the active contact span. Put mounts outside the swept/contact region, make them symmetric if they are physical, or make them remote bookkeeping-only geoms that cannot affect task contact.",
         "For deformable squeeze or transport mechanisms, assume the soft body can bulge sideways and along the roller/tool axis; mount/base geoms must be outside that expanded bbox and must have positive initial clearance.",
+        "When an XML/MJCF request includes a transparent screen, window, pane, or plate, specify its radius/width/height and a small physical thickness explicitly. Do not describe or generate a transparent primitive that fills the enclosing drum, vessel, room, or container depth.",
+        "When an XML/MJCF request includes a hollow transparent shell, tube, or container, specify whether inner and outer surfaces are required and keep the geometry semantically hollow before physics/cache acceptance.",
         "Do not ask action to create motion for an XML articulated asset by overwriting root pose, qpos, or velocities during simulation.",
         "If the actuator contract is missing, generated code should fail clearly so critic can assign a source-aware body/action repair."
       ],
       "checks": [
         "Inspect generated XML for mount/base geoms near active contact paths; route to XML asset regeneration if they can collide with, guide, block, wedge, or deflect task objects.",
         "Check that active tool surfaces keep collision enabled while dummy mount/base geoms are far from task objects and cannot become hidden obstacles.",
-        "Check that XML asset reports identify dummy mounts separately from active contact geoms and state their pose, minimal nonzero size, initial-clearance margin, and safety rationale."
+        "Check that XML asset reports identify dummy mounts separately from active contact geoms and state their pose, minimal nonzero size, initial-clearance margin, and safety rationale.",
+        "Inspect transparent screen/shell primitive dimensions in generated XML and reject full-volume glass substitutes for thin boundaries."
       ],
       "dispatch_hints": [
         "Send to planner when creating or rewriting XML/MJCF asset requests.",
@@ -1740,7 +1756,7 @@
       "schema_version": 1,
       "id": "fem_cloth_shell_guideline",
       "title": "FEM cloth uses IPC shell meshes, not PBD or volumetric tets",
-      "summary": "Thin cloth tasks should use gs.materials.FEM.Cloth with ready procedural cloth_mesh surface assets and IPC contact; PBD cloth and volumetric FEM substitutes remain out of scope unless the task is explicitly rewritten.",
+      "summary": "Thin cloth tasks should use gs.materials.FEM.Cloth with ready cloth_mesh surface assets and IPC contact. Procedural cloth_mesh only supports four basic shape families: square sheet, rectangle/ribbon/strip sheet, cylinder/tube/sleeve shell, and sphere/balloon shell; it does not generate arbitrary silhouettes, logos, icons, animals, or other complex open cloth outlines. Complex closed manifold cloth shells may use Meshy generated_mesh requests routed back to cloth_mesh. PBD cloth and volumetric FEM substitutes remain out of scope unless the task is explicitly rewritten.",
       "scopes": [
         "planner",
         "scene",
@@ -1769,14 +1785,18 @@
         "volumetric_substitute",
         "tet_resolution_for_cloth",
         "cloth_asset_missing",
-        "cloth_initial_intersection"
+        "cloth_initial_intersection",
+        "unsupported_cloth_mesh_shape",
+        "complex_open_cloth_silhouette"
       ],
       "guidance": [
-        "Request cloth geometry as asset_type cloth_mesh or one of cloth_mesh_square, cloth_mesh_rectangle, cloth_mesh_cylinder, or cloth_mesh_sphere; use the resulting asset_manifest entry with source_type cloth_mesh.",
+        "For procedural FEM.Cloth geometry, request asset_type cloth_mesh_square, cloth_mesh_rectangle, cloth_mesh_cylinder, cloth_mesh_sphere, or generic cloth_mesh only when one of the four supported basic shapes is acceptable: square sheet, rectangle/ribbon/strip sheet, cylinder/tube/sleeve shell, or sphere/balloon shell. Generic cloth_mesh is not an arbitrary contour generator.",
+        "Do not request arbitrary 2D silhouettes, icons, logos, letters, animals, character profiles, custom cutouts, or complex open cloth outlines through procedural cloth_mesh. The procedural generator must hard-fail these requests as unsupported instead of silently approximating them as a square or rectangle.",
+        "For complex closed manifold FEM.Cloth shells whose visual shape matters more than regular grid control, request asset_type generated_mesh and make purpose/simulation_role explicitly say FEM.Cloth closed manifold shell or cloth shell; the Meshy-generated manifold surface is written back as source_type cloth_mesh.",
         "For cloth asset_request bbox, all three components must be positive; use a small positive thickness dimension such as 0.001 for flat square or rectangle sheets instead of 0.0.",
-        "Every asset_request includes cloth_target_edge_length; set it to null for non-cloth assets or default cloth resolution, or set a positive meter value to control cloth primitive mesh resolution per asset.",
+        "Every asset_request includes cloth_target_edge_length; set it to null for non-cloth assets, Meshy-generated cloth shells, or default procedural cloth resolution, or set a positive meter value to control cloth primitive mesh resolution per asset.",
         "Choose cloth_target_edge_length relative to bbox size and contact needs, then check validation.cloth_mesh.target_edge_length, median_edge_length, and face_count; the generator may coarsen relative to the target when the configured max face budget would be exceeded.",
-        "Instantiate cloth with gs.morphs.Mesh(file=runtime_path, scale=scale or 1.0, file_meshes_are_zup=True) and gs.materials.FEM.Cloth.",
+        "Instantiate cloth with gs.morphs.Mesh(file=runtime_path, scale=scale or 1.0, file_meshes_are_zup=entry.get(\"file_meshes_are_zup\")) and gs.materials.FEM.Cloth.",
         "Choose E, nu, rho, thickness, bending_stiffness, and friction_mu from deformable_cfg cloth defaults/ranges; do not use tet_resolution for FEM.Cloth.",
         "For square and rectangle cloth, start with moderate grid resolution and positive clearance from rigid colliders.",
         "For cylindrical and spherical cloth shells, keep the mesh coarse enough for IPC contact and avoid initial self-intersection or near-coincident folds.",
@@ -1785,12 +1805,14 @@
       "restrictions": [
         "Do not instantiate gs.materials.PBD.Cloth or gs.options.PBDOptions in code_agent cloth tasks.",
         "Do not use Genesis built-in meshes/cloth.obj; use ready cloth_mesh assets generated into the case workspace.",
-        "Do not pass tet_resolution to cloth morphs or route cloth meshes through the generated_mesh watertight/tetgen repair path.",
+        "Do not ask procedural cloth_mesh to create complex silhouettes or recognizable graphic outlines. If the prompt fundamentally requires an unsupported open cloth silhouette, Planner should revise the task to a supported basic cloth shape with an explicit limitation or finish fail/inconclusive rather than looping on asset retries.",
+        "Do not pass tet_resolution to cloth morphs. Only complex closed manifold cloth shells should route through the Meshy watertight/manifold repair path, and the final manifest entry must still be source_type cloth_mesh.",
         "Do not fake cloth motion with rigid sheets, direct vertex pose edits after stepping starts, hidden constraints, or keyframed folding."
       ],
       "checks": [
         "Check generated source for gs.materials.FEM.Cloth and absence of PBD cloth APIs.",
-        "Check asset_manifest for a ready source_type cloth_mesh entry whose runtime_path exists and whose face count is within budget.",
+        "Check asset_manifest for a ready source_type cloth_mesh entry whose runtime_path exists, whose validation.cloth_mesh.shape is one of square, rectangle, cylinder, or sphere for procedural cloth, and whose face count is within budget.",
+        "If asset generation reports cloth_mesh.unsupported_shape or validation.cloth_mesh.error mentions unsupported procedural cloth_mesh shape, route the failure to Planner task/asset request revision instead of body/action repair.",
         "Check initial layout for positive clearance relative to cloth thickness and ipc_contact_d_hat.",
         "Check video and metrics for visible bending, draping, folding, or shell deformation rather than rigid-sheet motion."
       ],
@@ -2285,21 +2307,36 @@
         "bad_camera_target",
         "overwide_fov",
         "unreadable_video",
-        "object_leaves_frame"
+        "object_leaves_frame",
+        "vertex_follow_camera",
+        "unstable_camera_target",
+        "raw_bbox_zoom",
+        "camera_temporal_jitter",
+        "replay_camera_smoothing_disabled"
       ],
       "guidance": [
         "When generating or repairing rendering, estimate the main dynamic objects' initial, mid-run, and final bounding boxes, then choose camera target, distance, and FOV so the main behavior occupies about 55%-80% of the image.",
+        "For final path-traced replay, use the full trajectory bbox from the state cache manifest when available, not only actor positions from the first frame.",
+        "Prefer a fixed final camera fitted to the full trajectory bbox. Enable a following camera only when the main subject translates far enough that a fixed camera cannot keep the behavior readable.",
+        "When camera following is necessary, target the main object's whole-body center of mass. Prefer a physics-reported mass-weighted center of mass; otherwise use a stable area-, volume-, or vertex-weighted centroid over the complete visible object.",
+        "For multi-actor interactions, define a stable primary actor set and follow its aggregate center of mass. Do not switch the target identity between actors as contacts or extrema change.",
+        "Smooth follow target and camera distance over time with a dead zone, low-pass filter, and bounded per-frame movement. Use the full-trajectory envelope or a smoothed extent for distance fitting rather than raw per-frame bbox size.",
         "Do not let the main subjects shrink into a small corner or a tiny central region.",
         "For objects with large travel, prefer a better camera center, elevated oblique view, and moderate distance over blindly looking at the world origin.",
         "Use a slightly wider view only when the action would otherwise leave the frame, and keep the behavior readable rather than merely visible."
       ],
       "restrictions": [
         "Do not accept a physically correct render if the requested contact, deformation, motion, or interaction cannot be judged because the subjects are too small.",
-        "Do not optimize camera framing by cropping away necessary start, impact, or final-settle context."
+        "Do not optimize camera framing by cropping away necessary start, impact, or final-settle context.",
+        "Do not follow a selected vertex, contact point, bbox corner, highest point, farthest point, or another instantaneous geometric extremum.",
+        "Do not apply unsmoothed per-frame COM, bbox, distance, or FOV updates, and do not disable camera smoothing during render-only replay."
       ],
       "checks": [
         "Inspect sampled frames or contact sheets for subject fill ratio, centering, and whether the main action remains in frame.",
-        "Check render_stats.json records camera position, lookat, FOV, and resolution when available."
+        "For replay renders, check the cache frame bboxes or start/mid/end cached states before locking the final camera.",
+        "Check render_stats.json records camera position, lookat, FOV, and resolution when available.",
+        "When following is enabled, require render_stats.json to record camera_follow.enabled, target_source, com_source, smoothing parameters, per-frame position/lookat/distance, and maximum adjacent-frame deltas.",
+        "Review camera position, target, and distance trajectories for temporal jumps or breathing zoom; a subject remaining in frame is not sufficient when the camera motion is unstable."
       ],
       "dispatch_hints": [
         "Send to rendering for camera setup and repair.",
@@ -2349,6 +2386,8 @@
       ],
       "guidance": [
         "Treat execution_report.json as the source of truth for the latest run status, start time, exit code, timeout flag, and workspace directory.",
+        "When final video is produced from a state cache, treat artifacts/state_cache/manifest.json and its frame npz files as part of the freshness contract.",
+        "Final replay render_stats.json must cite the cache manifest, source hashes, and replay_only status so Critic can distinguish fresh replay from stale physical evidence.",
         "Use metrics.json, event_log.json, run_result.json, summary.json, render_stats.json, frames, and render.mp4 only if they were produced by the latest completed execution.",
         "Before rerunning a failed or repaired case, clean or clearly version output artifacts so Critic cannot confuse stale successful artifacts with current failed execution.",
         "When the latest execution times out or exits nonzero, require a clean successful rerun before accepting task success even if old video or metrics files still exist.",
@@ -2356,13 +2395,16 @@
       ],
       "restrictions": [
         "Do not pass an episode using metrics, render_stats, frames, or video whose timestamps or run identifiers predate the latest execution_report started_at time.",
+        "Do not accept a replay render whose cache manifest or referenced npz files predate the accepted physics run or no longer match source hashes.",
         "Do not use stale completed video to mask a later timeout, nonzero exit, or source repair that never finished.",
         "Do not let a success flag in an old summary override a current execution failure."
       ],
       "checks": [
         "Check execution_report.status, exit_code, timed_out, started_at_unix, and duration_sec before inspecting semantic success.",
+        "If render_stats.json records a replay cache, check that the manifest and all referenced npz files are present and fresh.",
         "Check artifact timestamps, run identifiers, frame counts, render_stats frame totals, and video presence against the latest execution.",
         "Check whether current frames cover the requested duration and whether render.mp4 exists for the latest run.",
+        "For rendered evidence, do not accept a merely non-empty render.mp4. Its probed frame count and duration must agree with render_stats.json and the saved frame_*.png sequence; a single-frame camera-recording MP4 is not valid evidence for a multi-frame render.",
         "Check whether summary/run_result success agrees with the latest metrics and execution status."
       ],
       "dispatch_hints": [
@@ -2384,8 +2426,8 @@
     {
       "schema_version": 1,
       "id": "non_white_ground_on_white_background_guideline",
-      "title": "Use a subtly tinted ground on white backgrounds",
-      "summary": "When the background is pure white and a ground plane is present, use a light non-white ground color unless the prompt explicitly requests white ground.",
+      "title": "Use visible ground contrast on light backgrounds",
+      "summary": "When a render uses a white, near-white, or light studio background and includes a ground plane, use a subtly non-white ground unless the prompt explicitly requests white ground.",
       "scopes": [
         "planner",
         "scene",
@@ -2411,17 +2453,20 @@
         "pure_white_ground"
       ],
       "guidance": [
-        "If the render uses a pure white background and includes a ground/floor, do not make the ground pure white unless the prompt explicitly requires white ground.",
+        "This card does not require a white background; it only applies after the scene has already chosen a white, near-white, or light studio background.",
+        "If the render uses a light background and includes a ground/floor, do not make the ground pure white unless the prompt explicitly requires white ground.",
         "Use a low-saturation light color such as light gray, pale blue-gray, or pale warm gray so the horizon, contact shadows, and support surface remain visible.",
+        "For final path-traced renders, prefer a polished light neutral studio floor that supports soft shadows and contact cues without reading as a pure-white void.",
         "Keep the ground subtle enough that it does not distract from task objects, but distinct enough to separate from the sky/background."
       ],
       "restrictions": [
         "Do not override a prompt that explicitly asks for a white floor or a specific ground material.",
-        "Do not use dark or saturated floors when the task only needs a neutral evidence render."
+        "Do not use dark or saturated floors when the task only needs a neutral debug evidence render.",
+        "Do not use this card to force a final render back to a pure-white stage when final_path_tracing_siggraph_guideline calls for a light studio look-dev setup."
       ],
       "checks": [
         "Inspect sampled frames for a visible floor boundary, contact shadow, or surface cue.",
-        "Check scene/rendering code for a non-white floor material when background_color is white."
+        "Check scene/rendering code for a non-white floor material when background_color is white, near-white, or a light studio tone."
       ],
       "dispatch_hints": [
         "Send to scene/rendering when floor material or background color is chosen.",
@@ -2429,9 +2474,69 @@
       ],
       "provenance": {
         "source": "new_simdebug_card",
-        "motivation": "Avoid invisible pure-white floors on white evidence backgrounds."
+        "motivation": "Avoid invisible pure-white floors on light evidence or final studio backgrounds."
       },
       "source_path": "code_agent/context/simdebug/evidence_validation/non_white_ground_on_white_background_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "render_replay_consistency_guideline",
+      "title": "Validate render-only replay against accepted physics cache",
+      "summary": "A replayed final video must cite a fresh, validated state cache from an accepted physical run and must not silently step or alter physics.",
+      "scopes": [
+        "planner",
+        "rendering",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "replay",
+        "render_only",
+        "final_render",
+        "state_cache",
+        "artifact"
+      ],
+      "failure_tags": [
+        "replay_without_cache",
+        "replay_stepped_physics",
+        "cache_mismatch",
+        "stale_replay",
+        "missing_replay_metadata",
+        "articulated_motion_missing_from_replay",
+        "replay_actor_state_incomplete"
+      ],
+      "guidance": [
+        "Render-only replay should use a cache manifest produced by the latest accepted physical run.",
+        "Replay code must apply cached states and render frames without calling scene.step().",
+        "Final render_stats.json should record replay_only=true, physics_cache_manifest, cache frame count, source hashes, and source run result when available.",
+        "If cache validation fails or source hashes mismatch, rerun physics or repair the cache before final rendering.",
+        "Compare the manifest actor contracts with the rebuilt scene before rendering. Final replay must fail when an articulated actor lacks qpos/DOF state, a deformable actor lacks vertex state, or a required setter cannot apply the cached state.",
+        "Compare task-critical cached motion with rendered motion. Joint-driven rollers, drums, paddles, robot links, gates, and similar articulated actors must visibly follow their cached generalized coordinates rather than remaining at their initial pose."
+      ],
+      "restrictions": [
+        "Do not accept a final replay video that lacks cache provenance in render_stats.json.",
+        "Do not accept replay output if it was generated after physics source changes without a new cache.",
+        "Do not use stale videos or frame directories to mask replay failures.",
+        "Do not accept replay_valid=true from file existence alone; every required actor-state array must be present, finite, shape-consistent, and successfully applied."
+      ],
+      "checks": [
+        "Check replay_only and physics_cache_manifest fields in render_stats.json.",
+        "Check frame count and video duration match the validated cache and requested fps.",
+        "Check cache manifest freshness against execution_report and source hashes.",
+        "Check actor_contracts and per-frame required arrays, then inspect task-critical articulated and deformable motion in start/mid/end replay frames."
+      ],
+      "dispatch_hints": [
+        "Send to rendering when replay mode is requested.",
+        "Send to Critic when judging final path-traced replay evidence."
+      ],
+      "provenance": {
+        "source": "path_tracing_debug_card_workflow",
+        "motivation": "Make final render replay auditable and resistant to stale artifacts."
+      },
+      "source_path": "code_agent/context/simdebug/evidence_validation/render_replay_consistency_guideline.yaml"
     },
     {
       "schema_version": 1,
@@ -2472,10 +2577,15 @@
         "missing_video"
       ],
       "guidance": [
-        "When the task does not specify a background or environment, prefer a plain pure-white background for ordinary evidence renders so objects, contacts, and motion stay easy to inspect.",
-        "For Genesis Rasterizer camera renders, set the default light background in scene.py when constructing gs.Scene: pass vis_options=gs.options.VisOptions(background_color=(1.0, 1.0, 1.0), ambient_light=(0.55, 0.55, 0.55), lights=(...)) or a similarly bright near-white background.",
-        "Do not rely on scene.add_light to create the white background. scene.add_light only adds explicit lights for supported renderers and does not replace VisOptions.background_color; with the default Rasterizer it may be unsupported.",
-        "If the case needs non-white environmental context, document that choice in the plan and render_stats.json; otherwise scene.py should explicitly set VisOptions.background_color rather than inheriting the Genesis dark default."
+        "During intermediate physics debugging, ordinary rasterized or low-cost evidence renders are preferred. Their goal is to judge physical behavior quickly, not to achieve final path-traced quality.",
+        "After physics is accepted, final visual polish must be handled by a separate final path-tracing pass rather than by slowing every debug iteration.",
+        "Do not treat a debug raster video as the final accepted render when rendering is requested. It is evidence for physics, not the final deliverable.",
+        "When the task does not specify a background or environment, ordinary debug evidence renders should use an explicit readable high-key background: light gray, pale blue-gray, near-white, or pure white are all acceptable. Pure white is a fallback for fast inspection, not a hard requirement.",
+        "For Genesis Rasterizer debug camera renders, set the default light background in scene.py when constructing gs.Scene: pass vis_options=gs.options.VisOptions(background_color=(1.0, 1.0, 1.0), ambient_light=(0.55, 0.55, 0.55), lights=(...)) or a similarly bright light-gray/near-white background.",
+        "Do not rely on scene.add_light to create the debug background. scene.add_light only adds explicit lights for supported renderers and does not replace VisOptions.background_color; with the default Rasterizer it may be unsupported.",
+        "For final_path_traced or replay_render outputs, do not inherit the debug evidence pure-white fallback. Choose the final background, floor, lighting, and material look from final_path_tracing_siggraph_guideline, and record render_profile, background_style, floor_material, and lighting metadata in render_stats.json.",
+        "For final_path_traced outputs, keep iterating if the image is flat, over-lit, noisy, cropped, or materially bland; first successful RayTracer execution is not enough by itself.",
+        "If the case needs non-white environmental context, document that choice in the plan and render_stats.json; otherwise scene.py should explicitly set a readable background rather than inheriting the Genesis dark default."
       ],
       "restrictions": [
         "Do not treat unclear rendering as acceptable when the simulation behavior cannot be judged.",
@@ -2485,7 +2595,10 @@
       ],
       "checks": [
         "Inspect sampled frames or video before accepting success.",
-        "When no non-white environment is requested, check generated scene.py for gs.options.VisOptions with an explicit bright background_color and ambient_light passed into gs.Scene.",
+        "Check whether the current render is a debug evidence render or a final render, and judge it against the appropriate standard.",
+        "For debug raster evidence, check generated scene.py for gs.options.VisOptions with an explicit readable high-key background_color and ambient_light passed into gs.Scene.",
+        "For final or replay rendering, check that background, floor, lighting, and material choices follow final_path_tracing_siggraph_guideline rather than this debug evidence fallback.",
+        "For final rendering, check render_stats.path_tracing.enabled is true before accepting the result as final visual evidence.",
         "Record final camera and rendering choices in render_stats.json when the generated case supports it.",
         "If meshes or textures are involved, check whether orientation, scale, material binding, and rendered texture appearance are consistent with the source and manifest."
       ],
@@ -2613,13 +2726,22 @@
         "default_gray_objects",
         "oversaturated_palette",
         "poor_color_separation",
-        "muddy_palette"
+        "muddy_palette",
+        "all_white_scene_lock_in",
+        "low_contrast_palette_retry_loop"
       ],
       "guidance": [
         "Planner, asset decisions, scene/body/rendering workers, and Critic should inspect not only semantic and physics correctness, but also whether the video is visually readable and easy to review.",
+        "When Critic has accepted physical behavior, visual-readability work may escalate to a final render pass governed by final_path_tracing_siggraph_guideline.",
+        "When final rendering is required, visual-readability work must continue through an accepted final_path_traced pass; a debug raster pass only validates the physics.",
+        "During final path-traced look-dev, encourage semantic material variety and visible lighting hierarchy so the image reads as a polished path-traced render rather than a flat diffuse preview.",
+        "For final path-traced visuals, semantic visual geometry should be authored before physics/cache acceptance. Render-only look-dev must not add, hide, or replace collision helper tiles, proxy cages, supports, or shells to improve appearance.",
         "Treat subject size, ground/background contrast, viewing angle, occlusion, color separation, lighting, and one-glance motion legibility as soft quality goals.",
         "Visual readability is not normally a hard pass/fail condition by itself, but repair advice and generated visual choices should push the result toward clearer, more polished, and easier-to-review output when semantics are otherwise close.",
         "When the prompt does not specify object colors, avoid defaulting all important objects to gray. Assign distinct, role-aware colors so different actors, obstacles, targets, supports, and actuators are easy to distinguish.",
+        "Do not put every important actor, wall, window, support, floor, and background in the same white or near-white value range. A preferred light studio background still needs hue or value separation from light-colored subjects.",
+        "Preserve prompt-specified colors. If the prompt requires a white main actor, keep it white and create separation through the background, floor, window, fixtures, roughness, and lighting rather than recoloring the required actor.",
+        "If two consecutive final-render attempts are rejected for low contrast or disappearing subjects, the next repair must make a substantive palette, background-value, material-roughness, exposure, or key/fill hierarchy change instead of repeating tiny exposure adjustments.",
         "Prefer soft, low-to-medium saturation colors with clear value contrast: muted teal, soft blue, gentle green, warm orange, dusty rose, lavender, pale yellow, or warm clay. Use gray mainly for neutral supports, floors, metal fixtures, or intentionally background objects.",
         "Use a clean character-animation visualization style: simple readable shapes, uncluttered backgrounds, subtle floor cues, soft shadows, and a small number of coordinated colors that clarify motion rather than distract from it.",
         "Use color semantically: the main dynamic actor gets the strongest readable color; passive obstacles and supports get quieter colors; goals, handles, or actuators may receive a consistent accent color.",
@@ -2630,14 +2752,19 @@
         "Do not recommend purely cosmetic changes that would break physical semantics or hide failure evidence.",
         "Do not leave multiple important prompt-unspecified objects as the same gray material when color separation would make the behavior easier to inspect.",
         "Do not use highly saturated, neon, or rainbow palettes as the default style; reserve them for prompts that explicitly ask for bright, toy-like, or stylized colors.",
-        "Do not choose colors that make contact, deformation, or relative motion harder to see against the ground/background."
+        "Do not choose colors that make contact, deformation, or relative motion harder to see against the ground/background.",
+        "Do not approve an all-white or near-white scene merely because individual material declarations differ numerically; the final rendered subjects must remain visually separable."
       ],
       "checks": [
         "Review sampled frames and video, not only metrics and event logs.",
+        "For final renders, check start, mid, and end frames under the final camera/lights/materials rather than approving only the first frame.",
+        "For final renders, check that material choices include task-appropriate metal, rough plastic/rubber/cloth, or refractive glass/transmission where those semantics appear in the prompt.",
+        "For final renders, check that transparent objects use renderer-native refractive materials and that any required hollow shell/container geometry already exists in the accepted scene rather than being introduced during render-only replay.",
         "When proposing repair, separate hard correctness failures from soft visual-readability improvements.",
         "Check whether the main actor, passive objects, obstacles, supports, and targets are visually separable in sampled frames.",
         "Check whether unspecified colors were chosen intentionally rather than falling back to gray/default materials.",
-        "Check that the palette is coordinated and low-to-medium saturation unless the prompt asked for vivid colors."
+        "Check that the palette is coordinated and low-to-medium saturation unless the prompt asked for vivid colors.",
+        "Check render_stats.json records palette_roles and the material/background changes made after repeated low-contrast repair attempts."
       ],
       "dispatch_hints": [
         "Send to planner when visual styling, asset requests, or worker dispatch may affect readability.",
@@ -2978,6 +3105,165 @@
     },
     {
       "schema_version": 1,
+      "id": "final_path_tracing_siggraph_guideline",
+      "title": "Tune final GPU path tracing toward SIGGRAPH-demo visual quality",
+      "summary": "Final renders must use Genesis RayTracer on GPU with denoising, light studio backgrounds, controlled lighting, readable materials, iterative look-dev, and recorded path-tracing metadata.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "rendering",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "path_tracing",
+        "raytracer",
+        "optix",
+        "denoise",
+        "final_render",
+        "lighting",
+        "material"
+      ],
+      "failure_tags": [
+        "opengl_style_render",
+        "noisy_path_trace",
+        "optix_stub",
+        "denoise_failed",
+        "visible_light_mesh",
+        "missing_light_visibility_check",
+        "light_frustum_intersection",
+        "overexposed_render",
+        "cropped_final_render",
+        "flat_lighting",
+        "diffuse_only_materials",
+        "alpha_fake_glass",
+        "solid_glass_volume_for_thin_screen",
+        "low_contrast_palette_retry_loop",
+        "one_shot_final_render"
+      ],
+      "guidance": [
+        "Final renders must use GPU gs.renderers.RayTracer with WavePathIntegrator or an equivalent validated path-tracing integrator.",
+        "Do not accept a final render whose render_stats.json has path_tracing.enabled=false. That is still debug evidence, not the final deliverable.",
+        "Use camera_denoise=True for final outputs; treat OptiX denoiser failures as runtime issues to fix, not as a reason to silently disable denoising.",
+        "Use low spp only for previews. Final outputs should use 512 spp or higher when runtime allows.",
+        "Use tracing_depth in the 16-32 range; 24 is a validated practical default.",
+        "Use large sphere, mesh, or emissive area lights for soft shadows and highlights, but project-check their renderable geometry so it cannot intersect the final camera frustum.",
+        {
+          "Treat RayTracer sphere lights as renderable geometry": "place large soft lights outside the camera frustum, typically behind/above the camera or well off-frame, and rerender if any light ball appears in a final frame."
+        },
+        "Validate light visibility from parameters as well as pixels. Project each sphere radius or emissive-mesh world bbox through every final camera pose, or conservatively test it against the swept frustum; a white background does not waive this check because a white light ball may be visually camouflaged.",
+        "Avoid flat over-lit setups. Reduce uniform ambient light, build a visible key/fill/rim hierarchy, and preserve soft contact shadows and tonal layers.",
+        "Prefer light studio backdrops such as warm light gray, pale blue-gray, soft off-white, or other neutral high-key backgrounds, with non-pure-white matte floors when such support geometry already exists, soft shadows, controlled warm key light, cool fill, and small rim accents.",
+        "Do not inherit the debug raster pure-white background fallback as the final look. Use pure white in final renders only when the prompt explicitly asks for a white stage/product-style background or when it is required for visual comparison.",
+        "Choose semantically varied materials instead of defaulting to diffuse surfaces. Use metallic/satin materials for metal objects, rougher plastic/rubber/cloth materials for soft or textile objects, and controlled specular highlights for tools and fixtures.",
+        "For transparent or semi-transparent final-render objects, do not fake glass with only RGBA alpha or Smooth.opacity. Use path-traced transmission/refraction materials such as gs.surfaces.Glass or task-appropriate Glass/Water-derived surfaces with IOR, transmission/tint, and roughness metadata.",
+        "For Genesis Glass, prefer explicit renderer-native material settings such as gs.surfaces.Glass(color=(1.0, 1.0, 1.0), roughness=0.0-0.06, ior=1.2-1.5). Use lower tint and lower IOR for thick glass that otherwise looks smoky; use stronger IOR/tint only when the refractive object remains readable.",
+        "Do not assume a Glass material can turn a solid primitive into a hollow container. A single Glass sphere renders as a solid glass volume; hollow glass shells need actual thin-shell geometry with inner and outer surfaces, authored before the accepted physics/cache run.",
+        "Interpret transparent geometry semantically before physics acceptance. A prompt-requested screen, window pane, or transparent plate must be a bounded thin layer whose thickness is small relative to its span, not a glass primitive that fills the enclosing drum, room, vessel, or container volume.",
+        "Render-only replay must not add, hide, delete, or replace geometry, including collision proxies, support floors, helper cages, or visual shells. It may adjust renderer settings, camera, lights, exposure, and existing surface/material parameters only.",
+        "If dense collision-proxy geometry or helper cages would dominate the final image, route repair to scene/body before physics acceptance so the semantic visual geometry and the cache source are correct. Do not fix that by changing geometry during final render replay.",
+        "When using a constant RayTracer environment, prefer explicit emissive_texture=gs.textures.ColorTexture(...) on gs.surfaces.Emission rather than relying on shortcut fields that may collide with texture resolution.",
+        "Tune roughness and material type for readability. Avoid mirror-like settings that make small or gray actors disappear in reflected environments.",
+        "Final path tracing is an iterative look-dev stage. Planner should repair rendering/body/scene and rerun final_path_traced until start/mid/end frames are polished, not stop after one technically successful RayTracer run.",
+        "Do not remain trapped in an all-white or near-white look-dev loop. After repeated low-contrast rejection, make a substantive palette, background value, roughness, exposure, or lighting-hierarchy change while preserving prompt-specified object colors.",
+        "Final render_stats.json must record path_tracing.enabled, backend, integrator, spp, denoise, tracing depth, render_profile, background_style, floor_material, lights, camera, material notes, transparent_materials, alpha_rgba_used=false for refractive materials, and replay/cache source when used."
+      ],
+      "checks": [
+        "Inspect start, mid, and end frames for cropping, visible lights, overexposure, missing actors, and material readability.",
+        "Check that LD_LIBRARY_PATH in final execution puts /opt/nvidia-optix-595/lib before /usr/lib/wsl/lib when running under WSL.",
+        "Check render_stats.json confirms RayTracer, WavePathIntegrator, camera_denoise=true, and the intended spp.",
+        "Check that the final background is a deliberate light studio choice, not an accidental default inherited from debug raster evidence.",
+        "Check for visible soft shadows and lighting hierarchy; reject flat uniformly lit final renders when the image lacks path-traced depth.",
+        "Require render_stats.json light_visibility_checks for sphere/mesh/emissive lights, including world bounds, tested camera frames, frustum_intersects, and minimum frame clearance. Reject missing checks or any intersection.",
+        "Check transparent objects for true refractive/transmissive material use rather than alpha-only raster-style transparency.",
+        "Check that render-only look-dev did not add, hide, delete, or replace geometry. If final geometry is semantically wrong, require scene/body repair and a new cache instead of accepting a render-only geometry workaround.",
+        "Check that hollow transparent objects have actual hollow/thin-shell geometry; reject solid primitive Glass volumes when the prompt calls for a hollow shell or container.",
+        "Check screen/window/plate primitive dimensions before accepting physics/cache; reject transparent geometry whose depth fills the enclosing mechanism instead of forming a thin layer.",
+        "When prompt-required objects are white, preserve that color but require contrasting window, wall, floor, support, or background roles so silhouettes and motion remain readable.",
+        "Check render-only look-dev outputs have replay_only=true and physics_cache_manifest when they are derived from an accepted state cache."
+      ],
+      "dispatch_hints": [
+        "Send to rendering for final look-dev and camera/lights.",
+        "Send to scene/body when material or backdrop choices must be encoded in generated source.",
+        "Send to Critic when evaluating final render quality and metadata."
+      ],
+      "provenance": {
+        "source": "rigid_sphere_twisting_edge_slide_contact_path_tracing_debug",
+        "motivation": "Capture the successful OptiX/GPU path tracing and look-dev recipe."
+      },
+      "source_path": "code_agent/context/simdebug/rendering_quality/final_path_tracing_siggraph_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "physics_state_cache_replay_guideline",
+      "title": "Save physics state caches for render-only replay",
+      "summary": "Physics runs should be able to save a manifest plus per-frame npz state files so final rendering can replay accepted motion without stepping physics again.",
+      "scopes": [
+        "planner",
+        "action",
+        "rendering",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "state_cache",
+        "replay",
+        "npz",
+        "render_only",
+        "final_render"
+      ],
+      "failure_tags": [
+        "missing_state_cache",
+        "missing_npz",
+        "stale_cache",
+        "replay_failed",
+        "cache_source_mismatch",
+        "missing_articulated_qpos",
+        "incomplete_actor_state_contract"
+      ],
+      "guidance": [
+        "When requested, every physics run must write artifacts/state_cache/manifest.json and artifacts/state_cache/states/frame_*.npz.",
+        "The npz files are a hard requirement. Do not accept a cache manifest whose frame entries cannot be opened as NumPy npz files.",
+        "Rigid caches should save per-frame transforms or positions/quaternions for dynamic rigid actors.",
+        {
+          "Articulated rigid bodies must save a complete replayable generalized state on every frame": "prefer qpos and also record DOF positions when the API exposes them. Root pose alone is insufficient because it cannot reproduce joint/link motion."
+        },
+        "Every manifest must declare an actor contract with each actor's replay mode, required per-frame NPZ arrays, expected shapes, DOF count, and actor identity. Validation must reject any frame that omits or changes a required channel.",
+        "FEM, deformable, and cloth caches should save visible or state vertices, faces references, bboxes, and centers of mass when available.",
+        "Static geometry, materials, actor names, source hashes, sim_dt, substeps, backend, and capture steps should be recorded in the manifest.",
+        "Render-only replay must read a validated manifest and must not call scene.step()."
+      ],
+      "restrictions": [
+        "Do not run final replay from a cache that lacks readable frame npz files.",
+        "Do not treat event_log positions alone as sufficient for final replay when full state cache was requested.",
+        "Do not reuse a cache after source hashes or physics run identity no longer match the accepted physical run.",
+        "Do not mark an articulated cache replayable when it contains only root positions/quaternions but no qpos or DOF-position channel."
+      ],
+      "checks": [
+        "Check manifest.json exists and lists every frame step and relative npz path.",
+        "Check every referenced npz file exists and np.load can open it before replay begins.",
+        "Check every actor contract against every NPZ frame; articulated qpos/DOF arrays and deformable state-position arrays must be present, finite, and shape-stable.",
+        "During replay, require each contracted actor to exist in the rebuilt scene and require the matching set_qpos, set_dofs_position, set_position, or pose setter to succeed before rendering the frame.",
+        "Check render_stats.json records replay_only, physics_cache_manifest, and physics run/source identifiers when replay is used."
+      ],
+      "dispatch_hints": [
+        "Send to action when physics stepping should save state.",
+        "Send to rendering when final rendering should replay from cache.",
+        "Send to Critic when judging cache freshness and replay validity."
+      ],
+      "provenance": {
+        "source": "path_tracing_debug_card_workflow",
+        "motivation": "Avoid rerunning accepted physics while tuning final path-traced rendering."
+      },
+      "source_path": "code_agent/context/simdebug/workflow_orchestration/physics_state_cache_replay_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
       "id": "planner_card_dispatch_guideline",
       "title": "Planner should dispatch focused SimDebug cards to each downstream role",
       "summary": "Planner should use the simdebug_cards action field to send every card that is relevant to the current evidence and declared role scope, while avoiding unrelated default card noise.",
@@ -3004,6 +3290,14 @@
       ],
       "guidance": [
         "Use simdebug_cards when the current action has clear task- or evidence-specific needs; leave it null only when all role/physics-compatible candidates are useful.",
+        "When physics is still failing, dispatch ordinary visual evidence and camera cards for debug renders; do not default to final path tracing.",
+        "After Critic accepts physics, dispatch two_stage_rendering_workflow_guideline, final_path_tracing_siggraph_guideline, physics_state_cache_replay_guideline, and render_replay_consistency_guideline as relevant to final rendering.",
+        "After Critic accepts physics, do not finish the case from debug raster evidence. Request or execute the mandatory final_path_traced pass, then keep dispatching final render repair cards until final_render.status is passed.",
+        "When dispatching final render work, treat final_path_tracing_siggraph_guideline as the owner of background, floor, lighting, and material look-dev. Do not let debug evidence background fallbacks override the final light studio style.",
+        "Dispatch camera_framing_subject_fill_guideline whenever final rendering uses a following camera or per-frame camera updates; require whole-body COM targeting and temporal-continuity evidence, not only subject fill.",
+        "Dispatch final_path_tracing_siggraph_guideline to rendering and Critic whenever sphere, mesh, or emissive lights are present; final acceptance requires parameter-based light-frustum checks even on white backgrounds.",
+        "If a requested screen, window, pane, plate, shell, tube, or transparent container has semantically wrong thickness or filled geometry, dispatch generated_asset_shape_fidelity_guideline and xml_asset_request_contract_guideline to Planner/body before physics acceptance. Do not defer geometry repair to render-only replay.",
+        "After repeated low-contrast final-render rejection, dispatch visual_style_readability_guideline and require a substantive palette, background, material, or lighting change while preserving prompt-specified colors.",
         "Before placing a card id under simdebug_cards.<role>, check the candidate card's declared scopes and only assign it to that role when scopes includes that role or all.",
         "If a card is conceptually useful but its declared scopes do not include the target role, route the evidence through a scoped owner such as planner or critic, or update the card library before relying on it.",
         "For generated mesh use, dispatch generated_mesh_manifest_usage_guideline, planner_asset_retry_guideline, scale_policy_restriction, and render_visual_evidence_restriction as relevant.",
@@ -3014,6 +3308,9 @@
       ],
       "checks": [
         "Before spawn_workers, check whether each role receives cards matching its actual ownership and each selected card's declared scope.",
+        "Before final render dispatch, check whether a state cache is required and whether render-only replay should be requested instead of rerunning physics.",
+        "Before final render dispatch, check that final_path_tracing_siggraph_guideline is present when background, floor, lighting, or material look-dev is being changed.",
+        "Before finish pass, check final_render.status and render_stats.path_tracing.enabled; a physics-only debug raster pass is insufficient.",
         "Before request_repair, check whether the selected cards reflect the latest failure evidence.",
         "Before request_repair, check that every simdebug_cards.<role> entry is scoped to that role; Python will filter incompatible cards, but Planner should avoid sending them.",
         "Before run_opt, check that the selected cards distinguish parameter-limited failures from structural failures."
@@ -3026,6 +3323,59 @@
         "motivation": "Teach Planner how to use the new simdebug_cards action field instead of relying only on fallback dispatch."
       },
       "source_path": "code_agent/context/simdebug/workflow_orchestration/planner_card_dispatch_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "two_stage_rendering_workflow_guideline",
+      "title": "Split physics debugging from final path-traced rendering",
+      "summary": "Use cheap readable raster evidence while physics is being repaired, then switch to a final GPU path-traced render pass only after physical behavior is accepted.",
+      "scopes": [
+        "planner",
+        "scene",
+        "rendering",
+        "critic",
+        "opt"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "render",
+        "path_tracing",
+        "final_render",
+        "debug_render",
+        "replay_render",
+        "workflow"
+      ],
+      "failure_tags": [
+        "slow_debug_loop",
+        "premature_path_tracing",
+        "final_render_changed_physics",
+        "missing_final_render"
+      ],
+      "guidance": [
+        "During physics repair, prefer ordinary rasterized or low-cost evidence renders whose purpose is behavioral diagnosis, not final visual quality.",
+        "After Critic accepts physical behavior, enter a separate final render pass that must use GPU path tracing, studio lighting, material look-dev, and replay from cache when available.",
+        "A debug raster Critic pass means the physics is accepted; it does not mean the case can finish when rendering is requested.",
+        "The final path-traced render stage is iterative look-dev. If the first RayTracer output is flat, over-lit, noisy, materially bland, or poorly framed, repair rendering/body/scene and rerun final_path_traced until Critic accepts the final image.",
+        "Planner should distinguish debug_render, final_render, and replay_render in its worker dispatch and execution mode.",
+        "Final rendering must preserve physical semantics. Do not move bodies, hide collisions, or change solver behavior merely to improve composition."
+      ],
+      "checks": [
+        "Check whether the latest task state is still in physics repair or has passed physical validation before requesting final path tracing.",
+        "Check that finish pass is blocked until an execution with render_profile=final_path_traced has path_tracing.enabled=true and the final Critic pass accepts visual quality.",
+        "Check that final render changes are limited to renderer, camera, lighting, materials, background, and replay mechanics unless Planner explicitly opens a physics repair."
+      ],
+      "dispatch_hints": [
+        "Send to Planner when deciding which render mode to request.",
+        "Send to rendering when upgrading from evidence render to final render.",
+        "Send to Critic when judging whether final render changes invalidated physical evidence."
+      ],
+      "provenance": {
+        "source": "path_tracing_debug_card_workflow",
+        "motivation": "Separate fast physics debugging from SIGGRAPH-quality final rendering."
+      },
+      "source_path": "code_agent/context/simdebug/workflow_orchestration/two_stage_rendering_workflow_guideline.yaml"
     }
   ]
 }

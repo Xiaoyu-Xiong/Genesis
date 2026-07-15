@@ -12,7 +12,7 @@ SPEC = WorkerSpec(
         "and scene lifecycle"
     ),
     prompt_body="""
-    Write `create_scene(backend: str, *, sim_dt: float, sim_substeps: int, deformable_cfg: dict)`.
+    Write `create_scene(backend: str, *, sim_dt: float, sim_substeps: int, deformable_cfg: dict, render_profile: str = "debug_raster")`.
     The function must initialize Genesis and return an unbuilt `gs.Scene`.
     It must pass the supplied timing parameters into Genesis with
     `gs.options.SimOptions(dt=sim_dt, substeps=sim_substeps)` when constructing the scene. Do not hardcode local
@@ -33,6 +33,18 @@ SPEC = WorkerSpec(
     on `scene.genesis_static_floor` and describe it in `scene.genesis_case_metadata`; body.py must then reuse that
     scene-owned floor instead of adding a second coincident IPC plane. Never create duplicate overlapping ground planes
     in FEM+IPC scenes.
+    During ordinary physics debugging (`render_profile == "debug_raster"`), use the low-cost Rasterizer/native Genesis
+    camera path with readable VisOptions. During the final render stage (`render_profile == "final_path_traced"` or
+    `GENESIS_RENDER_PROFILE=final_path_traced`), construct the scene with GPU `gs.renderers.RayTracer`, a
+    `WavePathIntegrator`/validated RayTracer integrator configuration when available, and metadata on the scene such as
+    `scene.genesis_path_tracing` describing backend, integrator, spp, denoise, tracing depth, background/floor style,
+    and lights, including each renderable light's position/radius or world bounds. Final path tracing should use
+    area/sphere/mesh/emissive lights supported by RayTracer, not unsupported `scene.add_light` calls. Place all
+    renderable light geometry outside the intended final camera frustum with enough clearance for any smoothed camera
+    motion; a light background does not make a visible white light sphere acceptable.
+    Keep the preferred final background light but deliberately separated in hue or value from prompt-required white
+    subjects. Use coordinated non-white floors, walls, windows, or fixtures when needed to preserve silhouettes,
+    contact shadows, folds, and motion readability.
     Add a small number of fixed stage props suggested by the task, such as a wall, bin, ramp, stop, support,
     or ready fixed generated mesh from `assets/asset_manifest.json`. For fixed generated meshes and cloth support
     meshes, use the manifest runtime path, Genesis scale factors, and `file_meshes_are_zup` exactly; do not search the

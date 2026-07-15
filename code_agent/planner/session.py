@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover - the uv environment normally has jsonsc
 from code_agent.assets.builtin_guard import builtin_asset_violations
 from code_agent.configs import CONFIGS, deformable_config_dict
 from code_agent.io_utils import dump_json
-from code_agent.utils.codex import DEFAULT_REPO_ROOT
+from code_agent.utils.codex import CODEX_INFRA_ERROR_TYPES, DEFAULT_REPO_ROOT
 from code_agent.utils.timing import TimingPlan, resolve_timing
 from code_agent.planner.actions import EpisodeActionExecutor
 from code_agent.planner.action_handlers.worker_actions import WORKER_ROLES
@@ -118,6 +118,20 @@ class PlannerSession:
                 "latest_request": None,
                 "history": [],
             },
+            "physics_validation": {
+                "status": "pending",
+                "accepted_state_cache_manifest": None,
+                "accepted_at_unix": None,
+            },
+            "final_render": {
+                "required": bool(config.render),
+                "status": "pending" if config.render else "not_required",
+                "attempts": 0,
+                "latest_render_profile": None,
+                "latest_render_stats_path": None,
+                "latest_issue": None,
+                "passed_at_unix": None,
+            },
             "commands": [],
             "observations": [],
             "stop_reason": None,
@@ -184,10 +198,7 @@ class PlannerSession:
 
         errors: list[str] = []
         if bool(raw_plan.get("deformable_enabled")) != deformable_enabled:
-            errors.append(
-                "physics_plan.deformable_enabled must match mode "
-                f"{mode!r}: expected {deformable_enabled}."
-            )
+            errors.append(f"physics_plan.deformable_enabled must match mode {mode!r}: expected {deformable_enabled}.")
         if not deformable_enabled and bool(raw_plan.get("ipc_enabled")) != ipc_enabled:
             errors.append(f"physics_plan.ipc_enabled must match mode {mode!r}: expected {ipc_enabled}.")
 
@@ -400,6 +411,8 @@ class PlannerSession:
             "opt_enabled": self.config.opt_enabled,
             "deformable_config_path": str(self.deformable_config_path),
             "opt": self.state.get("opt"),
+            "physics_validation": self.state.get("physics_validation"),
+            "final_render": self.state.get("final_render"),
         }
 
     def _critic_infra_status(self, critic: dict[str, Any]) -> str:
@@ -409,6 +422,9 @@ class PlannerSession:
     def _infra_blocked_reason(self, *, critic_infra_status: str) -> str | None:
         if critic_infra_status not in {"ok", "not_used"}:
             return critic_infra_status
+        worker_reason = self._worker_infra_blocked_reason()
+        if worker_reason is not None:
+            return worker_reason
         blocked_reason = self.state.get("blocked_reason")
         if isinstance(blocked_reason, dict):
             blocked_type = str(blocked_reason.get("type") or "")
@@ -420,6 +436,8 @@ class PlannerSession:
                 return "planner_prompt_too_large"
             if blocked_type == "timeout":
                 return "planner_timeout"
+            if blocked_type in CODEX_INFRA_ERROR_TYPES:
+                return blocked_type
         stop_reason = str(self.state.get("stop_reason") or "").lower()
         if "usage limit" in stop_reason or "purchase more credits" in stop_reason:
             return "quota_blocked"
@@ -427,6 +445,21 @@ class PlannerSession:
             return "auth_failed"
         if "input exceeds the maximum length" in stop_reason:
             return "critic_prompt_too_large"
+        return None
+
+    def _worker_infra_blocked_reason(self) -> str | None:
+        workers = self.state.get("workers")
+        if not isinstance(workers, dict):
+            return None
+        for role, data in workers.items():
+            if not isinstance(data, dict) or data.get("ok"):
+                continue
+            codex = data.get("codex")
+            if not isinstance(codex, dict):
+                continue
+            error_type = codex.get("error_type")
+            if isinstance(error_type, str) and error_type in CODEX_INFRA_ERROR_TYPES:
+                return f"{role}_worker:{error_type}"
         return None
 
     def _outcome_class(self, *, verdict: str, infra_blocked_reason: str | None) -> str:
@@ -601,9 +634,7 @@ class PlannerSession:
             simdebug_state = {}
             self.state["simdebug"] = simdebug_state
         selected_ids = [
-            item.get("id")
-            for item in selection.get("selected_cards", [])
-            if isinstance(item, dict) and item.get("id")
+            item.get("id") for item in selection.get("selected_cards", []) if isinstance(item, dict) and item.get("id")
         ]
         latest_by_role = simdebug_state.setdefault("latest_by_role", {})
         if isinstance(latest_by_role, dict):

@@ -410,8 +410,11 @@ The output is not a caption. It must be a Genesis/code_agent input prompt like t
 - Name the physics mode and objects clearly.
 - Describe actuation, gravity/contact/friction, expected deformation/contact behavior, and forbidden shortcuts.
 - Prefer Genesis-feasible rigid, articulated, FEM+IPC, or rigid-soft coupling wording.
-- For thin cloth, sheet, ribbon, drape, or fabric-like clips, prefer FEM.Cloth + IPC wording and procedural cloth_mesh
-  assets; do not request PBD cloth, fluid, hair, or Meshy-generated watertight cloth.
+- For thin cloth, sheet, ribbon, drape, or fabric-like clips, prefer FEM.Cloth + IPC wording. Use procedural
+  cloth_mesh only for the supported basic cloth shapes: square sheet, rectangle/ribbon/strip sheet,
+  cylinder/tube/sleeve shell, or sphere/balloon shell. Do not ask for arbitrary animal/logo/icon/custom open cloth
+  silhouettes; use Meshy generated_mesh only for complex closed manifold FEM.Cloth shells with explicit cloth-shell
+  wording. Do not request PBD cloth, fluid, or hair.
 - Set coverage to `fem_cloth` for FEM.Cloth thin-shell prompts.
 - End with "Render Ns behavior." unless the evidence strongly suggests another duration.
 - Do not mention the source video URL, paper title, or that this came from a dataset.

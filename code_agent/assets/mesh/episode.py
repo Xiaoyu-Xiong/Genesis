@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -8,10 +10,16 @@ from code_agent.assets.mesh.manifest import (
     build_manifest,
     failed_manifest_entry,
     manifest_entry_from_bundle,
+    manifest_entry_from_generated_cloth_bundle,
     manifest_entry_from_ready_entry_with_request,
 )
-from code_agent.assets.mesh.cloth import generate_cloth_mesh_asset, is_cloth_mesh_request
-from code_agent.assets.mesh.models import MeshyApiConfig, MeshyPromptLengthError
+from code_agent.assets.mesh.cloth import (
+    failed_cloth_mesh_manifest_entry,
+    generate_cloth_mesh_asset,
+    is_cloth_mesh_request,
+    is_meshy_generated_cloth_request,
+)
+from code_agent.assets.mesh.models import MeshyApiConfig, MeshyPromptLengthError, MeshyRequestError
 from code_agent.assets.mesh.pipeline import download_meshy_mesh_from_text, process_downloaded_meshy_mesh
 from code_agent.assets.mesh.request_adapter import (
     mesh_prompt_from_request,
@@ -20,13 +28,18 @@ from code_agent.assets.mesh.request_adapter import (
     meshy_texture_config,
     select_mesh_requests,
 )
-from code_agent.assets.mesh.validation import run_genesis_fem_import_validation
+from code_agent.assets.mesh.validation import run_genesis_cloth_import_validation, run_genesis_fem_import_validation
 from code_agent.assets.mesh.workflow.steps import slugify_prompt
 from code_agent.configs import CONFIGS
 from code_agent.io_utils import dump_json, load_json_object
 
 
 MESH_PROMPT_LENGTH_FAILURE_CLASS = "mesh.prompt_length_exceeded"
+UNSUPPORTED_CLOTH_MESH_SHAPE_FAILURE_CLASS = "cloth_mesh.unsupported_shape"
+MESHY_API_RETRY_ATTEMPTS_ENV = "CODE_AGENT_MESHY_API_RETRY_ATTEMPTS"
+MESHY_API_RETRY_DELAY_ENV = "CODE_AGENT_MESHY_API_RETRY_DELAY_SEC"
+DEFAULT_MESHY_API_RETRY_ATTEMPTS = 3
+DEFAULT_MESHY_API_RETRY_DELAY_SEC = 20.0
 
 
 def generate_mesh_assets_for_episode(
@@ -100,7 +113,7 @@ def generate_mesh_assets_for_episode(
         api_config = MeshyApiConfig.from_env(timeout_sec=CONFIGS.meshy_request.timeout_sec)
     except Exception as exc:
         generated_entries = [
-            failed_manifest_entry(request, f"{type(exc).__name__}: {exc}") for request in meshy_requests
+            _failed_manifest_entry_for_request(request, f"{type(exc).__name__}: {exc}") for request in meshy_requests
         ]
         entries = _merge_manifest_entries(
             preserved_entries,
@@ -364,7 +377,7 @@ def _missing_api_result(request: dict[str, Any], task: str) -> dict[str, Any]:
         "ok": False,
         "request": request,
         "mesh_prompt": mesh_prompt_from_request(request, task),
-        "manifest_entry": failed_manifest_entry(request, error),
+        "manifest_entry": _failed_manifest_entry_for_request(request, error),
         "error": error,
     }
 
@@ -394,6 +407,19 @@ def _write_final_mesh_generation_report(
         }
     )
     prompt_length_message = _prompt_length_report_message(prompt_length_assets) if prompt_length_assets else None
+    unsupported_cloth_assets = sorted(
+        {
+            str(request.get("name", "")).strip()
+            for result in results
+            if result.get("failure_class") == UNSUPPORTED_CLOTH_MESH_SHAPE_FAILURE_CLASS
+            and isinstance(request := result.get("request"), dict)
+            and str(request.get("name", "")).strip()
+        }
+    )
+    unsupported_cloth_message = (
+        _unsupported_cloth_shape_report_message(unsupported_cloth_assets) if unsupported_cloth_assets else None
+    )
+    repair_message = prompt_length_message or unsupported_cloth_message
     ok = all(bool(result.get("ok")) for result in results) and not skipped_names
     report = {
         "ok": ok,
@@ -402,11 +428,13 @@ def _write_final_mesh_generation_report(
             if ok
             else "mesh_prompt_length_exceeded"
             if prompt_length_assets
+            else "cloth_mesh_unsupported_shape"
+            if unsupported_cloth_assets
             else "mesh_asset_generation_failed"
         ),
-        "message": prompt_length_message,
-        "recommended_owner": "planner" if prompt_length_assets else None,
-        "repair_summary": prompt_length_message,
+        "message": repair_message,
+        "recommended_owner": "planner" if prompt_length_assets or unsupported_cloth_assets else None,
+        "repair_summary": repair_message,
         "asset_manifest_path": str(manifest_path),
         "asset_generation_report_path": str(report_path),
         "num_assets": len(entries),
@@ -442,14 +470,14 @@ def _download_one_mesh_asset(
     output_root: Path,
     api_config: MeshyApiConfig,
 ) -> dict[str, Any]:
+    output_dir = output_root / f"{index:02d}_{slugify_prompt(str(request.get('name', 'mesh_asset')))}"
+    mesh_prompt = mesh_prompt_from_request(request, task)
     try:
-        output_dir = output_root / f"{index:02d}_{slugify_prompt(str(request.get('name', 'mesh_asset')))}"
-        mesh_prompt = mesh_prompt_from_request(request, task)
-        downloaded = download_meshy_mesh_from_text(
-            prompt=mesh_prompt,
+        downloaded = _download_meshy_mesh_with_retry(
+            mesh_prompt=mesh_prompt,
+            request=request,
+            output_dir=output_dir,
             api_config=api_config,
-            generation_config=meshy_generation_config(mesh_prompt, output_dir),
-            texture_config=meshy_texture_config(request),
         )
         return {
             "ok": True,
@@ -459,9 +487,8 @@ def _download_one_mesh_asset(
             "downloaded_asset": downloaded.to_dict(),
         }
     except MeshyPromptLengthError as exc:
-        mesh_prompt = mesh_prompt_from_request(request, task)
         message = _prompt_length_asset_message(request, mesh_prompt, exc)
-        manifest_entry = failed_manifest_entry(request, message)
+        manifest_entry = _failed_manifest_entry_for_request(request, message)
         return {
             "ok": False,
             "request": request,
@@ -473,14 +500,82 @@ def _download_one_mesh_asset(
             "repair_summary": message,
         }
     except Exception as exc:
-        manifest_entry = failed_manifest_entry(request, f"{type(exc).__name__}: {exc}")
+        manifest_entry = _failed_manifest_entry_for_request(request, f"{type(exc).__name__}: {exc}")
         return {
             "ok": False,
             "request": request,
-            "mesh_prompt": mesh_prompt_from_request(request, task),
+            "mesh_prompt": mesh_prompt,
             "manifest_entry": manifest_entry,
             "error": manifest_entry["notes"][0],
         }
+
+
+def _download_meshy_mesh_with_retry(
+    *,
+    mesh_prompt: str,
+    request: dict[str, Any],
+    output_dir: Path,
+    api_config: MeshyApiConfig,
+):
+    attempts = max(1, _int_env(MESHY_API_RETRY_ATTEMPTS_ENV, DEFAULT_MESHY_API_RETRY_ATTEMPTS))
+    delay_sec = _float_env(MESHY_API_RETRY_DELAY_ENV, DEFAULT_MESHY_API_RETRY_DELAY_SEC)
+    last_error: MeshyRequestError | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return download_meshy_mesh_from_text(
+                prompt=mesh_prompt,
+                api_config=api_config,
+                generation_config=meshy_generation_config(mesh_prompt, output_dir),
+                texture_config=meshy_texture_config(request),
+            )
+        except MeshyPromptLengthError:
+            raise
+        except MeshyRequestError as exc:
+            last_error = exc
+            if attempt >= attempts or not _is_retryable_meshy_request_error(exc):
+                raise
+            if delay_sec > 0:
+                time.sleep(delay_sec)
+    assert last_error is not None
+    raise last_error
+
+
+def _is_retryable_meshy_request_error(exc: MeshyRequestError) -> bool:
+    text = str(exc).lower()
+    retryable_markers = (
+        "temporary failure in name resolution",
+        "name resolution",
+        "dns",
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection aborted",
+        "connection refused",
+        "network is unreachable",
+        "remote end closed connection",
+        "temporarily unavailable",
+    )
+    return any(marker in text for marker in retryable_markers)
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return int(default)
+    try:
+        return int(raw)
+    except ValueError:
+        return int(default)
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return float(default)
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return float(default)
 
 
 def _process_one_mesh_asset(api_result: dict[str, Any]) -> dict[str, Any]:
@@ -504,11 +599,18 @@ def _process_one_mesh_asset(api_result: dict[str, Any]) -> dict[str, Any]:
             downloaded=api_result["downloaded"],
             repair_config=mesh_repair_config(),
         )
-        pre_validation_entry = manifest_entry_from_bundle(request, bundle)
-        genesis_validation = run_genesis_fem_import_validation(pre_validation_entry)
-        bundle.genesis_fem_import = genesis_validation
-        _write_genesis_validation_artifacts(bundle)
-        manifest_entry = manifest_entry_from_bundle(request, bundle)
+        if is_meshy_generated_cloth_request(request):
+            pre_validation_entry = manifest_entry_from_generated_cloth_bundle(request, bundle)
+            genesis_validation = run_genesis_cloth_import_validation(pre_validation_entry)
+            bundle.genesis_cloth_import = genesis_validation
+            _write_genesis_cloth_validation_artifacts(bundle)
+            manifest_entry = manifest_entry_from_generated_cloth_bundle(request, bundle)
+        else:
+            pre_validation_entry = manifest_entry_from_bundle(request, bundle)
+            genesis_validation = run_genesis_fem_import_validation(pre_validation_entry)
+            bundle.genesis_fem_import = genesis_validation
+            _write_genesis_validation_artifacts(bundle)
+            manifest_entry = manifest_entry_from_bundle(request, bundle)
         return {
             "ok": manifest_entry["status"] == "ready",
             "request": request,
@@ -518,7 +620,7 @@ def _process_one_mesh_asset(api_result: dict[str, Any]) -> dict[str, Any]:
             "bundle": bundle.to_dict(),
         }
     except Exception as exc:
-        manifest_entry = failed_manifest_entry(request, f"{type(exc).__name__}: {exc}")
+        manifest_entry = _failed_manifest_entry_for_request(request, f"{type(exc).__name__}: {exc}")
         return {
             "ok": False,
             "request": request,
@@ -716,6 +818,17 @@ def _prompt_length_report_message(asset_names: list[str]) -> str:
     )
 
 
+def _unsupported_cloth_shape_report_message(asset_names: list[str]) -> str:
+    names = ", ".join(asset_names)
+    return (
+        f"Procedural cloth_mesh requested unsupported complex open cloth shape(s): {names}. Planner should rewrite the "
+        "affected FEM.Cloth asset request to one of the supported basic procedural shapes "
+        "(square, rectangle/ribbon/strip, cylinder/tube/sleeve, sphere/balloon), switch only truly closed manifold cloth "
+        "shells to generated_mesh with explicit cloth-shell wording, or finish fail/inconclusive if the prompt requires "
+        "an unsupported arbitrary open cloth silhouette."
+    )
+
+
 def _prompt_length_asset_message(
     request: dict[str, Any],
     mesh_prompt: str,
@@ -741,6 +854,24 @@ def _write_genesis_validation_artifacts(bundle: Any) -> None:
     metadata = load_json_object(metadata_path) or {}
     metadata["genesis_fem_import"] = validation.to_dict()
     dump_json(metadata, metadata_path)
+
+
+def _write_genesis_cloth_validation_artifacts(bundle: Any) -> None:
+    validation = getattr(bundle, "genesis_cloth_import", None)
+    if validation is None:
+        return
+    output_dir = Path(bundle.generation.output_dir)
+    dump_json(validation.to_dict(), output_dir / "genesis_cloth_import_check.json")
+    metadata_path = bundle.generation.metadata_path
+    metadata = load_json_object(metadata_path) or {}
+    metadata["genesis_cloth_import"] = validation.to_dict()
+    dump_json(metadata, metadata_path)
+
+
+def _failed_manifest_entry_for_request(request: dict[str, Any], error: str) -> dict[str, Any]:
+    if is_meshy_generated_cloth_request(request):
+        return failed_cloth_mesh_manifest_entry(request, error)
+    return failed_manifest_entry(request, error)
 
 
 def _api_progress_entry(api_result: dict[str, Any]) -> dict[str, Any]:

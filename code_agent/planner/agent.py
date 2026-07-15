@@ -6,7 +6,7 @@ from typing import Any
 
 from code_agent.configs import CONFIGS, runtime_defaults_dict
 from code_agent.io_utils import load_json_object
-from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
+from code_agent.utils.codex import CODEX_INFRA_ERROR_TYPES, DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
 from code_agent.prompts.planner import (
     PLANNER_ACTION_POLICY_GUIDE,
     PLANNER_GENERAL_RULES,
@@ -50,12 +50,10 @@ class EpisodePlanner:
             }
         )
         if not result.success:
-            if result.error_type in {"codex_usage_limit", "codex_auth_failed", "codex_input_too_large", "timeout"}:
+            if result.error_type in CODEX_INFRA_ERROR_TYPES:
                 control = self.session.state.get("control")
                 pending = [
-                    name
-                    for name, active in (control.items() if isinstance(control, dict) else [])
-                    if bool(active)
+                    name for name, active in (control.items() if isinstance(control, dict) else []) if bool(active)
                 ]
                 blocked = {
                     "type": result.error_type,
@@ -229,7 +227,37 @@ class EpisodePlanner:
         else:
             critic = state.get("critic")
             if isinstance(critic, dict) and critic.get("verdict") == "pass":
-                guide.append("critic passed: finish pass is valid.")
+                final_render = state.get("final_render")
+                if self._final_render_required(final_render) and not self._final_render_passed(final_render):
+                    physics_validation = state.get("physics_validation")
+                    accepted_cache = (
+                        physics_validation.get("accepted_state_cache_manifest")
+                        if isinstance(physics_validation, dict)
+                        else None
+                    )
+                    if isinstance(final_render, dict) and final_render.get("status") == "needs_repair":
+                        guide.append(
+                            "final path-traced render is required but the latest final render did not pass. "
+                            "Choose request_repair for rendering/body/scene as indicated, then run_integrator and "
+                            "run_execution with render_profile=final_path_traced again. Continue look-dev iterations "
+                            "until Critic accepts the final image quality."
+                        )
+                    elif accepted_cache:
+                        guide.append(
+                            "physics critic passed and a state cache is available, but final path-traced render is "
+                            "still required before finish pass. If source already supports final RayTracer mode, choose "
+                            "run_execution with render_profile=final_path_traced, replay_cache set to the accepted "
+                            "manifest, and render_only=true; otherwise request_repair for rendering/body/scene to add "
+                            "the final path tracing branch first."
+                        )
+                    else:
+                        guide.append(
+                            "physics critic passed, but final path-traced render is still required and no accepted "
+                            "state cache is recorded. Run or repair a debug_raster execution with save_state_cache and "
+                            "require_state_cache, then run the final_path_traced look-dev pass."
+                        )
+                else:
+                    guide.append("critic passed and final path-traced render is accepted: finish pass is valid.")
             elif isinstance(critic, dict):
                 opt_state = state.get("opt")
                 opt_attempts = int(opt_state.get("attempts") or 0) if isinstance(opt_state, dict) else 0
@@ -250,6 +278,12 @@ class EpisodePlanner:
                     guide.append("critic did not pass: repair if budget remains, otherwise finish fail.")
         return guide
 
+    def _final_render_required(self, final_render: object) -> bool:
+        return isinstance(final_render, dict) and bool(final_render.get("required"))
+
+    def _final_render_passed(self, final_render: object) -> bool:
+        return isinstance(final_render, dict) and final_render.get("status") == "passed"
+
     def _codex_infra_blockers(self) -> list[str]:
         blockers: list[str] = []
         critic = self.session.state.get("critic")
@@ -265,7 +299,7 @@ class EpisodePlanner:
                 codex = data.get("codex")
                 if isinstance(codex, dict):
                     error_type = codex.get("error_type")
-                    if error_type in {"codex_usage_limit", "codex_auth_failed", "codex_input_too_large", "timeout"}:
+                    if error_type in CODEX_INFRA_ERROR_TYPES:
                         blockers.append(f"{role}_worker:{error_type}")
         return blockers
 

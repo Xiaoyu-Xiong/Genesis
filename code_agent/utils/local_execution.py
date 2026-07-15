@@ -61,6 +61,17 @@ class _CommandRunResult:
     timeout_process_tree: dict[str, Any] | None = None
 
 
+@dataclass(slots=True, frozen=True)
+class _VideoProbeResult:
+    frame_count: int | None
+    duration_sec: float | None
+    width: int | None
+    height: int | None
+    codec_name: str | None
+    pix_fmt: str | None
+    bit_rate: int | None
+
+
 def run_local(config: LocalRunConfig) -> dict[str, Any]:
     """Run generated ``main.py`` directly and write an execution report."""
 
@@ -112,11 +123,20 @@ def run_local(config: LocalRunConfig) -> dict[str, Any]:
     stdout_path.write_text(completed.stdout, encoding="utf-8")
     stderr_path.write_text(completed.stderr, encoding="utf-8")
 
-    report = _base_report(
-        config, command, workspace_dir, main_path, output_dir, started_at, duration_sec, run_env=run_env
-    )
     artifact_paths, stale_artifact_paths = _collect_artifact_paths(
         config, workspace_dir, output_dir, min_mtime=started_at
+    )
+    video_normalization = _normalize_render_video_from_frames(
+        workspace_dir=workspace_dir,
+        output_dir=output_dir,
+        artifact_paths=artifact_paths,
+    )
+    if video_normalization.get("changed"):
+        artifact_paths, stale_artifact_paths = _collect_artifact_paths(
+            config, workspace_dir, output_dir, min_mtime=started_at
+        )
+    report = _base_report(
+        config, command, workspace_dir, main_path, output_dir, started_at, duration_sec, run_env=run_env
     )
     report.update(
         {
@@ -129,6 +149,9 @@ def run_local(config: LocalRunConfig) -> dict[str, Any]:
             **_artifact_report_fields(artifact_paths, stale_artifact_paths),
         }
     )
+    if video_normalization:
+        report["render_video_normalization"] = video_normalization
+    _apply_artifact_validation(report, workspace_dir, output_dir, artifact_paths)
     if completed.timeout_process_tree is not None:
         report["timeout_process_tree"] = completed.timeout_process_tree
     _write_json(report_path, report)
@@ -208,11 +231,20 @@ def run_local_in_process(config: LocalRunConfig) -> dict[str, Any]:
     stdout_path.write_text(stdout_text, encoding="utf-8")
     stderr_path.write_text(stderr_text, encoding="utf-8")
 
-    report = _base_report(
-        config, command, workspace_dir, main_path, output_dir, started_at, duration_sec, run_env=run_env
-    )
     artifact_paths, stale_artifact_paths = _collect_artifact_paths(
         config, workspace_dir, output_dir, min_mtime=started_at
+    )
+    video_normalization = _normalize_render_video_from_frames(
+        workspace_dir=workspace_dir,
+        output_dir=output_dir,
+        artifact_paths=artifact_paths,
+    )
+    if video_normalization.get("changed"):
+        artifact_paths, stale_artifact_paths = _collect_artifact_paths(
+            config, workspace_dir, output_dir, min_mtime=started_at
+        )
+    report = _base_report(
+        config, command, workspace_dir, main_path, output_dir, started_at, duration_sec, run_env=run_env
     )
     report.update(
         {
@@ -226,6 +258,9 @@ def run_local_in_process(config: LocalRunConfig) -> dict[str, Any]:
             **_artifact_report_fields(artifact_paths, stale_artifact_paths),
         }
     )
+    if video_normalization:
+        report["render_video_normalization"] = video_normalization
+    _apply_artifact_validation(report, workspace_dir, output_dir, artifact_paths)
     _write_json(report_path, report)
     return report
 
@@ -270,6 +305,8 @@ def _build_env(overrides: dict[str, str]) -> dict[str, str]:
             "PYTHONUNBUFFERED": "1",
         }
     )
+    env.setdefault("CUDA_VISIBLE_DEVICES", "0")
+    env.setdefault("QD_VISIBLE_DEVICE", "0")
     env.update(overrides)
     return env
 
@@ -601,6 +638,429 @@ def _artifact_report_fields(artifact_paths: list[str], stale_artifact_paths: lis
         "stale_artifact_count": len(stale_artifact_paths),
         "stale_artifact_paths_sample": stale_artifact_paths[:STALE_ARTIFACT_SAMPLE_LIMIT],
     }
+
+
+def _normalize_render_video_from_frames(
+    *,
+    workspace_dir: Path,
+    output_dir: Path,
+    artifact_paths: list[str],
+) -> dict[str, Any]:
+    stats_path = _find_named_artifact(artifact_paths, "render_stats.json")
+    if stats_path is None:
+        return {}
+    stats = _read_json_file(stats_path)
+    if not isinstance(stats, dict):
+        return {"errors": [f"could not parse render_stats.json at {stats_path}"]}
+
+    expected_frames = _expected_render_frame_count(stats)
+    fps = _positive_float(stats.get("fps")) or 25.0
+    if expected_frames is None or expected_frames <= 1:
+        return {"skipped": "render_stats does not describe a multi-frame render"}
+
+    video_path = _resolve_artifact_path(stats.get("video_path"), workspace_dir, output_dir, stats_path, must_exist=False)
+    if video_path is None:
+        video_path = _find_named_artifact(artifact_paths, "render.mp4") or _find_named_artifact(artifact_paths, "video.mp4")
+    frames_dir = _resolve_artifact_path(stats.get("frames_dir"), workspace_dir, output_dir, stats_path)
+    if frames_dir is None:
+        mapped_frames = _artifact_map(artifact_paths).get("frames_dir")
+        frames_dir = Path(mapped_frames) if mapped_frames else None
+    if video_path is None or frames_dir is None:
+        return {"errors": ["render_stats did not identify both video_path and frames_dir"]}
+
+    frame_paths = _sorted_frame_paths(frames_dir)
+    if len(frame_paths) < expected_frames:
+        return {
+            "video_path": str(video_path),
+            "frames_dir": str(frames_dir),
+            "expected_frames": expected_frames,
+            "frame_count": len(frame_paths),
+            "errors": [
+                f"only {len(frame_paths)} saved frame PNGs are available for expected {expected_frames} frame video"
+            ],
+        }
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return {
+            "video_path": str(video_path),
+            "frames_dir": str(frames_dir),
+            "expected_frames": expected_frames,
+            "frame_count": len(frame_paths),
+            "errors": ["ffmpeg is required to normalize render.mp4 from saved frame PNGs but was not found"],
+        }
+
+    before_probe = _probe_video(video_path)
+    tmp_path = video_path.with_name(f"{video_path.stem}.frames_tmp{video_path.suffix}")
+    frame_input, input_is_glob = _frame_input_pattern(frames_dir, frame_paths)
+    command = [
+        ffmpeg,
+        "-y",
+        "-v",
+        "error",
+        "-framerate",
+        _format_fps(fps),
+    ]
+    if input_is_glob:
+        command.extend(("-pattern_type", "glob"))
+    command.extend(
+        [
+            "-i",
+            frame_input,
+            "-frames:v",
+            str(int(expected_frames)),
+        ]
+    )
+    command.extend(
+        [
+            "-c:v",
+            "libx264",
+            "-profile:v",
+            "high",
+            "-level",
+            "4.0",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            "-r",
+            _format_fps(fps),
+            str(tmp_path),
+        ]
+    )
+    try:
+        completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=120.0)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "video_path": str(video_path),
+            "frames_dir": str(frames_dir),
+            "expected_frames": expected_frames,
+            "frame_count": len(frame_paths),
+            "errors": [f"ffmpeg frame video normalization failed: {exc}"],
+        }
+    if completed.returncode != 0:
+        _unlink_file(tmp_path)
+        return {
+            "video_path": str(video_path),
+            "frames_dir": str(frames_dir),
+            "expected_frames": expected_frames,
+            "frame_count": len(frame_paths),
+            "ffmpeg_command": command,
+            "errors": [f"ffmpeg frame video normalization exited {completed.returncode}: {completed.stderr.strip()}"],
+        }
+
+    tmp_probe = _probe_video(tmp_path)
+    errors = _video_probe_errors(
+        probe=tmp_probe,
+        expected_frames=expected_frames,
+        fps=fps,
+        video_path=tmp_path,
+    )
+    if errors:
+        _unlink_file(tmp_path)
+        return {
+            "video_path": str(video_path),
+            "frames_dir": str(frames_dir),
+            "expected_frames": expected_frames,
+            "frame_count": len(frame_paths),
+            "probe": _video_probe_dict(tmp_probe),
+            "errors": errors,
+        }
+
+    video_path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(tmp_path, video_path)
+    final_probe = _probe_video(video_path)
+    _update_render_stats_for_frame_video(stats_path, stats, final_probe, expected_frames)
+    return {
+        "changed": True,
+        "video_path": str(video_path),
+        "frames_dir": str(frames_dir),
+        "expected_frames": expected_frames,
+        "frame_count": len(frame_paths),
+        "strategy": "harness_ffmpeg_from_png_frames",
+        "before_probe": _video_probe_dict(before_probe),
+        "after_probe": _video_probe_dict(final_probe),
+    }
+
+
+def _apply_artifact_validation(
+    report: dict[str, Any],
+    workspace_dir: Path,
+    output_dir: Path,
+    artifact_paths: list[str],
+) -> None:
+    validation = _validate_render_video_artifact(
+        workspace_dir=workspace_dir,
+        output_dir=output_dir,
+        artifact_paths=artifact_paths,
+    )
+    if not validation:
+        return
+    report["artifact_validation"] = validation
+    errors = validation.get("errors") if isinstance(validation, dict) else None
+    if errors and report.get("status") == "passed":
+        report["artifact_validation_failed"] = True
+        report["process_exit_code"] = report.get("exit_code")
+        report["status"] = "failed"
+        report["exit_code"] = 1
+
+
+def _validate_render_video_artifact(
+    *,
+    workspace_dir: Path,
+    output_dir: Path,
+    artifact_paths: list[str],
+) -> dict[str, Any]:
+    stats_path = _find_named_artifact(artifact_paths, "render_stats.json")
+    if stats_path is None:
+        return {}
+    stats = _read_json_file(stats_path)
+    if not isinstance(stats, dict):
+        return {"errors": [f"could not parse render_stats.json at {stats_path}"]}
+
+    expected_frames = _expected_render_frame_count(stats)
+    fps = _positive_float(stats.get("fps")) or 25.0
+    video_path = _resolve_artifact_path(stats.get("video_path"), workspace_dir, output_dir, stats_path)
+    if video_path is None:
+        video_path = _find_named_artifact(artifact_paths, "render.mp4") or _find_named_artifact(artifact_paths, "video.mp4")
+    if video_path is None:
+        return {"errors": ["render_stats.json exists but no render video artifact was found"]}
+
+    probe = _probe_video(video_path)
+    errors = _video_probe_errors(
+        probe=probe,
+        expected_frames=expected_frames,
+        fps=fps,
+        video_path=video_path,
+    )
+    return {
+        "video": {
+            "path": str(video_path),
+            "expected_frames": expected_frames,
+            "fps": fps,
+            **_video_probe_dict(probe),
+        },
+        "errors": errors,
+    }
+
+
+def _video_probe_errors(
+    *,
+    probe: _VideoProbeResult | None,
+    expected_frames: int | None,
+    fps: float,
+    video_path: Path,
+) -> list[str]:
+    errors: list[str] = []
+    if probe is None:
+        return [f"could not probe video artifact {video_path}"]
+    if expected_frames is not None and expected_frames > 1:
+        if probe.frame_count is None:
+            errors.append(f"could not verify frame count for {video_path}")
+        elif probe.frame_count < expected_frames:
+            errors.append(
+                f"video artifact has {probe.frame_count} frames, expected at least {expected_frames} from render_stats"
+            )
+        expected_duration = expected_frames / fps if fps > 0 else None
+        if expected_duration is not None:
+            tolerance = max(0.10, 2.0 / fps)
+            if probe.duration_sec is None:
+                errors.append(f"could not verify duration for {video_path}")
+            elif probe.duration_sec + tolerance < expected_duration:
+                errors.append(
+                    f"video artifact duration {probe.duration_sec:.3f}s is shorter than expected "
+                    f"{expected_duration:.3f}s"
+                )
+    return errors
+
+
+def _probe_video(path: Path) -> _VideoProbeResult | None:
+    if not path.is_file() or path.stat().st_size <= 0:
+        return None
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        return None
+    command = [
+        ffprobe,
+        "-v",
+        "error",
+        "-count_frames",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=codec_name,pix_fmt,width,height,nb_frames,nb_read_frames,duration,bit_rate",
+        "-show_entries",
+        "format=duration,size,bit_rate",
+        "-of",
+        "json",
+        str(path),
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return None
+    streams = payload.get("streams") or []
+    stream = streams[0] if streams and isinstance(streams[0], dict) else {}
+    fmt = payload.get("format") if isinstance(payload.get("format"), dict) else {}
+    return _VideoProbeResult(
+        frame_count=_optional_int(stream.get("nb_read_frames")) or _optional_int(stream.get("nb_frames")),
+        duration_sec=_positive_float(stream.get("duration")) or _positive_float(fmt.get("duration")),
+        width=_optional_int(stream.get("width")),
+        height=_optional_int(stream.get("height")),
+        codec_name=_optional_str(stream.get("codec_name")),
+        pix_fmt=_optional_str(stream.get("pix_fmt")),
+        bit_rate=_optional_int(stream.get("bit_rate")) or _optional_int(fmt.get("bit_rate")),
+    )
+
+
+def _update_render_stats_for_frame_video(
+    stats_path: Path,
+    stats: dict[str, Any],
+    probe: _VideoProbeResult | None,
+    expected_frames: int,
+) -> None:
+    warnings = list(stats.get("warnings") or [])
+    message = (
+        "render.mp4 was encoded by the execution harness from saved frame_*.png files; "
+        "Genesis camera recording output is not used as the final video artifact."
+    )
+    if message not in warnings:
+        warnings.append(message)
+    stats.update(
+        {
+            "rendered": True,
+            "video_writer_strategy": "harness_ffmpeg_from_png_frames",
+            "video_reencoded_from_frames": True,
+            "video_frame_count_verified": None if probe is None else probe.frame_count,
+            "video_duration_verified_sec": None if probe is None else probe.duration_sec,
+            "video_expected_frame_count": int(expected_frames),
+            "used_genesis_recording": False,
+            "warnings": warnings,
+        }
+    )
+    stats_path.write_text(json.dumps(stats, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _find_named_artifact(artifact_paths: list[str], name: str) -> Path | None:
+    for path_text in artifact_paths:
+        path = Path(path_text)
+        if path.name == name:
+            return path
+    return None
+
+
+def _read_json_file(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _resolve_artifact_path(
+    value: Any,
+    workspace_dir: Path,
+    output_dir: Path,
+    stats_path: Path,
+    *,
+    must_exist: bool = True,
+) -> Path | None:
+    if not value:
+        return None
+    path = Path(str(value))
+    candidates = [path] if path.is_absolute() else [workspace_dir / path, output_dir / path, stats_path.parent / path]
+    existing = next((candidate.resolve() for candidate in candidates if candidate.exists()), None)
+    if existing is not None or must_exist:
+        return existing
+    return candidates[0].resolve()
+
+
+def _sorted_frame_paths(frames_dir: Path) -> list[Path]:
+    if not frames_dir.is_dir():
+        return []
+    return sorted(frames_dir.glob("frame_*.png"))
+
+
+def _frame_input_pattern(frames_dir: Path, frame_paths: list[Path]) -> tuple[str, bool]:
+    if frame_paths:
+        stem = frame_paths[0].stem
+        digits = stem.removeprefix("frame_")
+        if stem.startswith("frame_") and digits.isdigit():
+            return str(frames_dir / f"frame_%0{len(digits)}d.png"), False
+    return str(frames_dir / "frame_*.png"), True
+
+
+def _expected_render_frame_count(stats: dict[str, Any]) -> int | None:
+    for key in ("num_frames", "effective_target_video_frames", "target_video_frames", "expected_frames"):
+        value = _optional_int(stats.get(key))
+        if value is not None and value > 0:
+            return value
+    frame_steps = stats.get("frame_steps")
+    if isinstance(frame_steps, list) and frame_steps:
+        return len(frame_steps)
+    return None
+
+
+def _video_probe_dict(probe: _VideoProbeResult | None) -> dict[str, Any]:
+    if probe is None:
+        return {"probe_ok": False}
+    return {
+        "probe_ok": True,
+        "frame_count": probe.frame_count,
+        "duration_sec": probe.duration_sec,
+        "width": probe.width,
+        "height": probe.height,
+        "codec_name": probe.codec_name,
+        "pix_fmt": probe.pix_fmt,
+        "bit_rate": probe.bit_rate,
+    }
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        if value is None or value == "N/A":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _positive_float(value: Any) -> float | None:
+    try:
+        if value is None or value == "N/A":
+            return None
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result > 0 else None
+
+
+def _optional_str(value: Any) -> str | None:
+    return str(value) if value not in (None, "N/A") else None
+
+
+def _format_fps(value: float) -> str:
+    if abs(value - round(value)) < 1.0e-6:
+        return str(int(round(value)))
+    return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
+def _unlink_file(path: Path) -> None:
+    with contextlib.suppress(OSError):
+        if path.is_file():
+            path.unlink()
 
 
 def _artifact_map(paths: list[str]) -> dict[str, str | None]:

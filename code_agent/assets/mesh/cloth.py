@@ -21,9 +21,39 @@ CLOTH_MESH_ASSET_TYPES = {
     "cloth_mesh_sphere",
 }
 
+MESHY_CLOTH_ASSET_TYPE = "generated_mesh"
+
+
+class UnsupportedClothMeshShapeError(ValueError):
+    """Raised when a procedural cloth request asks for a shape the generator cannot build."""
+
 
 def is_cloth_mesh_request(request: dict[str, Any]) -> bool:
     return str(request.get("asset_type", "")).strip().lower() in CLOTH_MESH_ASSET_TYPES
+
+
+def is_meshy_generated_cloth_request(request: dict[str, Any]) -> bool:
+    if str(request.get("asset_type", "")).strip().lower() != MESHY_CLOTH_ASSET_TYPE:
+        return False
+    text = _request_cloth_semantics_text(request)
+    if not text:
+        return False
+    explicit_cloth_markers = (
+        "fem.cloth",
+        "fem cloth",
+        "cloth shell",
+        "cloth-like shell",
+        "clothlike shell",
+        "thin-shell cloth",
+        "thin shell cloth",
+        "manifold cloth",
+        "closed cloth",
+        "cloth surface mesh",
+        "fabric shell",
+    )
+    if any(marker in text for marker in explicit_cloth_markers):
+        return True
+    return "cloth" in text and "shell" in text and "manifold" in text
 
 
 def generate_cloth_mesh_asset(
@@ -33,11 +63,14 @@ def generate_cloth_mesh_asset(
     index: int,
 ) -> dict[str, Any]:
     name = str(request.get("name") or "cloth_mesh")
-    shape = _cloth_shape_from_request(request)
     output_dir = output_root / f"{index:02d}_{_slugify(name)}"
     output_dir.mkdir(parents=True, exist_ok=True)
     mesh_path = output_dir / f"{_slugify(name)}.obj"
     try:
+        unsupported_reason = _unsupported_complex_cloth_shape_reason(request)
+        if unsupported_reason is not None:
+            raise UnsupportedClothMeshShapeError(unsupported_reason)
+        shape = _cloth_shape_from_request(request)
         target_edge_length = _target_edge_length(request)
         vertices, faces = _build_cloth_mesh(shape, request, target_edge_length=target_edge_length)
         stats = _mesh_stats(vertices, faces)
@@ -67,6 +100,20 @@ def generate_cloth_mesh_asset(
                 "mesh_path": str(mesh_path),
                 "stats": stats,
             },
+        }
+    except UnsupportedClothMeshShapeError as exc:
+        manifest_entry = failed_cloth_mesh_manifest_entry(request, str(exc))
+        payload = {
+            "ok": False,
+            "request": request,
+            "manifest_entry": manifest_entry,
+            "error": str(exc),
+            "failure_class": "cloth_mesh.unsupported_shape",
+            "recommended_owner": "planner",
+            "repair_summary": (
+                "Rewrite this procedural FEM.Cloth request to square, rectangle/ribbon/strip, cylinder/tube/sleeve, "
+                "or sphere/balloon; use generated_mesh only for an explicitly closed manifold cloth shell."
+            ),
         }
     except Exception as exc:  # noqa: BLE001 - record asset-level failure.
         manifest_entry = failed_cloth_mesh_manifest_entry(request, f"{type(exc).__name__}: {exc}")
@@ -116,6 +163,65 @@ def _cloth_shape_from_request(request: dict[str, Any]) -> str:
     if any(token in text for token in ("square", "sheet", "cloth")):
         return "square"
     return "square"
+
+
+def _unsupported_complex_cloth_shape_reason(request: dict[str, Any]) -> str | None:
+    text = " ".join(
+        str(request.get(key) or "").lower()
+        for key in ("name", "purpose", "simulation_role", "texture_needs")
+    )
+    complex_shape_tokens = (
+        "silhouette",
+        "cutout",
+        "cut-out",
+        "icon",
+        "logo",
+        "profile",
+        "outline",
+        "animal-shaped",
+        "animal shaped",
+        "character-shaped",
+        "character shaped",
+        "custom shape",
+        "custom-shaped",
+        "armadillo",
+        "dragon",
+        "bunny",
+        "panda",
+        "giraffe",
+        "person",
+        "human",
+        "star",
+        "heart",
+        "letter",
+        "number",
+    )
+    if not any(token in text for token in complex_shape_tokens):
+        return None
+
+    basic_shape_tokens = (
+        "square",
+        "rectangular",
+        "rectangle",
+        "ribbon",
+        "strip",
+        "cylindrical",
+        "cylinder",
+        "tube",
+        "sleeve",
+        "spherical",
+        "sphere",
+        "balloon",
+        "shell ball",
+    )
+    if any(token in text for token in basic_shape_tokens):
+        return None
+
+    return (
+        "Unsupported procedural cloth_mesh shape. The local procedural FEM.Cloth mesh generator only supports "
+        "square, rectangle/ribbon/strip, cylinder/tube, and sphere/balloon surface meshes. It cannot generate "
+        "arbitrary 2D silhouettes, icons, logos, animal-shaped cutouts, or other complex cloth outlines."
+    )
 
 
 def _build_cloth_mesh(
@@ -356,3 +462,10 @@ def _write_obj(path: Path, vertices: np.ndarray, faces: np.ndarray) -> None:
 def _slugify(text: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", text.lower()).strip("_")
     return slug or "cloth_mesh"
+
+
+def _request_cloth_semantics_text(request: dict[str, Any]) -> str:
+    return " ".join(
+        str(request.get(key) or "").strip().lower()
+        for key in ("name", "purpose", "simulation_role")
+    )

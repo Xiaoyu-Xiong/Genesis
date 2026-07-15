@@ -12,10 +12,12 @@ from code_agent.dataset.store import DEFAULT_DATA_ROOT, DatasetStore
 from code_agent.opt.runner import RunOptConfig, run_optimization
 from code_agent.scores.physical.agent import PhysicalScoreRequest, run_physical_score
 from code_agent.scores.physical.suite import score_physical_suite
+from code_agent.utils.codex import CodexAuthFreshnessError, ensure_configured_codex_accounts_fresh
 from code_agent.utils.suite import run_suite
 
 
 def _cmd_run_suite(args: argparse.Namespace) -> None:
+    _ensure_codex_auth_fresh()
     out_dir = args.out_dir.resolve()
     summary_path = out_dir / "summary.json"
     summary_callback = _dataset_train_summary_callback(args, out_dir=out_dir, summary_path=summary_path)
@@ -98,6 +100,7 @@ def _cmd_run_opt(args: argparse.Namespace) -> None:
 
 
 def _cmd_score_physical_case(args: argparse.Namespace) -> None:
+    _ensure_codex_auth_fresh()
     report = run_physical_score(
         PhysicalScoreRequest(
             run_dir=args.run_dir.resolve(),
@@ -129,6 +132,7 @@ def _cmd_score_physical_case(args: argparse.Namespace) -> None:
 
 
 def _cmd_score_physical_suite(args: argparse.Namespace) -> None:
+    _ensure_codex_auth_fresh()
     summary = score_physical_suite(
         suite_dir=args.suite_dir.resolve(),
         tasks_file=args.tasks_file.resolve() if args.tasks_file else None,
@@ -157,6 +161,13 @@ def _format_score(value: object) -> str:
     if isinstance(value, int | float):
         return f"{float(value):.2f}"
     return "n/a"
+
+
+def _ensure_codex_auth_fresh() -> None:
+    try:
+        ensure_configured_codex_accounts_fresh()
+    except CodexAuthFreshnessError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:

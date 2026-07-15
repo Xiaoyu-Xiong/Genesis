@@ -1,8 +1,9 @@
 # Assets
 
-Planner can generate two asset families:
+Planner can generate these asset families:
 
 - mesh assets from `asset_type="generated_mesh"`
+- procedural FEM.Cloth surface assets from `asset_type="cloth_mesh*"`
 - XML/MJCF articulated assets from `asset_type="generated_xml"` or `asset_type="mjcf"`
 
 Planner asset actions are:
@@ -56,6 +57,11 @@ Do not create separate simulation and visual entities for one generated object.
 If only generated mesh sizing metadata is wrong, Planner should use `update_mesh_asset_metadata`. That action reuses the
 ready mesh entry, updates scalar uniform scale/bbox metadata, and reruns Genesis FEM import validation without another
 Meshy request. Prompt, geometry, texture, or role changes should still regenerate through `start_mesh_assets`.
+
+For FEM.Cloth assets, simple sheets, ribbons, cylinders, and spheres should use the procedural `cloth_mesh*` asset
+types. Complex closed manifold cloth shells may use `asset_type="generated_mesh"` when `purpose` or `simulation_role`
+explicitly identifies the asset as a `FEM.Cloth closed manifold shell` or `cloth shell`; the Meshy pipeline then writes
+the ready entry back as `source_type="cloth_mesh"` and validates it through the FEM.Cloth import path.
 
 ## XML / MJCF
 

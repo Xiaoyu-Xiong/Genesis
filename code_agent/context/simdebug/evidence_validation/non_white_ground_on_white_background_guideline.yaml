@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "id": "non_white_ground_on_white_background_guideline",
-  "title": "Use a subtly tinted ground on white backgrounds",
-  "summary": "When the background is pure white and a ground plane is present, use a light non-white ground color unless the prompt explicitly requests white ground.",
+  "title": "Use visible ground contrast on light backgrounds",
+  "summary": "When a render uses a white, near-white, or light studio background and includes a ground plane, use a subtly non-white ground unless the prompt explicitly requests white ground.",
   "scopes": ["planner", "scene", "rendering", "critic"],
   "physics_modes": ["any"],
   "task_tags": [
@@ -21,17 +21,20 @@
     "pure_white_ground"
   ],
   "guidance": [
-    "If the render uses a pure white background and includes a ground/floor, do not make the ground pure white unless the prompt explicitly requires white ground.",
+    "This card does not require a white background; it only applies after the scene has already chosen a white, near-white, or light studio background.",
+    "If the render uses a light background and includes a ground/floor, do not make the ground pure white unless the prompt explicitly requires white ground.",
     "Use a low-saturation light color such as light gray, pale blue-gray, or pale warm gray so the horizon, contact shadows, and support surface remain visible.",
+    "For final path-traced renders, prefer a polished light neutral studio floor that supports soft shadows and contact cues without reading as a pure-white void.",
     "Keep the ground subtle enough that it does not distract from task objects, but distinct enough to separate from the sky/background."
   ],
   "restrictions": [
     "Do not override a prompt that explicitly asks for a white floor or a specific ground material.",
-    "Do not use dark or saturated floors when the task only needs a neutral evidence render."
+    "Do not use dark or saturated floors when the task only needs a neutral debug evidence render.",
+    "Do not use this card to force a final render back to a pure-white stage when final_path_tracing_siggraph_guideline calls for a light studio look-dev setup."
   ],
   "checks": [
     "Inspect sampled frames for a visible floor boundary, contact shadow, or surface cue.",
-    "Check scene/rendering code for a non-white floor material when background_color is white."
+    "Check scene/rendering code for a non-white floor material when background_color is white, near-white, or a light studio tone."
   ],
   "dispatch_hints": [
     "Send to scene/rendering when floor material or background color is chosen.",
@@ -39,6 +42,6 @@
   ],
   "provenance": {
     "source": "new_simdebug_card",
-    "motivation": "Avoid invisible pure-white floors on white evidence backgrounds."
+    "motivation": "Avoid invisible pure-white floors on light evidence or final studio backgrounds."
   }
 }

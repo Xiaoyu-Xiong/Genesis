@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from code_agent.assets.mesh.cloth import CLOTH_MESH_ASSET_TYPES
+from code_agent.assets.mesh.cloth import CLOTH_MESH_ASSET_TYPES, is_meshy_generated_cloth_request
 from code_agent.assets.mesh.models import MeshRepairConfig, MeshyGenerationConfig, MeshyTextureConfig
 from code_agent.configs import CONFIGS
 
@@ -111,6 +111,14 @@ def mesh_prompt_from_request(request: dict[str, Any], task: str) -> str:
     purpose = _clean_prompt_field(request.get("purpose"))
     simulation_role = _clean_prompt_field(request.get("simulation_role"))
     texture_needs = _clean_prompt_field(request.get("texture_needs"))
+    if is_meshy_generated_cloth_request(request):
+        return _meshy_cloth_prompt_from_request(
+            name=name,
+            purpose=purpose,
+            simulation_role=simulation_role,
+            texture_needs=texture_needs,
+            request=request,
+        )
     parts = [
         f"Create one simulation-ready 3D mesh: {name}.",
         purpose,
@@ -151,3 +159,27 @@ def positive_vector3(value: object) -> list[float] | None:
 
 def _clean_prompt_field(value: object) -> str:
     return " ".join(str(value or "").split())
+
+
+def _meshy_cloth_prompt_from_request(
+    *,
+    name: str,
+    purpose: str,
+    simulation_role: str,
+    texture_needs: str,
+    request: dict[str, Any],
+) -> str:
+    parts = [
+        f"Create one Meshy-generated FEM.Cloth closed manifold surface mesh: {name}.",
+        purpose,
+        f"Role: {simulation_role}.",
+        "This asset will be consumed as a dynamic FEM.Cloth shell surface, not as a volumetric FEM soft body.",
+        "Make it one closed watertight manifold surface with no open boundaries, holes, loose fragments, or self-intersections.",
+    ]
+    size = request_size(request)
+    if size is not None:
+        parts.append(f"Approximate positive dimensions in meters: {size}.")
+    if texture_needs:
+        parts.append(f"Material: {texture_needs}.")
+    parts.append("Prioritize a coherent cloth-shell silhouette and robust simulation-ready topology over fine detail.")
+    return _clean_prompt_field(" ".join(part for part in parts if part))

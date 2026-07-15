@@ -11,7 +11,7 @@ import trimesh
 from code_agent.io_utils import dump_json, load_json_object
 
 MESH_EXTENSIONS = {".obj", ".stl", ".ply", ".glb", ".gltf", ".dae"}
-DIRECT_PRIMITIVE_SOURCE_FILES = ("src/body.py", "src/scene.py")
+DIRECT_PRIMITIVE_SOURCE_FILES = ("src/body.py", "src/scene.py", "src/main.py")
 DIRECT_PRIMITIVE_TYPES = {"Box", "Cylinder", "Sphere"}
 ADAPTIVE_CONTACT_D_HAT_FACTOR = 0.2
 ADAPTIVE_CONTACT_D_HAT_MIN_BBOX_FACTOR = 1e-5
@@ -49,7 +49,7 @@ def _adaptive_report_payload(candidates: list[dict[str, Any]], *, manifest_loade
         return None
 
     return {
-        "source": "assets/asset_manifest.json" if manifest_loaded else "contracts/planner_output.json asset_requests",
+        "source": _adaptive_report_source(candidates, manifest_loaded=manifest_loaded),
         "rule": (
             "ipc_contact_d_hat = clamp("
             "min(0.2 * median_mesh_edge_or_bbox_feature), "
@@ -70,6 +70,20 @@ def _adaptive_report_payload(candidates: list[dict[str, Any]], *, manifest_loade
         "max_ipc_contact_d_hat": max_d_hat,
         "ipc_contact_d_hat": ipc_contact_d_hat,
     }
+
+
+def _adaptive_report_source(candidates: list[dict[str, Any]], *, manifest_loaded: bool) -> str:
+    has_direct_primitive = any(candidate.get("source_type") == "direct_primitive" for candidate in candidates)
+    if manifest_loaded:
+        if has_direct_primitive:
+            return "assets/asset_manifest.json + generated source primitive morphs"
+        return "assets/asset_manifest.json"
+    if has_direct_primitive:
+        has_asset_request = any(candidate.get("source_type") != "direct_primitive" for candidate in candidates)
+        if has_asset_request:
+            return "contracts/planner_output.json asset_requests + generated source primitive morphs"
+        return "generated source primitive morphs"
+    return "contracts/planner_output.json asset_requests"
 
 
 def _adaptive_candidates(
@@ -466,20 +480,31 @@ def _safe_eval_ast(node: ast.AST, constants: dict[str, Any]) -> Any:
     return None
 
 
+def _collect_literal_assignments(statements: list[ast.stmt], constants: dict[str, Any]) -> None:
+    for node in statements:
+        if isinstance(node, ast.Assign):
+            try:
+                value = _safe_eval_ast(node.value, constants)
+            except Exception:
+                value = None
+            if value is not None:
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        constants[target.id] = value
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _collect_literal_assignments(list(node.body), constants)
+        elif isinstance(node, (ast.If, ast.For, ast.While, ast.With, ast.Try)):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.stmt):
+                    _collect_literal_assignments([child], constants)
+                elif isinstance(child, list):
+                    _collect_literal_assignments([item for item in child if isinstance(item, ast.stmt)], constants)
+
+
 def _literal_constants(tree: ast.AST, cfg: dict[str, object]) -> dict[str, Any]:
     constants: dict[str, Any] = {"DEFAULT_TET_RESOLUTION": int(cfg.get("tet_resolution", 2) or 2)}
-    for node in tree.body if isinstance(tree, ast.Module) else []:
-        if not isinstance(node, ast.Assign):
-            continue
-        try:
-            value = _safe_eval_ast(node.value, constants)
-        except Exception:
-            value = None
-        if value is None:
-            continue
-        for target in node.targets:
-            if isinstance(target, ast.Name):
-                constants[target.id] = value
+    if isinstance(tree, ast.Module):
+        _collect_literal_assignments(list(tree.body), constants)
     return constants
 
 
