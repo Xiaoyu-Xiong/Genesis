@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import time
 from dataclasses import asdict
@@ -174,6 +175,10 @@ class RuntimeActionHandler:
         )
         self.session.state["critic"] = critic
         self._record_render_critic_result(critic=critic, execution=execution)
+        (self.session.case_dir / "reports" / "critic_report.json").write_text(
+            json.dumps(critic, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
         self.session.state["control"]["needs_critic"] = False
         return {"ok": critic.get("verdict") == "pass", "status": "critic_evaluated", "critic": critic}
 
@@ -514,6 +519,12 @@ class RuntimeActionHandler:
         path_tracing = render_stats.get("path_tracing") if isinstance(render_stats, dict) else None
         path_tracing_enabled = isinstance(path_tracing, dict) and path_tracing.get("enabled") is True
         rendered = bool(render_stats.get("rendered")) if isinstance(render_stats, dict) else False
+        if not self._accept_final_replay_source_consistency(
+            critic=critic,
+            render_stats=render_stats,
+            final=final,
+        ):
+            return
         if not path_tracing_enabled:
             critic["verdict"] = "fail"
             critic["recommended_owner"] = "rendering"
@@ -538,6 +549,51 @@ class RuntimeActionHandler:
         else:
             final["status"] = "needs_repair"
             final["latest_issue"] = "critic_rejected_final_render_quality"
+
+    def _accept_final_replay_source_consistency(
+        self,
+        *,
+        critic: dict[str, Any],
+        render_stats: dict[str, Any],
+        final: dict[str, Any],
+    ) -> bool:
+        uses_replay = bool(render_stats.get("replay_only") is True or render_stats.get("physics_cache_manifest"))
+        source_report = critic.get("state_cache_source_report")
+        consistency = critic.get("cache_source_consistency")
+        if not uses_replay:
+            final["cache_source_classification"] = "not_applicable"
+            return True
+        status = source_report.get("status") if isinstance(source_report, dict) else None
+        classification = consistency.get("classification") if isinstance(consistency, dict) else None
+        rerun_required = consistency.get("physics_rerun_required") if isinstance(consistency, dict) else None
+        final["cache_source_report_status"] = status
+        final["cache_source_classification"] = classification
+        if status == "match" and classification == "match" and rerun_required is False:
+            return True
+        if status == "mismatch" and classification == "render_only" and rerun_required is False:
+            return True
+
+        physics = self.session.state.setdefault("physics_validation", {})
+        if not isinstance(physics, dict):
+            physics = {}
+            self.session.state["physics_validation"] = physics
+        accepted_manifest = physics.get("accepted_state_cache_manifest")
+        if accepted_manifest:
+            physics["stale_state_cache_manifest"] = accepted_manifest
+        physics["accepted_state_cache_manifest"] = None
+        physics["status"] = "stale"
+        physics["stale_reason"] = f"cache_source_{classification or status or 'classification_missing'}"
+
+        critic["verdict"] = "fail"
+        critic["recommended_owner"] = "execution"
+        critic["summary"] = (
+            "Final replay cannot reuse the accepted state cache because Critic classified the source mismatch as "
+            f"{classification or 'indeterminate'} (source report status: {status or 'missing'}). Rerun the debug "
+            "physics stage, write and validate a fresh NPZ state cache, then resume final path-traced look-dev."
+        )
+        final["status"] = "needs_repair"
+        final["latest_issue"] = "physics_state_cache_rerun_required"
+        return False
 
     def _final_render_passed(self) -> bool:
         final = self.session.state.get("final_render")

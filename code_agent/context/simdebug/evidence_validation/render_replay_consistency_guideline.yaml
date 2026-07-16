@@ -22,18 +22,22 @@ guidance:
   - Render-only replay should use a cache manifest produced by the latest accepted physical run.
   - Replay code must apply cached states and render frames without calling scene.step().
   - Final render_stats.json should record replay_only=true, physics_cache_manifest, cache frame count, source hashes, and source run result when available.
-  - If cache validation fails or source hashes mismatch, rerun physics or repair the cache before final rendering.
+  - Cache creation must preserve source snapshots alongside source hashes so a later mismatch can be reviewed as a concrete old-to-current diff.
+  - A source-hash mismatch is mandatory Critic evidence, not automatic cache invalidation. Critic must read each diff and classify it as render_only, physics_affecting, or indeterminate from source semantics rather than filenames.
+  - A render_only mismatch may reuse the accepted cache only when the changes cannot alter geometry, collision, physical materials, solver settings, initialization, forces, controls, actions, or simulated state. Physics-affecting or indeterminate changes require a fresh physics run and state cache.
   - Compare the manifest actor contracts with the rebuilt scene before rendering. Final replay must fail when an articulated actor lacks qpos/DOF state, a deformable actor lacks vertex state, or a required setter cannot apply the cached state.
   - Compare task-critical cached motion with rendered motion. Joint-driven rollers, drums, paddles, robot links, gates, and similar articulated actors must visibly follow their cached generalized coordinates rather than remaining at their initial pose.
 restrictions:
   - Do not accept a final replay video that lacks cache provenance in render_stats.json.
-  - Do not accept replay output if it was generated after physics source changes without a new cache.
+  - Do not accept replay output after a physics-affecting source change without a new cache. Do not assume that every edit in scene.py or body.py affects physics; inspect the changed code.
+  - Do not classify a mismatch as render_only from filenames or hashes alone. Missing snapshots or insufficient logs must be classified indeterminate unless other concrete evidence proves the change is visual-only.
   - Do not use stale videos or frame directories to mask replay failures.
   - Do not accept replay_valid=true from file existence alone; every required actor-state array must be present, finite, shape-consistent, and successfully applied.
 checks:
   - Check replay_only and physics_cache_manifest fields in render_stats.json.
   - Check frame count and video duration match the validated cache and requested fps.
-  - Check cache manifest freshness against execution_report and source hashes.
+  - Check cache manifest freshness against execution_report and source hashes; for mismatches, inspect cached snapshots, current files, generated diffs, and relevant worker logs.
+  - Check Critic records cache_source_consistency.classification, mismatched_files, physics_rerun_required, rationale, and concrete evidence.
   - Check actor_contracts and per-frame required arrays, then inspect task-critical articulated and deformable motion in start/mid/end replay frames.
 dispatch_hints:
   - Send to rendering when replay mode is requested.

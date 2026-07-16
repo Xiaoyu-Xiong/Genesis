@@ -2387,7 +2387,8 @@
       "guidance": [
         "Treat execution_report.json as the source of truth for the latest run status, start time, exit code, timeout flag, and workspace directory.",
         "When final video is produced from a state cache, treat artifacts/state_cache/manifest.json and its frame npz files as part of the freshness contract.",
-        "Final replay render_stats.json must cite the cache manifest, source hashes, and replay_only status so Critic can distinguish fresh replay from stale physical evidence.",
+        "Final replay render_stats.json must cite the cache manifest, source hashes, source-consistency classification, and replay_only status so Critic can distinguish fresh replay from stale physical evidence.",
+        "When hashes differ, freshness depends on Critic's content-based classification: render_only changes preserve the accepted physical state, while physics_affecting or indeterminate changes invalidate it.",
         "Use metrics.json, event_log.json, run_result.json, summary.json, render_stats.json, frames, and render.mp4 only if they were produced by the latest completed execution.",
         "Before rerunning a failed or repaired case, clean or clearly version output artifacts so Critic cannot confuse stale successful artifacts with current failed execution.",
         "When the latest execution times out or exits nonzero, require a clean successful rerun before accepting task success even if old video or metrics files still exist.",
@@ -2395,13 +2396,14 @@
       ],
       "restrictions": [
         "Do not pass an episode using metrics, render_stats, frames, or video whose timestamps or run identifiers predate the latest execution_report started_at time.",
-        "Do not accept a replay render whose cache manifest or referenced npz files predate the accepted physics run or no longer match source hashes.",
+        "Do not accept a replay render whose cache manifest or referenced npz files predate the accepted physics run. For source-hash mismatch, reject physics_affecting or indeterminate changes but permit a Critic-evidenced render_only change.",
         "Do not use stale completed video to mask a later timeout, nonzero exit, or source repair that never finished.",
         "Do not let a success flag in an old summary override a current execution failure."
       ],
       "checks": [
         "Check execution_report.status, exit_code, timed_out, started_at_unix, and duration_sec before inspecting semantic success.",
         "If render_stats.json records a replay cache, check that the manifest and all referenced npz files are present and fresh.",
+        "If source hashes differ, check the cached snapshot/current-source diff and Critic cache_source_consistency evidence instead of invalidating the cache from hash inequality alone.",
         "Check artifact timestamps, run identifiers, frame counts, render_stats frame totals, and video presence against the latest execution.",
         "Check whether current frames cover the requested duration and whether render.mp4 exists for the latest run.",
         "For rendered evidence, do not accept a merely non-empty render.mp4. Its probed frame count and duration must agree with render_stats.json and the saved frame_*.png sequence; a single-frame camera-recording MP4 is not valid evidence for a multi-frame render.",
@@ -2512,20 +2514,24 @@
         "Render-only replay should use a cache manifest produced by the latest accepted physical run.",
         "Replay code must apply cached states and render frames without calling scene.step().",
         "Final render_stats.json should record replay_only=true, physics_cache_manifest, cache frame count, source hashes, and source run result when available.",
-        "If cache validation fails or source hashes mismatch, rerun physics or repair the cache before final rendering.",
+        "Cache creation must preserve source snapshots alongside source hashes so a later mismatch can be reviewed as a concrete old-to-current diff.",
+        "A source-hash mismatch is mandatory Critic evidence, not automatic cache invalidation. Critic must read each diff and classify it as render_only, physics_affecting, or indeterminate from source semantics rather than filenames.",
+        "A render_only mismatch may reuse the accepted cache only when the changes cannot alter geometry, collision, physical materials, solver settings, initialization, forces, controls, actions, or simulated state. Physics-affecting or indeterminate changes require a fresh physics run and state cache.",
         "Compare the manifest actor contracts with the rebuilt scene before rendering. Final replay must fail when an articulated actor lacks qpos/DOF state, a deformable actor lacks vertex state, or a required setter cannot apply the cached state.",
         "Compare task-critical cached motion with rendered motion. Joint-driven rollers, drums, paddles, robot links, gates, and similar articulated actors must visibly follow their cached generalized coordinates rather than remaining at their initial pose."
       ],
       "restrictions": [
         "Do not accept a final replay video that lacks cache provenance in render_stats.json.",
-        "Do not accept replay output if it was generated after physics source changes without a new cache.",
+        "Do not accept replay output after a physics-affecting source change without a new cache. Do not assume that every edit in scene.py or body.py affects physics; inspect the changed code.",
+        "Do not classify a mismatch as render_only from filenames or hashes alone. Missing snapshots or insufficient logs must be classified indeterminate unless other concrete evidence proves the change is visual-only.",
         "Do not use stale videos or frame directories to mask replay failures.",
         "Do not accept replay_valid=true from file existence alone; every required actor-state array must be present, finite, shape-consistent, and successfully applied."
       ],
       "checks": [
         "Check replay_only and physics_cache_manifest fields in render_stats.json.",
         "Check frame count and video duration match the validated cache and requested fps.",
-        "Check cache manifest freshness against execution_report and source hashes.",
+        "Check cache manifest freshness against execution_report and source hashes; for mismatches, inspect cached snapshots, current files, generated diffs, and relevant worker logs.",
+        "Check Critic records cache_source_consistency.classification, mismatched_files, physics_rerun_required, rationale, and concrete evidence.",
         "Check actor_contracts and per-frame required arrays, then inspect task-critical articulated and deformable motion in start/mid/end replay frames."
       ],
       "dispatch_hints": [
@@ -3235,13 +3241,15 @@
         },
         "Every manifest must declare an actor contract with each actor's replay mode, required per-frame NPZ arrays, expected shapes, DOF count, and actor identity. Validation must reject any frame that omits or changes a required channel.",
         "FEM, deformable, and cloth caches should save visible or state vertices, faces references, bboxes, and centers of mass when available.",
-        "Static geometry, materials, actor names, source hashes, sim_dt, substeps, backend, and capture steps should be recorded in the manifest.",
+        "Static geometry, materials, actor names, source hashes, source snapshots, sim_dt, substeps, backend, and capture steps should be recorded in the manifest.",
+        "When current source hashes differ, produce a per-file old-to-current diff for Critic. Critic decides whether the edit is render_only, physics_affecting, or indeterminate by reading the changed code.",
         "Render-only replay must read a validated manifest and must not call scene.step()."
       ],
       "restrictions": [
         "Do not run final replay from a cache that lacks readable frame npz files.",
         "Do not treat event_log positions alone as sufficient for final replay when full state cache was requested.",
-        "Do not reuse a cache after source hashes or physics run identity no longer match the accepted physical run.",
+        "Do not reuse a cache after a physics-affecting source mismatch or an indeterminate mismatch. A Critic-confirmed render_only mismatch may reuse it because the simulated state is unchanged.",
+        "Do not weaken NPZ, actor-contract, finite-value, shape, or state-application validation based on a render_only source classification; those remain hard requirements.",
         "Do not mark an articulated cache replayable when it contains only root positions/quaternions but no qpos or DOF-position channel."
       ],
       "checks": [
@@ -3249,7 +3257,8 @@
         "Check every referenced npz file exists and np.load can open it before replay begins.",
         "Check every actor contract against every NPZ frame; articulated qpos/DOF arrays and deformable state-position arrays must be present, finite, and shape-stable.",
         "During replay, require each contracted actor to exist in the rebuilt scene and require the matching set_qpos, set_dofs_position, set_position, or pose setter to succeed before rendering the frame.",
-        "Check render_stats.json records replay_only, physics_cache_manifest, and physics run/source identifiers when replay is used."
+        "Check render_stats.json records replay_only, physics_cache_manifest, and physics run/source identifiers when replay is used.",
+        "Check source mismatch classification is content-based and that only render_only sets physics_rerun_required=false."
       ],
       "dispatch_hints": [
         "Send to action when physics stepping should save state.",

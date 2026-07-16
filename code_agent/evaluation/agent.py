@@ -17,6 +17,7 @@ from code_agent.prompts.critic import (
     CRITIC_VISUAL_EVIDENCE_GUIDE,
 )
 from code_agent.utils.codex import DEFAULT_REPO_ROOT, CodexExecRequest, run_codex_exec
+from code_agent.utils.state_cache import build_state_cache_source_consistency_report
 
 PROMPT_TEXT_LIMITS = {
     "execution_report": 120_000,
@@ -36,7 +37,12 @@ def run_codex_critic(
 ) -> dict[str, Any]:
     reports_dir = run_dir / "reports"
     logs_dir = run_dir / "logs"
-    evidence_index = _write_critic_evidence_index(run_dir=run_dir, artifact_report=artifact_report)
+    source_report = _write_state_cache_source_report(run_dir)
+    evidence_index = _write_critic_evidence_index(
+        run_dir=run_dir,
+        artifact_report=artifact_report,
+        source_report=source_report,
+    )
     image_paths = _critic_image_paths(run_dir)
     max_attempts = max(1, int(CONFIGS.critic.max_attempts))
     attempts: list[dict[str, Any]] = []
@@ -95,9 +101,15 @@ def run_codex_critic(
             "recommended_owner": "none",
             "repair_summary": None,
             "asset_diagnostics": None,
+            "cache_source_consistency": _default_cache_source_consistency(source_report),
             "evidence": {"metrics": [], "frames": [], "video": None, "event_logs": []},
         }
     assert result is not None
+    report["cache_source_consistency"] = _normalize_cache_source_consistency(
+        report.get("cache_source_consistency"),
+        source_report,
+    )
+    report["state_cache_source_report"] = source_report
     report["codex_result"] = {
         "returncode": result.exit_code,
         "ok": result.success,
@@ -142,6 +154,7 @@ def _critic_prompt(
     stdout = _read_text(run_dir / "reports" / "stdout.txt", max_chars=CONFIGS.critic.prompt_inline_text_chars)
     stderr = _read_text(run_dir / "reports" / "stderr.txt", max_chars=CONFIGS.critic.prompt_inline_text_chars)
     source_paths = _source_paths_for_prompt(run_dir)
+    source_consistency = evidence_index.get("state_cache_source_consistency")
     asset_evidence_paths = _asset_evidence_paths_for_prompt(run_dir)
     retry_note = ""
     if previous_failure is not None:
@@ -193,6 +206,20 @@ def _critic_prompt(
 
         Render stats digest:
         {render_stats}
+
+        State-cache source consistency report:
+        {json.dumps(source_consistency, indent=2)}
+
+        When this report has status=mismatch, inspect every listed diff, cached snapshot, current source file, and any
+        relevant worker logs before deciding whether physics must be rerun. Classify the mismatch as:
+        - render_only: all changes are limited to renderer setup, camera, lights, visual-only materials/background,
+          video encoding, or replay plumbing and cannot alter physical geometry, collision, physical material values,
+          solver settings, initialization, forces, actions, or simulated state.
+        - physics_affecting: any change can alter geometry/topology, entities, collision, solver/coupler, dt/substeps,
+          physical material values, initial state, forces, controls, or actions.
+        - indeterminate: the available snapshot/diff/log evidence is insufficient to prove the change is render-only.
+        Judge source content, not filenames: a rendering-only edit may live in scene.py or body.py. Set
+        physics_rerun_required=false only for not_applicable, match, or a well-supported render_only classification.
 
         Visual evidence digest:
         {visual_evaluation}
@@ -455,7 +482,12 @@ def _asset_evidence_paths_for_prompt(run_dir: Path) -> dict[str, list[str]]:
     }
 
 
-def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, Any]) -> dict[str, Any]:
+def _write_critic_evidence_index(
+    *,
+    run_dir: Path,
+    artifact_report: dict[str, Any],
+    source_report: dict[str, Any],
+) -> dict[str, Any]:
     reports_dir = run_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
     full_artifact_report_path = reports_dir / "critic_artifact_report.json"
@@ -486,6 +518,7 @@ def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, An
         "source_action": run_dir / "src" / "action.py",
         "source_rendering": run_dir / "src" / "rendering.py",
         "source_main": run_dir / "src" / "main.py",
+        "state_cache_source_consistency": reports_dir / "state_cache_source_consistency.json",
     }
     visual_report = load_json_object(paths["visual_evaluation"])
     contact_sheet_path = None
@@ -509,11 +542,14 @@ def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, An
         "asset_preview_images": asset_preview_images,
         "asset_preview_reports": asset_preview_reports,
         "asset_source_paths": asset_source_paths,
+        "state_cache_source_consistency": source_report,
         "notes": [
             "Generated source is referenced by path. Read only the source files needed for source-aware review.",
             "Generated asset source and preview paths are included so asset morphology can be judged directly.",
             "Large evidence files are referenced by path so the critic can inspect them without exceeding input limits.",
             "The event log is complete on disk and should be sampled or searched as needed.",
+            "State-cache hash mismatches are evidence to classify by source semantics; they are not automatically a "
+            "physics-cache invalidation.",
             "If Opt was used, compare the Opt report against the current root artifacts; do not treat Opt success as "
             "final acceptance unless the rerun artifacts and source evidence are physically faithful.",
         ],
@@ -522,6 +558,135 @@ def _write_critic_evidence_index(*, run_dir: Path, artifact_report: dict[str, An
     index["index_path"] = str(index_path)
     index_path.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
     return index
+
+
+def _write_state_cache_source_report(run_dir: Path) -> dict[str, Any]:
+    reports_dir = run_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = _state_cache_manifest_for_critic(run_dir)
+    if manifest_path is None:
+        report: dict[str, Any] = {
+            "schema_version": 1,
+            "manifest_path": None,
+            "case_root": str(run_dir.resolve()),
+            "status": "not_applicable",
+            "classification_required": False,
+            "cached_source_count": 0,
+            "current_source_count": 0,
+            "mismatch_count": 0,
+            "mismatches": [],
+            "provenance_errors": [],
+        }
+    else:
+        report = build_state_cache_source_consistency_report(
+            manifest_path,
+            case_root=run_dir,
+            diff_dir=reports_dir / "state_cache_source_diffs",
+        )
+    report["candidate_worker_evidence_paths"] = _source_change_worker_evidence_paths(run_dir, report)
+    (reports_dir / "state_cache_source_consistency.json").write_text(
+        json.dumps(report, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return report
+
+
+def _source_change_worker_evidence_paths(run_dir: Path, source_report: dict[str, Any]) -> list[str]:
+    logs_dir = run_dir / "logs"
+    if not logs_dir.is_dir():
+        return []
+    roles: set[str] = set()
+    for mismatch in source_report.get("mismatches", []):
+        if not isinstance(mismatch, dict):
+            continue
+        value = mismatch.get("path")
+        if isinstance(value, str):
+            role = Path(value).stem
+            if role in {"scene", "body", "action", "rendering"}:
+                roles.add(role)
+    candidates: list[Path] = []
+    for role in sorted(roles):
+        candidates.extend(logs_dir.glob(f"codex_{role}*.final.json"))
+    existing = [path for path in candidates if path.is_file()]
+    existing.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    return [str(path.resolve()) for path in existing[:12]]
+
+
+def _state_cache_manifest_for_critic(run_dir: Path) -> Path | None:
+    render_stats = load_json_object(run_dir / "artifacts" / "render_stats.json")
+    candidates: list[str] = []
+    if isinstance(render_stats, dict):
+        for key in ("physics_cache_manifest", "state_cache_manifest"):
+            value = render_stats.get(key)
+            if isinstance(value, str) and value:
+                candidates.append(value)
+        replay = render_stats.get("replay")
+        if isinstance(replay, dict):
+            value = replay.get("physics_cache_manifest")
+            if isinstance(value, str) and value:
+                candidates.append(value)
+    default_manifest = run_dir / "artifacts" / "state_cache" / "manifest.json"
+    resolved_candidates: list[Path] = []
+    for value in candidates:
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = run_dir / candidate
+        resolved_candidates.append(candidate)
+        if candidate.is_file():
+            return candidate
+    if resolved_candidates:
+        return resolved_candidates[0]
+    return default_manifest if default_manifest.is_file() else None
+
+
+def _default_cache_source_consistency(source_report: dict[str, Any]) -> dict[str, Any]:
+    status = str(source_report.get("status") or "not_applicable")
+    mismatched_files = [
+        str(item.get("path"))
+        for item in source_report.get("mismatches", [])
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    ]
+    if status == "not_applicable":
+        classification = "not_applicable"
+    elif status == "match":
+        classification = "match"
+    else:
+        classification = "indeterminate"
+    return {
+        "classification": classification,
+        "mismatched_files": mismatched_files,
+        "physics_rerun_required": classification == "indeterminate",
+        "rationale": (
+            "No state cache was used."
+            if classification == "not_applicable"
+            else "Cached and current source hashes match."
+            if classification == "match"
+            else "Source provenance requires semantic review, but no valid Critic classification was available."
+        ),
+        "evidence": [str(source_report.get("manifest_path"))] if source_report.get("manifest_path") else [],
+    }
+
+
+def _normalize_cache_source_consistency(value: Any, source_report: dict[str, Any]) -> dict[str, Any]:
+    default = _default_cache_source_consistency(source_report)
+    status = str(source_report.get("status") or "not_applicable")
+    if status in {"not_applicable", "match"}:
+        return default
+    if not isinstance(value, dict):
+        return default
+    classification = value.get("classification")
+    if classification not in {"render_only", "physics_affecting", "indeterminate"}:
+        return default
+    mismatched_files = default["mismatched_files"]
+    rationale = value.get("rationale")
+    evidence = value.get("evidence")
+    return {
+        "classification": classification,
+        "mismatched_files": mismatched_files,
+        "physics_rerun_required": classification != "render_only",
+        "rationale": rationale if isinstance(rationale, str) and rationale else default["rationale"],
+        "evidence": [str(item) for item in evidence] if isinstance(evidence, list) else default["evidence"],
+    }
 
 
 def _critic_image_paths(run_dir: Path) -> tuple[Path, ...]:

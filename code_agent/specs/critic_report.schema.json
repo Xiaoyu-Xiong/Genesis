@@ -11,6 +11,7 @@
     "recommended_owner",
     "repair_summary",
     "asset_diagnostics",
+    "cache_source_consistency",
     "evidence"
   ],
   "properties": {
@@ -50,6 +51,27 @@
             null
           ]
         }
+      },
+      "additionalProperties": false
+    },
+    "cache_source_consistency": {
+      "type": "object",
+      "required": [
+        "classification",
+        "mismatched_files",
+        "physics_rerun_required",
+        "rationale",
+        "evidence"
+      ],
+      "properties": {
+        "classification": {
+          "type": "string",
+          "enum": ["not_applicable", "match", "render_only", "physics_affecting", "indeterminate"]
+        },
+        "mismatched_files": { "type": "array", "items": { "type": "string" } },
+        "physics_rerun_required": { "type": "boolean" },
+        "rationale": { "type": "string" },
+        "evidence": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false
     },

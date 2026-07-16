@@ -52,6 +52,7 @@ Every cache lives under:
 ```text
 artifacts/state_cache/
   manifest.json
+  source_snapshot/src/*.py
   states/frame_000.npz
   states/frame_001.npz
   ...
@@ -62,7 +63,7 @@ The manifest must record:
 - schema version and cache kind
 - frame steps and relative `.npz` paths
 - simulation step count, `sim_dt`, `sim_substeps`, backend, and render profile
-- actor names, actor replay contracts, required state-array shapes, and source hashes for generated files
+- actor names, actor replay contracts, required state-array shapes, source hashes, and cached source snapshots
 - whether the cache is intended for replay
 
 The validator must fail if:
@@ -71,6 +72,13 @@ The validator must fail if:
 - any frame entry lacks an `.npz` path
 - any referenced `.npz` file is missing
 - any referenced `.npz` file cannot be opened by NumPy
+
+Source hash mismatch is reviewed separately from structural cache validation. The
+pipeline writes a per-file old-to-current diff and asks Critic to classify it as
+`render_only`, `physics_affecting`, or `indeterminate` by reading the changed
+code. Only `render_only` may reuse the accepted NPZ cache. Physics-affecting or
+indeterminate edits require a fresh simulation/cache; missing or invalid NPZ and
+actor-state data remain hard failures regardless of this classification.
 
 Rigid state should include per-frame actor transforms when available. Articulated
 rigid bodies must include qpos or DOF positions on every frame; root pose alone

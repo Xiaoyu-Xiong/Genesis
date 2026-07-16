@@ -10,7 +10,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from code_agent.utils.render_replay import apply_cached_state_npz
-from code_agent.utils.state_cache import StateCacheError, StateCacheWriter, verify_state_cache_manifest
+from code_agent.utils.state_cache import (
+    StateCacheError,
+    StateCacheWriter,
+    build_state_cache_source_consistency_report,
+    verify_state_cache_manifest,
+)
 
 
 class _FakeEntity:
@@ -64,6 +69,9 @@ class _BrokenArticulatedEntity(_FakeEntity):
 
 
 def test_state_cache_writer_creates_required_npz_frames(tmp_path: Path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "rendering.py").write_text("LIGHT_POWER = 10\n", encoding="utf-8")
     out_dir = tmp_path / "artifacts"
     actors = [{"name": "rigid_ball", "entity": _FakeEntity()}]
     writer = StateCacheWriter.create(
@@ -90,6 +98,10 @@ def test_state_cache_writer_creates_required_npz_frames(tmp_path: Path):
     assert manifest["schema_version"] == 2
     assert manifest["npz_required"] is True
     assert manifest["state_completeness_required"] is True
+    assert manifest["source_provenance_schema_version"] == 1
+    assert set(manifest["source_hashes"]) == {"src/rendering.py"}
+    snapshot_path = manifest_path.parent / manifest["source_snapshots"]["src/rendering.py"]
+    assert snapshot_path.read_text(encoding="utf-8") == "LIGHT_POWER = 10\n"
     assert manifest["actor_contracts"][0]["replay_mode"] == "pose"
     assert manifest["frame_steps"] == [0, 2, 4]
     assert len(manifest["frames"]) == 3
@@ -99,6 +111,66 @@ def test_state_cache_writer_creates_required_npz_frames(tmp_path: Path):
         with np.load(npz_path, allow_pickle=False) as data:
             assert data["actor_names"].tolist() == ["rigid_ball"]
             assert data["positions"].shape == (1, 3)
+
+    source_report = build_state_cache_source_consistency_report(manifest_path, case_root=tmp_path)
+    assert source_report["status"] == "match"
+    assert source_report["classification_required"] is False
+
+
+def test_state_cache_source_report_writes_diff_for_changed_source(tmp_path: Path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    rendering_path = src_dir / "rendering.py"
+    rendering_path.write_text("LIGHT_POWER = 10\n", encoding="utf-8")
+    writer = StateCacheWriter.create(
+        out_dir=tmp_path / "artifacts",
+        scene=object(),
+        actors=[{"name": "rigid_ball", "entity": _FakeEntity()}],
+        steps=0,
+    )
+    writer.capture(0)
+    manifest_path = writer.finalize()
+
+    rendering_path.write_text("LIGHT_POWER = 5\n", encoding="utf-8")
+    report = build_state_cache_source_consistency_report(
+        manifest_path,
+        case_root=tmp_path,
+        diff_dir=tmp_path / "reports" / "diffs",
+    )
+
+    assert report["status"] == "mismatch"
+    assert report["mismatch_count"] == 1
+    mismatch = report["mismatches"][0]
+    assert mismatch["path"] == "src/rendering.py"
+    assert mismatch["snapshot_available"] is True
+    diff_text = Path(mismatch["diff_path"]).read_text(encoding="utf-8")
+    assert "-LIGHT_POWER = 10" in diff_text
+    assert "+LIGHT_POWER = 5" in diff_text
+
+
+def test_old_state_cache_without_snapshot_requires_semantic_evidence(tmp_path: Path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    rendering_path = src_dir / "rendering.py"
+    rendering_path.write_text("LIGHT_POWER = 10\n", encoding="utf-8")
+    writer = StateCacheWriter.create(
+        out_dir=tmp_path / "artifacts",
+        scene=object(),
+        actors=[{"name": "rigid_ball", "entity": _FakeEntity()}],
+        steps=0,
+    )
+    writer.capture(0)
+    manifest_path = writer.finalize()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("source_snapshots")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    rendering_path.write_text("LIGHT_POWER = 5\n", encoding="utf-8")
+    report = build_state_cache_source_consistency_report(manifest_path, case_root=tmp_path)
+
+    assert report["status"] == "mismatch"
+    assert report["mismatches"][0]["snapshot_available"] is False
+    assert "indeterminate" in report["provenance_errors"][0]
 
 
 def test_articulated_qpos_and_dofs_are_saved_and_replayed(tmp_path: Path):

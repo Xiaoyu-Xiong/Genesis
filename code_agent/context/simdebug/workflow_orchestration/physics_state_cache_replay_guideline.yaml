@@ -25,12 +25,14 @@ guidance:
   - Articulated rigid bodies must save a complete replayable generalized state on every frame: prefer qpos and also record DOF positions when the API exposes them. Root pose alone is insufficient because it cannot reproduce joint/link motion.
   - Every manifest must declare an actor contract with each actor's replay mode, required per-frame NPZ arrays, expected shapes, DOF count, and actor identity. Validation must reject any frame that omits or changes a required channel.
   - FEM, deformable, and cloth caches should save visible or state vertices, faces references, bboxes, and centers of mass when available.
-  - Static geometry, materials, actor names, source hashes, sim_dt, substeps, backend, and capture steps should be recorded in the manifest.
+  - Static geometry, materials, actor names, source hashes, source snapshots, sim_dt, substeps, backend, and capture steps should be recorded in the manifest.
+  - When current source hashes differ, produce a per-file old-to-current diff for Critic. Critic decides whether the edit is render_only, physics_affecting, or indeterminate by reading the changed code.
   - Render-only replay must read a validated manifest and must not call scene.step().
 restrictions:
   - Do not run final replay from a cache that lacks readable frame npz files.
   - Do not treat event_log positions alone as sufficient for final replay when full state cache was requested.
-  - Do not reuse a cache after source hashes or physics run identity no longer match the accepted physical run.
+  - Do not reuse a cache after a physics-affecting source mismatch or an indeterminate mismatch. A Critic-confirmed render_only mismatch may reuse it because the simulated state is unchanged.
+  - Do not weaken NPZ, actor-contract, finite-value, shape, or state-application validation based on a render_only source classification; those remain hard requirements.
   - Do not mark an articulated cache replayable when it contains only root positions/quaternions but no qpos or DOF-position channel.
 checks:
   - Check manifest.json exists and lists every frame step and relative npz path.
@@ -38,6 +40,7 @@ checks:
   - Check every actor contract against every NPZ frame; articulated qpos/DOF arrays and deformable state-position arrays must be present, finite, and shape-stable.
   - During replay, require each contracted actor to exist in the rebuilt scene and require the matching set_qpos, set_dofs_position, set_position, or pose setter to succeed before rendering the frame.
   - Check render_stats.json records replay_only, physics_cache_manifest, and physics run/source identifiers when replay is used.
+  - Check source mismatch classification is content-based and that only render_only sets physics_rerun_required=false.
 dispatch_hints:
   - Send to action when physics stepping should save state.
   - Send to rendering when final rendering should replay from cache.

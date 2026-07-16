@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 from dataclasses import dataclass, field
@@ -10,6 +11,8 @@ import numpy as np
 
 
 STATE_CACHE_SCHEMA_VERSION = 2
+SOURCE_PROVENANCE_SCHEMA_VERSION = 1
+SOURCE_DIFF_MAX_CHARS = 200_000
 
 
 class StateCacheError(RuntimeError):
@@ -107,6 +110,7 @@ class StateCacheWriter:
         }
 
     def finalize(self, *, accepted_by_critic: bool | None = None) -> Path:
+        source_hashes, source_snapshots = _capture_source_provenance(self.out_dir, self.cache_dir)
         manifest = {
             "schema_version": STATE_CACHE_SCHEMA_VERSION,
             "kind": "genesis_state_cache",
@@ -123,7 +127,9 @@ class StateCacheWriter:
             "actor_names": [contract["name"] for contract in self._actor_contracts],
             "actor_contracts": list(self._actor_contracts),
             "state_completeness_required": True,
-            "source_hashes": _source_hashes(self.out_dir),
+            "source_provenance_schema_version": SOURCE_PROVENANCE_SCHEMA_VERSION,
+            "source_hashes": source_hashes,
+            "source_snapshots": source_snapshots,
             "npz_required": True,
         }
         manifest_path = self.cache_dir / "manifest.json"
@@ -576,6 +582,10 @@ def _vector_or_nan(value: np.ndarray | None, size: int) -> np.ndarray:
 
 def _source_hashes(out_dir: Path) -> dict[str, str]:
     case_root = Path(out_dir).resolve().parent
+    return _source_hashes_for_case(case_root)
+
+
+def _source_hashes_for_case(case_root: Path) -> dict[str, str]:
     src_dir = case_root / "src"
     hashes: dict[str, str] = {}
     if not src_dir.is_dir():
@@ -587,6 +597,154 @@ def _source_hashes(out_dir: Path) -> dict[str, str]:
         except OSError:
             continue
     return hashes
+
+
+def _capture_source_provenance(out_dir: Path, cache_dir: Path) -> tuple[dict[str, str], dict[str, str]]:
+    case_root = Path(out_dir).resolve().parent
+    src_dir = case_root / "src"
+    hashes: dict[str, str] = {}
+    snapshots: dict[str, str] = {}
+    if not src_dir.is_dir():
+        return hashes, snapshots
+    snapshot_root = Path(cache_dir) / "source_snapshot"
+    for path in sorted(src_dir.glob("*.py")):
+        try:
+            rel = path.relative_to(case_root)
+            data = path.read_bytes()
+            snapshot_path = snapshot_root / rel
+            snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+            snapshot_path.write_bytes(data)
+        except OSError:
+            continue
+        rel_text = str(rel)
+        hashes[rel_text] = hashlib.sha256(data).hexdigest()
+        snapshots[rel_text] = str(snapshot_path.relative_to(cache_dir))
+    return hashes, snapshots
+
+
+def build_state_cache_source_consistency_report(
+    manifest_path: str | Path,
+    *,
+    case_root: str | Path | None = None,
+    diff_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Compare cached source provenance with the current case source tree.
+
+    This reports evidence only. Deciding whether a mismatch changes physics is a
+    semantic Critic responsibility, not a filename or hash heuristic.
+    """
+
+    path = Path(manifest_path)
+    if path.is_dir():
+        path = path / "manifest.json"
+    report: dict[str, Any] = {
+        "schema_version": SOURCE_PROVENANCE_SCHEMA_VERSION,
+        "manifest_path": str(path.resolve()),
+        "case_root": None,
+        "status": "manifest_missing",
+        "classification_required": True,
+        "cached_source_count": 0,
+        "current_source_count": 0,
+        "mismatch_count": 0,
+        "mismatches": [],
+        "provenance_errors": [],
+    }
+    if not path.is_file():
+        report["provenance_errors"].append(f"state cache manifest not found: {path}")
+        return report
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        report["status"] = "manifest_invalid"
+        report["provenance_errors"].append(f"could not read state cache manifest: {exc}")
+        return report
+    if not isinstance(manifest, dict):
+        report["status"] = "manifest_invalid"
+        report["provenance_errors"].append("state cache manifest must be a JSON object")
+        return report
+
+    root = Path(case_root).resolve() if case_root is not None else path.resolve().parents[2]
+    report["case_root"] = str(root)
+    cached_hashes = manifest.get("source_hashes")
+    if not isinstance(cached_hashes, dict) or not cached_hashes:
+        report["status"] = "provenance_unavailable"
+        report["provenance_errors"].append("state cache manifest has no source_hashes provenance")
+        return report
+    cached_hashes = {str(key): str(value) for key, value in cached_hashes.items()}
+    snapshot_map = manifest.get("source_snapshots")
+    if not isinstance(snapshot_map, dict):
+        snapshot_map = {}
+    current_hashes = _source_hashes_for_case(root)
+    report["cached_source_count"] = len(cached_hashes)
+    report["current_source_count"] = len(current_hashes)
+
+    diff_root = Path(diff_dir) if diff_dir is not None else None
+    if diff_root is not None:
+        diff_root.mkdir(parents=True, exist_ok=True)
+    mismatches: list[dict[str, Any]] = []
+    for rel_text in sorted(set(cached_hashes) | set(current_hashes)):
+        cached_hash = cached_hashes.get(rel_text)
+        current_hash = current_hashes.get(rel_text)
+        if cached_hash == current_hash:
+            continue
+        current_path = root / rel_text
+        snapshot_path = _safe_cache_snapshot_path(path.parent, snapshot_map.get(rel_text))
+        entry: dict[str, Any] = {
+            "path": rel_text,
+            "change_type": (
+                "added" if cached_hash is None else "removed" if current_hash is None else "modified"
+            ),
+            "cached_sha256": cached_hash,
+            "current_sha256": current_hash,
+            "cached_snapshot_path": str(snapshot_path) if snapshot_path is not None else None,
+            "current_source_path": str(current_path.resolve()),
+            "snapshot_available": bool(snapshot_path is not None and snapshot_path.is_file()),
+            "diff_path": None,
+            "diff_truncated": False,
+        }
+        if diff_root is not None and entry["snapshot_available"] and current_path.is_file():
+            try:
+                old_lines = snapshot_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+                new_lines = current_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+                diff_text = "".join(
+                    difflib.unified_diff(
+                        old_lines,
+                        new_lines,
+                        fromfile=f"cached/{rel_text}",
+                        tofile=f"current/{rel_text}",
+                    )
+                )
+                if len(diff_text) > SOURCE_DIFF_MAX_CHARS:
+                    diff_text = diff_text[:SOURCE_DIFF_MAX_CHARS] + "\n... diff truncated ...\n"
+                    entry["diff_truncated"] = True
+                diff_path = diff_root / ("__".join(Path(rel_text).parts) + ".diff")
+                diff_path.write_text(diff_text, encoding="utf-8")
+                entry["diff_path"] = str(diff_path.resolve())
+            except OSError as exc:
+                report["provenance_errors"].append(f"could not produce diff for {rel_text}: {exc}")
+        mismatches.append(entry)
+
+    report["mismatches"] = mismatches
+    report["mismatch_count"] = len(mismatches)
+    report["status"] = "mismatch" if mismatches else "match"
+    report["classification_required"] = bool(mismatches)
+    if mismatches and not all(entry["snapshot_available"] for entry in mismatches):
+        report["provenance_errors"].append(
+            "one or more mismatches lack cached source snapshots; Critic must use other evidence or classify indeterminate"
+        )
+    return report
+
+
+def _safe_cache_snapshot_path(cache_dir: Path, relative_path: Any) -> Path | None:
+    if not isinstance(relative_path, str) or not relative_path:
+        return None
+    root = cache_dir.resolve()
+    candidate = (root / relative_path).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
 
 
 def _json_safe(value: Any) -> Any:

@@ -217,6 +217,58 @@ def test_finish_pass_requires_final_path_traced_acceptance(tmp_path: Path):
     assert "final_path_traced" in result["message"]
 
 
+def test_final_replay_accepts_critic_confirmed_render_only_source_change(tmp_path: Path):
+    session = _runtime_session(tmp_path / "case")
+    handler = runtime_actions.RuntimeActionHandler(session)
+    critic = {
+        "verdict": "pass",
+        "state_cache_source_report": {"status": "mismatch"},
+        "cache_source_consistency": {
+            "classification": "render_only",
+            "physics_rerun_required": False,
+        },
+    }
+
+    handler._record_final_render_critic_result(
+        critic=critic,
+        render_stats=_final_replay_render_stats(),
+        render_stats_path=session.case_dir / "artifacts" / "render_stats.json",
+    )
+
+    assert critic["verdict"] == "pass"
+    assert session.state["final_render"]["status"] == "passed"
+    assert session.state["final_render"]["cache_source_classification"] == "render_only"
+    assert session.state["physics_validation"]["status"] == "passed"
+    assert session.state["physics_validation"]["accepted_state_cache_manifest"] is not None
+
+
+def test_final_replay_invalidates_cache_for_physics_affecting_source_change(tmp_path: Path):
+    session = _runtime_session(tmp_path / "case")
+    handler = runtime_actions.RuntimeActionHandler(session)
+    critic = {
+        "verdict": "pass",
+        "state_cache_source_report": {"status": "mismatch"},
+        "cache_source_consistency": {
+            "classification": "physics_affecting",
+            "physics_rerun_required": True,
+        },
+    }
+
+    handler._record_final_render_critic_result(
+        critic=critic,
+        render_stats=_final_replay_render_stats(),
+        render_stats_path=session.case_dir / "artifacts" / "render_stats.json",
+    )
+
+    assert critic["verdict"] == "fail"
+    assert critic["recommended_owner"] == "execution"
+    assert session.state["final_render"]["status"] == "needs_repair"
+    assert session.state["final_render"]["latest_issue"] == "physics_state_cache_rerun_required"
+    assert session.state["physics_validation"]["status"] == "stale"
+    assert session.state["physics_validation"]["accepted_state_cache_manifest"] is None
+    assert session.state["physics_validation"]["stale_state_cache_manifest"]
+
+
 def _capture_run_local(monkeypatch):
     captured = []
 
@@ -239,6 +291,15 @@ def _capture_run_local(monkeypatch):
 def _arg_pair(args: tuple[str, ...], flag: str) -> tuple[str, str]:
     index = args.index(flag)
     return args[index], args[index + 1]
+
+
+def _final_replay_render_stats():
+    return {
+        "rendered": True,
+        "replay_only": True,
+        "physics_cache_manifest": "artifacts/state_cache/manifest.json",
+        "path_tracing": {"enabled": True},
+    }
 
 
 def _runtime_session(case_dir: Path):

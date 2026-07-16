@@ -92,6 +92,12 @@ def evaluate_generated_run(
         "critic_attempts": _critic_attempt_count(codex_report),
         "artifact_report": artifact_report,
         "codex_critic_report": codex_report,
+        "cache_source_consistency": (
+            codex_report.get("cache_source_consistency") if isinstance(codex_report, dict) else None
+        ),
+        "state_cache_source_report": (
+            codex_report.get("state_cache_source_report") if isinstance(codex_report, dict) else None
+        ),
     }
     (reports_dir / "critic_report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report
