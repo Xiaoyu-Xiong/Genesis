@@ -21,9 +21,9 @@ class CodexConfigs:
     hide_builtin_assets_from_agents: bool = True
     builtin_asset_denied_roots: tuple[str, ...] = ("genesis/assets",)
     ask_for_approval: Literal["untrusted", "on-request", "never"] = "never"
-    planner_timeout_sec: float = 1500.0
-    worker_timeout_sec: float = 1500.0
-    critic_timeout_sec: float = 1500.0
+    planner_timeout_sec: float = 3600.0
+    worker_timeout_sec: float = 3600.0
+    critic_timeout_sec: float = 3600.0
     opt_timeout_sec: float = 3600.0
     quota_auto_wait: bool = True
     quota_probe_interval_sec: float = 300.0

@@ -16,13 +16,21 @@ These rules are mandatory for this repository.
 - **Put memory caps on long WSL runs.** Launch overnight suites, mesh/XML asset batches, and other memory-heavy background
   jobs under a process-tree memory limit. Prefer `systemd-run --user` with `MemoryMax=...`; fall back to `ulimit` only
   when cgroups are unavailable. Record the run root, log path, service/unit or PID, and memory cap in the response.
-- **Preserve `uv` and CUDA library paths in non-interactive/systemd environments.** User systemd services and other
-  non-interactive shells may not inherit the interactive shell `PATH` or `LD_LIBRARY_PATH`. When launching suites or
-  generated simulations through `systemd-run`, pass an explicit `PATH` containing the directory that owns `uv`, or invoke
-  `uv` by absolute path. On WSL GPU runs, also pass the interactive CUDA library path (for example
-  `/home/xxyfh/Genesis/.venv/cuda-12.8/lib:/usr/lib/wsl/lib`) so Genesis does not load an incompatible system
-  `libcuda.so`. Otherwise nested execution may fail as inconclusive with `uv: command not found` or die during CUDA
-  initialization.
+- **Preserve the complete runtime environment in non-interactive/systemd jobs.** User systemd services do not reliably
+  inherit the interactive shell environment. When launching suites or generated simulations through `systemd-run`, pass:
+  an explicit `PATH` containing the directory that owns `uv` (or invoke `uv` by absolute path); the required CUDA and
+  OptiX `LD_LIBRARY_PATH` (for example
+  `/opt/nvidia-optix-595/lib:/home/xxyfh/Genesis/.venv/cuda-12.8/lib:/usr/lib/wsl/lib` on WSL); `MESHY_API_KEY` for any
+  asset-generating run; and the active Codex account configuration (`CODE_AGENT_CODEX_ACCOUNTS`,
+  `CODE_AGENT_CODEX_ACCOUNT_FILE`, and/or `CODEX_HOME`, whichever are set). Never assume that a variable exported in the
+  launching shell reached the service, and never silently fall back to an unintended default `~/.codex` account. Do not
+  hard-code or print secret values in commands, logs, or status messages.
+- **Verify background-job environment before declaring startup healthy.** After launching a systemd unit, inspect its
+  effective environment with secret values redacted, confirm that every configured Codex `auth.json` is fresh and usable,
+  and check early logs for Meshy authentication/funding errors, `codex_auth_failed`, `uv: command not found`, incompatible
+  `libcuda.so`, and OptiX load failures. For a long suite, ensure the Codex login freshness window will cover the expected
+  runtime; otherwise re-login before launch. Record the unit name, run root, log path, memory cap, and the names (not
+  values) of the Meshy/CUDA/OptiX/Codex variables passed to the service.
 
 ## Quick Start
 
