@@ -8,7 +8,98 @@ from typing import Any
 
 from code_agent.configs import CONFIGS
 
-from .models import MeshGenesisClothImportResult, MeshGenesisFEMImportResult
+from .models import MeshGenesisClothImportResult, MeshGenesisFEMImportResult, MeshGenesisRigidImportResult
+
+
+def run_genesis_rigid_import_validation(
+    manifest_entry: dict[str, Any],
+    *,
+    timeout_sec: float = CONFIGS.mesh_repair.genesis_fem_import_timeout_sec,
+) -> MeshGenesisRigidImportResult:
+    """Validate separate collision and textured visual meshes through the rigid import path."""
+
+    runtime_path = Path(str(manifest_entry.get("runtime_path", "")))
+    visual_path_raw = manifest_entry.get("visual_path")
+    visual_path = Path(str(visual_path_raw)) if visual_path_raw else None
+    scale = _scale_tuple(manifest_entry.get("scale"))
+    file_meshes_are_zup = manifest_entry.get("file_meshes_are_zup")
+    payload = {
+        "runtime_path": str(runtime_path),
+        "visual_path": None if visual_path is None else str(visual_path),
+        "scale": scale,
+        "file_meshes_are_zup": file_meshes_are_zup,
+    }
+    base_kwargs = {
+        "runtime_path": runtime_path,
+        "visual_path": visual_path,
+        "scale": scale,
+        "file_meshes_are_zup": _optional_bool(file_meshes_are_zup),
+    }
+    if not runtime_path.is_file():
+        return MeshGenesisRigidImportResult(
+            ok=False,
+            **base_kwargs,
+            error=f"Runtime mesh path does not exist: {runtime_path}",
+        )
+    if visual_path is not None and not visual_path.is_file():
+        return MeshGenesisRigidImportResult(
+            ok=False,
+            **base_kwargs,
+            error=f"Visual mesh path does not exist: {visual_path}",
+        )
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", _GENESIS_RIGID_IMPORT_PROBE, json.dumps(payload)],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return MeshGenesisRigidImportResult(
+            ok=False,
+            **base_kwargs,
+            stdout_tail=_tail(exc.stdout or ""),
+            stderr_tail=_tail(exc.stderr or ""),
+            error=f"Genesis rigid import probe timed out after {timeout_sec} seconds.",
+        )
+    stdout_tail = _tail(result.stdout)
+    stderr_tail = _tail(result.stderr)
+    if result.returncode != 0:
+        return MeshGenesisRigidImportResult(
+            ok=False,
+            **base_kwargs,
+            returncode=result.returncode,
+            stdout_tail=stdout_tail,
+            stderr_tail=stderr_tail,
+            error=f"Genesis rigid import probe failed with exit code {result.returncode}.",
+        )
+    try:
+        probe = _last_json_object(result.stdout)
+    except Exception as exc:
+        return MeshGenesisRigidImportResult(
+            ok=False,
+            **base_kwargs,
+            returncode=result.returncode,
+            stdout_tail=stdout_tail,
+            stderr_tail=stderr_tail,
+            error=f"Unable to parse Genesis rigid import probe output: {type(exc).__name__}: {exc}",
+        )
+    return MeshGenesisRigidImportResult(
+        ok=bool(probe.get("ok")),
+        **base_kwargs,
+        collision_geom_count=int(probe.get("collision_geom_count") or 0),
+        visual_geom_count=int(probe.get("visual_geom_count") or 0),
+        visual_vertex_count=int(probe.get("visual_vertex_count") or 0),
+        visual_face_count=int(probe.get("visual_face_count") or 0),
+        visual_uv_count=int(probe.get("visual_uv_count") or 0),
+        texture_attached=bool(probe.get("texture_attached")),
+        returncode=result.returncode,
+        stdout_tail=stdout_tail,
+        stderr_tail=stderr_tail,
+        error=probe.get("error"),
+    )
 
 
 def run_genesis_fem_import_validation(
@@ -109,6 +200,12 @@ def run_genesis_fem_import_validation(
         surface_visual_uv_shape=_shape_tuple(probe.get("surface_visual_uv_shape")),
         render_vertex_count=_optional_int(probe.get("render_vertex_count")),
         render_face_count=_optional_int(probe.get("render_face_count")),
+        render_unique_source_vertex_count=_optional_int(probe.get("render_unique_source_vertex_count")),
+        render_duplicate_source_vertex_count=_optional_int(probe.get("render_duplicate_source_vertex_count")),
+        render_source_indices_in_bounds=_optional_bool(probe.get("render_source_indices_in_bounds")),
+        render_face_indices_in_bounds=_optional_bool(probe.get("render_face_indices_in_bounds")),
+        seam_mapping_required=_optional_bool(probe.get("seam_mapping_required")),
+        seam_mapping_ok=_optional_bool(probe.get("seam_mapping_ok")),
         texture_path=Path(str(texture_path_raw)) if texture_path_raw else None,
         returncode=result.returncode,
         stdout_tail=stdout_tail,
@@ -206,6 +303,15 @@ def run_genesis_cloth_import_validation(
         surface_vertex_count=int(probe.get("surface_vertex_count") or 0),
         surface_face_count=int(probe.get("surface_face_count") or 0),
         surface_visual_uv_shape=_shape_tuple(probe.get("surface_visual_uv_shape")),
+        render_vertex_count=_optional_int(probe.get("render_vertex_count")),
+        render_face_count=_optional_int(probe.get("render_face_count")),
+        render_unique_source_vertex_count=_optional_int(probe.get("render_unique_source_vertex_count")),
+        render_duplicate_source_vertex_count=_optional_int(probe.get("render_duplicate_source_vertex_count")),
+        render_source_indices_in_bounds=_optional_bool(probe.get("render_source_indices_in_bounds")),
+        render_face_indices_in_bounds=_optional_bool(probe.get("render_face_indices_in_bounds")),
+        seam_mapping_required=_optional_bool(probe.get("seam_mapping_required")),
+        seam_mapping_ok=_optional_bool(probe.get("seam_mapping_ok")),
+        texture_path=(Path(str(probe["texture_path"])) if probe.get("texture_path") else None),
         returncode=result.returncode,
         stdout_tail=stdout_tail,
         stderr_tail=stderr_tail,
@@ -267,9 +373,71 @@ def _last_json_object(stdout: str) -> dict[str, Any]:
     raise ValueError("No JSON object found in subprocess stdout.")
 
 
+_GENESIS_RIGID_IMPORT_PROBE = r"""
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+
+import genesis as gs
+
+gs.init(backend=gs.cpu, precision="32", performance_mode=True, logging_level="warning")
+
+scene = gs.Scene(
+    sim_options=gs.options.SimOptions(dt=0.01, gravity=(0.0, 0.0, 0.0), floor_height=-2.0),
+    show_viewer=False,
+    show_FPS=False,
+)
+entity = scene.add_entity(
+    morph=gs.morphs.Mesh(
+        file=payload["runtime_path"],
+        visual_file=payload.get("visual_path"),
+        scale=payload["scale"] or 1.0,
+        file_meshes_are_zup=payload["file_meshes_are_zup"],
+        visual_file_meshes_are_zup=payload["file_meshes_are_zup"],
+        collision=True,
+        visualization=True,
+        convexify=False,
+        decimate=False,
+        fixed=True,
+    ),
+    material=gs.materials.Rigid(rho=1000.0, friction=0.5),
+    name="mesh_agent_rigid_import_validation",
+)
+scene.build()
+
+visual_uv_count = sum(0 if vgeom.uvs is None else int(len(vgeom.uvs)) for vgeom in entity.vgeoms)
+texture_attached = any(
+    vgeom.uvs is not None and len(vgeom.uvs) > 0 and bool(vgeom.surface.requires_uv)
+    for vgeom in entity.vgeoms
+)
+error = None
+if entity.n_geoms <= 0:
+    error = "Rigid import produced no collision geometry."
+elif entity.n_vgeoms <= 0 or entity.n_vverts <= 0 or entity.n_vfaces <= 0:
+    error = "Rigid import produced no visual geometry."
+elif payload.get("visual_path") and not texture_attached:
+    error = "Rigid visual_file imported, but its UV texture was not attached."
+
+print(json.dumps({
+    "ok": error is None,
+    "collision_geom_count": int(entity.n_geoms),
+    "visual_geom_count": int(entity.n_vgeoms),
+    "visual_vertex_count": int(entity.n_vverts),
+    "visual_face_count": int(entity.n_vfaces),
+    "visual_uv_count": visual_uv_count,
+    "texture_attached": texture_attached,
+    "error": error,
+}))
+"""
+
+
 _GENESIS_FEM_IMPORT_PROBE = r"""
 import json
 import sys
+
+import numpy as np
+import trimesh
 
 payload = json.loads(sys.argv[1])
 
@@ -314,14 +482,66 @@ error = None
 if payload.get("visual_path") and payload.get("visual_path") != payload["runtime_path"] and render_indices is None:
     error = "Genesis FEM import succeeded, but no seam-aware render artifact was registered for visual_path."
 
+render_vertex_count = None
+render_face_count = None
+render_unique_source_vertex_count = None
+render_duplicate_source_vertex_count = None
+render_source_indices_in_bounds = None
+render_face_indices_in_bounds = None
+seam_mapping_required = False
+seam_mapping_ok = None
+if render_indices is not None:
+    render_indices = np.asarray(render_indices, dtype=np.int64)
+    render_vertex_count = int(len(render_indices))
+    render_unique_source_vertex_count = int(len(np.unique(render_indices)))
+    render_duplicate_source_vertex_count = render_vertex_count - render_unique_source_vertex_count
+    render_source_indices_in_bounds = bool(
+        render_indices.ndim == 1
+        and np.all(render_indices >= 0)
+        and np.all(render_indices < int(entity.n_vertices))
+    )
+if render_faces is not None:
+    render_faces = np.asarray(render_faces, dtype=np.int64)
+    render_face_count = int(len(render_faces))
+    render_face_indices_in_bounds = bool(
+        render_faces.ndim == 2
+        and render_faces.shape[1] == 3
+        and render_vertex_count is not None
+        and np.all(render_faces >= 0)
+        and np.all(render_faces < render_vertex_count)
+    )
+
+visual_vertex_count = None
+if payload.get("visual_path"):
+    visual_mesh = trimesh.load_mesh(payload["visual_path"], force="mesh", skip_texture=False, process=False)
+    visual_vertex_count = int(len(visual_mesh.vertices))
+    runtime_mesh = trimesh.load_mesh(payload["runtime_path"], force="mesh", skip_texture=True, process=False)
+    seam_mapping_required = visual_vertex_count > int(len(runtime_mesh.vertices))
+
+if render_indices is not None and render_faces is not None:
+    seam_mapping_ok = bool(
+        render_source_indices_in_bounds
+        and render_face_indices_in_bounds
+        and (visual_vertex_count is None or render_vertex_count == visual_vertex_count)
+        and (not seam_mapping_required or render_duplicate_source_vertex_count > 0)
+    )
+    if not seam_mapping_ok:
+        error = "Genesis FEM seam-aware render mapping failed bounds, cardinality, or many-to-one validation."
+
 print(json.dumps({
     "ok": error is None,
     "vertex_count": int(entity.n_vertices),
     "element_count": int(entity.n_elements),
     "surface_vertex_count": int(entity.n_surface_vertices),
     "surface_visual_uv_shape": None if surface_uvs is None else list(surface_uvs.shape),
-    "render_vertex_count": None if render_indices is None else int(len(render_indices)),
-    "render_face_count": None if render_faces is None else int(len(render_faces)),
+    "render_vertex_count": render_vertex_count,
+    "render_face_count": render_face_count,
+    "render_unique_source_vertex_count": render_unique_source_vertex_count,
+    "render_duplicate_source_vertex_count": render_duplicate_source_vertex_count,
+    "render_source_indices_in_bounds": render_source_indices_in_bounds,
+    "render_face_indices_in_bounds": render_face_indices_in_bounds,
+    "seam_mapping_required": seam_mapping_required,
+    "seam_mapping_ok": seam_mapping_ok,
     "texture_path": texture_path,
     "error": error,
 }))
@@ -335,6 +555,8 @@ import sys
 payload = json.loads(sys.argv[1])
 
 import genesis as gs
+import numpy as np
+import trimesh
 
 gs.init(backend=gs.gpu, precision="32", performance_mode=True, logging_level="warning")
 
@@ -367,7 +589,67 @@ entity = scene.add_entity(
 
 scene.build()
 surface_uvs = entity.surface_visual_uvs
+from genesis.utils import element as eu
+
+artifact = eu.get_mesh_to_elements_render_artifact(
+    payload["runtime_path"],
+    payload["scale"] or 1.0,
+    entity.tet_cfg,
+    payload["file_meshes_are_zup"],
+)
+artifact = artifact if isinstance(artifact, dict) else {}
+render_faces = artifact.get("render_faces")
+render_indices = artifact.get("render_vertex_src_indices")
+texture_path = artifact.get("texture_path")
 error = None
+
+render_vertex_count = None
+render_face_count = None
+render_unique_source_vertex_count = None
+render_duplicate_source_vertex_count = None
+render_source_indices_in_bounds = None
+render_face_indices_in_bounds = None
+seam_mapping_required = False
+seam_mapping_ok = None
+if render_indices is not None:
+    render_indices = np.asarray(render_indices, dtype=np.int64)
+    render_vertex_count = int(len(render_indices))
+    render_unique_source_vertex_count = int(len(np.unique(render_indices)))
+    render_duplicate_source_vertex_count = render_vertex_count - render_unique_source_vertex_count
+    render_source_indices_in_bounds = bool(
+        render_indices.ndim == 1
+        and np.all(render_indices >= 0)
+        and np.all(render_indices < int(entity.n_vertices))
+    )
+if render_faces is not None:
+    render_faces = np.asarray(render_faces, dtype=np.int64)
+    render_face_count = int(len(render_faces))
+    render_face_indices_in_bounds = bool(
+        render_faces.ndim == 2
+        and render_faces.shape[1] == 3
+        and render_vertex_count is not None
+        and np.all(render_faces >= 0)
+        and np.all(render_faces < render_vertex_count)
+    )
+
+visual_vertex_count = None
+if payload.get("visual_path"):
+    visual_mesh = trimesh.load_mesh(payload["visual_path"], force="mesh", skip_texture=False, process=False)
+    visual_vertex_count = int(len(visual_mesh.vertices))
+    runtime_mesh = trimesh.load_mesh(payload["runtime_path"], force="mesh", skip_texture=True, process=False)
+    seam_mapping_required = visual_vertex_count > int(len(runtime_mesh.vertices))
+
+if payload.get("visual_path") and payload.get("visual_path") != payload["runtime_path"] and render_indices is None:
+    error = "Genesis FEM.Cloth import succeeded, but no seam-aware render artifact was registered for visual_path."
+if render_indices is not None and render_faces is not None:
+    seam_mapping_ok = bool(
+        render_source_indices_in_bounds
+        and render_face_indices_in_bounds
+        and (visual_vertex_count is None or render_vertex_count == visual_vertex_count)
+        and (not seam_mapping_required or render_duplicate_source_vertex_count > 0)
+    )
+    if not seam_mapping_ok:
+        error = "Genesis FEM.Cloth seam-aware render mapping failed bounds, cardinality, or many-to-one validation."
 
 print(json.dumps({
     "ok": error is None,
@@ -376,6 +658,15 @@ print(json.dumps({
     "surface_vertex_count": int(entity.n_surface_vertices),
     "surface_face_count": int(entity.n_surfaces),
     "surface_visual_uv_shape": None if surface_uvs is None else list(surface_uvs.shape),
+    "render_vertex_count": render_vertex_count,
+    "render_face_count": render_face_count,
+    "render_unique_source_vertex_count": render_unique_source_vertex_count,
+    "render_duplicate_source_vertex_count": render_duplicate_source_vertex_count,
+    "render_source_indices_in_bounds": render_source_indices_in_bounds,
+    "render_face_indices_in_bounds": render_face_indices_in_bounds,
+    "seam_mapping_required": seam_mapping_required,
+    "seam_mapping_ok": seam_mapping_ok,
+    "texture_path": texture_path,
     "error": error,
 }))
 """

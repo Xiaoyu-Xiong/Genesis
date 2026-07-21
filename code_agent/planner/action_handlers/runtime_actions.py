@@ -80,6 +80,7 @@ class RuntimeActionHandler:
             default_render_res=timing.render_res,
             default_duration_sec=timing.duration_sec,
             default_target_video_frames=timing.target_video_frames,
+            rigid_cfg=self.session.rigid_config,
             deformable_cfg=self.session.deformable_config,
         )
         self.session.state["integration"] = {
@@ -153,7 +154,8 @@ class RuntimeActionHandler:
         )
         self.session.state["control"]["needs_execution"] = False
         self.session.state["control"]["needs_critic"] = True
-        return {"ok": execution.ok, "status": "executed", "execution": self.session.state["execution"]}
+        status = "execution_rework_required" if execution_report.get("rework_required") else "executed"
+        return {"ok": execution.ok, "status": status, "execution": self.session.state["execution"]}
 
     def run_critic(self, action: dict[str, Any]) -> dict[str, Any]:
         execution = self.session.state.get("execution")

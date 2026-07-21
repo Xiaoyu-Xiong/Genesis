@@ -100,6 +100,7 @@ class EpisodePlanner:
         ipc_defaults = runtime_defaults_dict(ipc_enabled=True)
         deformable_enabled = bool(self.session.deformable_config.get("enabled"))
         ipc_enabled = bool(self.session.deformable_config.get("ipc_enabled"))
+        rigid_config_text = json.dumps(self.session.rigid_config, indent=2)
         deformable_config_text = json.dumps(self.session.deformable_config, indent=2)
         prompt_state = self._prompt_state()
         state_text = json.dumps(prompt_state, indent=2)
@@ -110,6 +111,8 @@ class EpisodePlanner:
             deformable_enabled=deformable_enabled,
             ipc_enabled=ipc_enabled,
             physics_modes=self.session.simdebug_physics_modes(),
+            rigid_config_path=self.session.rigid_config_path,
+            rigid_config_text=rigid_config_text,
             deformable_config_path=self.session.deformable_config_path,
             deformable_config_text=deformable_config_text,
         )

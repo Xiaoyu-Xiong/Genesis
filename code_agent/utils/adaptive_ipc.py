@@ -224,7 +224,7 @@ def _primitive_target_edge(feature_sizes: object, resolution: object, cfg: dict[
         resolution = max(1, int(resolution))
     except (TypeError, ValueError):
         resolution = max(1, int(cfg.get("tet_resolution", 2) or 2))
-    return max(float(min(positive)), 1e-6) / float(2 * resolution + 1)
+    return max(float(min(positive)), 1e-6) / float(resolution + 1)
 
 
 def _primitive_stats_from_extents(

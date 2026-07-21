@@ -1,7 +1,7 @@
 schema_version: 1
 id: physics_state_cache_replay_guideline
 title: Save physics state caches for render-only replay
-summary: Physics runs should be able to save a manifest plus per-frame npz state files so final rendering can replay accepted motion without stepping physics again.
+summary: Physics runs must save validated per-frame NPZ state with actor contracts whose replay modes reflect physical semantics and a state-application path proven on the rebuilt final scene.
 scopes: [planner, action, rendering, critic]
 physics_modes: [any]
 task_tags:
@@ -10,6 +10,7 @@ task_tags:
   - npz
   - render_only
   - final_render
+  - actor_contract
 failure_tags:
   - missing_state_cache
   - missing_npz
@@ -18,33 +19,46 @@ failure_tags:
   - cache_source_mismatch
   - missing_articulated_qpos
   - incomplete_actor_state_contract
+  - static_actor_replay_misclassified
+  - replay_state_application_unsupported
+  - articulated_replay_capability_mismatch
 guidance:
   - When requested, every physics run must write artifacts/state_cache/manifest.json and artifacts/state_cache/states/frame_*.npz.
-  - The npz files are a hard requirement. Do not accept a cache manifest whose frame entries cannot be opened as NumPy npz files.
-  - Rigid caches should save per-frame transforms or positions/quaternions for dynamic rigid actors.
-  - Articulated rigid bodies must save a complete replayable generalized state on every frame: prefer qpos and also record DOF positions when the API exposes them. Root pose alone is insufficient because it cannot reproduce joint/link motion.
-  - Every manifest must declare an actor contract with each actor's replay mode, required per-frame NPZ arrays, expected shapes, DOF count, and actor identity. Validation must reject any frame that omits or changes a required channel.
-  - FEM, deformable, and cloth caches should save visible or state vertices, faces references, bboxes, and centers of mass when available.
+  - The NPZ files are a hard requirement. Do not accept a cache manifest whose frame entries cannot be opened as NumPy npz files.
+  - Every manifest must declare an actor contract containing actor identity, physical role, fixed/static status, replay mode, required per-frame arrays, expected shapes, and DOF count when applicable.
+  - Choose replay_mode from the actor's physical semantics and a state-application path proven against the rebuilt final scene. Getter availability, setter attribute existence, or successful capture alone does not prove replayability.
+  - Explicitly fixed or static actors should normally use replay_mode=none. Record their identity, geometry reference, and rebuilt initial state, but do not require per-frame pose arrays or state setters for actors that cannot move.
+  - Dynamic non-articulated rigid actors should save and replay per-frame transforms or positions and quaternions through a verified pose application path.
+  - Articulated rigid bodies must save a complete replayable generalized state on every frame: prefer qpos and also record DOF positions when the API exposes them. Root pose alone is insufficient because it cannot reproduce joint or link motion.
+  - An articulated replay mode is valid only when the rebuilt final scene can apply the complete cached generalized state. Verify an actual application call and resulting link transforms; do not infer support merely because set_qpos or set_dofs_position is present.
+  - If an actor implementation does not support post-build generalized-state restoration, route support to a sanctioned replay implementation. An explicitly declared equivalent replay representation is allowed only when its identity, geometry, topology, names, link mapping, and DOF ordering were established before cache acceptance; do not invent replacement geometry during final look-dev.
+  - FEM, deformable, and cloth actors should save complete visible or state vertices with stable shape, faces references, bboxes, and centers of mass when available, then replay them through a verified vertex-state path.
   - Static geometry, materials, actor names, source hashes, source snapshots, sim_dt, substeps, backend, and capture steps should be recorded in the manifest.
+  - A legacy cache that labels an actually static actor as pose may be normalized to replay_mode=none only when every cached pose is finite, shape-stable, invariant across all frames, and matches the rebuilt actor within a tight documented tolerance. Otherwise require a fresh cache.
   - When current source hashes differ, produce a per-file old-to-current diff for Critic. Critic decides whether the edit is render_only, physics_affecting, or indeterminate by reading the changed code.
   - Render-only replay must read a validated manifest and must not call scene.step().
 restrictions:
-  - Do not run final replay from a cache that lacks readable frame npz files.
+  - Do not run final replay from a cache that lacks readable frame NPZ files.
   - Do not treat event_log positions alone as sufficient for final replay when full state cache was requested.
   - Do not reuse a cache after a physics-affecting source mismatch or an indeterminate mismatch. A Critic-confirmed render_only mismatch may reuse it because the simulated state is unchanged.
   - Do not weaken NPZ, actor-contract, finite-value, shape, or state-application validation based on a render_only source classification; those remain hard requirements.
-  - Do not mark an articulated cache replayable when it contains only root positions/quaternions but no qpos or DOF-position channel.
+  - Do not mark an articulated cache replayable when it contains only root positions/quaternions or when complete generalized state cannot be applied to the rebuilt scene.
+  - Do not silently skip, freeze, or root-pose-only an articulated actor whose links moved in the accepted physics run.
+  - Do not call per-frame pose setters for replay_mode=none actors solely to satisfy a uniform replay loop.
 checks:
-  - Check manifest.json exists and lists every frame step and relative npz path.
-  - Check every referenced npz file exists and np.load can open it before replay begins.
-  - Check every actor contract against every NPZ frame; articulated qpos/DOF arrays and deformable state-position arrays must be present, finite, and shape-stable.
-  - During replay, require each contracted actor to exist in the rebuilt scene and require the matching set_qpos, set_dofs_position, set_position, or pose setter to succeed before rendering the frame.
-  - Check render_stats.json records replay_only, physics_cache_manifest, and physics run/source identifiers when replay is used.
+  - Check manifest.json exists and lists every frame step and relative NPZ path.
+  - Check every referenced NPZ file exists and np.load can open it before replay begins.
+  - Check every actor contract against every NPZ frame; required arrays must be present, finite, and shape-stable.
+  - For replay_mode=none, require static/fixed semantics and rebuilt identity/state consistency, and require that replay makes no per-frame state-setter call.
+  - For every dynamic replay mode, require the contracted actor to exist and apply frame 0 plus at least one different cached frame through the declared state path before full rendering.
+  - For articulated actors, verify changing qpos or DOF state produces corresponding link-transform changes rather than only a successful method return.
+  - Check any legacy static-pose normalization records invariance evidence, rebuilt-state error, tolerance, and the resulting replay_mode=none decision.
+  - Check render_stats.json records replay_only, physics_cache_manifest, actor-contract validation, state-application validation, and physics run/source identifiers when replay is used.
   - Check source mismatch classification is content-based and that only render_only sets physics_rerun_required=false.
 dispatch_hints:
-  - Send to action when physics stepping should save state.
-  - Send to rendering when final rendering should replay from cache.
-  - Send to Critic when judging cache freshness and replay validity.
+  - Send to action when physics stepping should save state and author actor contracts.
+  - Send to rendering when final rendering should rebuild actors and apply cached state.
+  - Send to Critic when judging cache freshness, replay-mode classification, and state-application validity.
 provenance:
-  source: path_tracing_debug_card_workflow
-  motivation: Avoid rerunning accepted physics while tuning final path-traced rendering.
+  source: path_tracing_workflow
+  motivation: Avoid rerunning accepted physics while requiring each static, rigid, articulated, and deformable actor to have a truthful replay contract.

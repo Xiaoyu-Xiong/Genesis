@@ -1,74 +1,43 @@
 schema_version: 1
 id: final_path_tracing_siggraph_guideline
-title: Tune final GPU path tracing toward SIGGRAPH-demo visual quality
-summary: Final renders must use Genesis RayTracer on GPU with denoising, light studio backgrounds, controlled lighting, readable materials, iterative look-dev, and recorded path-tracing metadata.
-scopes: [planner, scene, body, rendering, critic]
+title: Complete a polished final GPU path-tracing pass
+summary: Final delivery requires an accepted GPU path-traced render whose runtime contract, look-dev quality, replay provenance, and sampled frames all pass their focused SimDebug checks.
+scopes: [planner, rendering, critic]
 physics_modes: [any]
 task_tags:
   - path_tracing
   - raytracer
-  - optix
-  - denoise
   - final_render
-  - lighting
-  - material
+  - quality_gate
+  - iterative_lookdev
 failure_tags:
   - opengl_style_render
-  - noisy_path_trace
-  - optix_stub
-  - denoise_failed
-  - visible_light_mesh
-  - missing_light_visibility_check
-  - light_frustum_intersection
-  - overexposed_render
+  - final_path_tracing_missing
   - cropped_final_render
-  - flat_lighting
-  - diffuse_only_materials
-  - alpha_fake_glass
-  - solid_glass_volume_for_thin_screen
-  - low_contrast_palette_retry_loop
   - one_shot_final_render
+  - missing_final_render_metadata
 guidance:
-  - Final renders must use GPU gs.renderers.RayTracer with WavePathIntegrator or an equivalent validated path-tracing integrator.
-  - Do not accept a final render whose render_stats.json has path_tracing.enabled=false. That is still debug evidence, not the final deliverable.
-  - Use camera_denoise=True for final outputs; treat OptiX denoiser failures as runtime issues to fix, not as a reason to silently disable denoising.
-  - Use low spp only for previews. Final outputs should use 512 spp or higher when runtime allows.
-  - Use tracing_depth in the 16-32 range; 24 is a validated practical default.
-  - Use large sphere, mesh, or emissive area lights for soft shadows and highlights, but project-check their renderable geometry so it cannot intersect the final camera frustum.
-  - Treat RayTracer sphere lights as renderable geometry: place large soft lights outside the camera frustum, typically behind/above the camera or well off-frame, and rerender if any light ball appears in a final frame.
-  - Validate light visibility from parameters as well as pixels. Project each sphere radius or emissive-mesh world bbox through every final camera pose, or conservatively test it against the swept frustum; a white background does not waive this check because a white light ball may be visually camouflaged.
-  - Avoid flat over-lit setups. Reduce uniform ambient light, build a visible key/fill/rim hierarchy, and preserve soft contact shadows and tonal layers.
-  - Prefer light studio backdrops such as warm light gray, pale blue-gray, soft off-white, or other neutral high-key backgrounds, with non-pure-white matte floors when such support geometry already exists, soft shadows, controlled warm key light, cool fill, and small rim accents.
-  - Do not inherit the debug raster pure-white background fallback as the final look. Use pure white in final renders only when the prompt explicitly asks for a white stage/product-style background or when it is required for visual comparison.
-  - Choose semantically varied materials instead of defaulting to diffuse surfaces. Use metallic/satin materials for metal objects, rougher plastic/rubber/cloth materials for soft or textile objects, and controlled specular highlights for tools and fixtures.
-  - For transparent or semi-transparent final-render objects, do not fake glass with only RGBA alpha or Smooth.opacity. Use path-traced transmission/refraction materials such as gs.surfaces.Glass or task-appropriate Glass/Water-derived surfaces with IOR, transmission/tint, and roughness metadata.
-  - For Genesis Glass, prefer explicit renderer-native material settings such as gs.surfaces.Glass(color=(1.0, 1.0, 1.0), roughness=0.0-0.06, ior=1.2-1.5). Use lower tint and lower IOR for thick glass that otherwise looks smoky; use stronger IOR/tint only when the refractive object remains readable.
-  - Do not assume a Glass material can turn a solid primitive into a hollow container. A single Glass sphere renders as a solid glass volume; hollow glass shells need actual thin-shell geometry with inner and outer surfaces, authored before the accepted physics/cache run.
-  - Interpret transparent geometry semantically before physics acceptance. A prompt-requested screen, window pane, or transparent plate must be a bounded thin layer whose thickness is small relative to its span, not a glass primitive that fills the enclosing drum, room, vessel, or container volume.
-  - Render-only replay must not add, hide, delete, or replace geometry, including collision proxies, support floors, helper cages, or visual shells. It may adjust renderer settings, camera, lights, exposure, and existing surface/material parameters only.
-  - If dense collision-proxy geometry or helper cages would dominate the final image, route repair to scene/body before physics acceptance so the semantic visual geometry and the cache source are correct. Do not fix that by changing geometry during final render replay.
-  - When using a constant RayTracer environment, prefer explicit emissive_texture=gs.textures.ColorTexture(...) on gs.surfaces.Emission rather than relying on shortcut fields that may collide with texture resolution.
-  - Tune roughness and material type for readability. Avoid mirror-like settings that make small or gray actors disappear in reflected environments.
-  - Final path tracing is an iterative look-dev stage. Planner should repair rendering/body/scene and rerun final_path_traced until start/mid/end frames are polished, not stop after one technically successful RayTracer run.
-  - Do not remain trapped in an all-white or near-white look-dev loop. After repeated low-contrast rejection, make a substantive palette, background value, roughness, exposure, or lighting-hierarchy change while preserving prompt-specified object colors.
-  - Final render_stats.json must record path_tracing.enabled, backend, integrator, spp, denoise, tracing depth, render_profile, background_style, floor_material, lights, camera, material notes, transparent_materials, alpha_rgba_used=false for refractive materials, and replay/cache source when used.
+  - After physical behavior is accepted, produce a final_path_traced or replay_render deliverable; debug raster evidence is not the final render.
+  - Do not accept a final render whose render_stats.json has path_tracing.enabled=false.
+  - Use raytracer_runtime_contract_guideline for GPU, OptiX, integrator, denoiser, renderer-construction, and mesh-channel correctness.
+  - Use path_traced_lookdev_guideline for background, lighting, soft shadows, material semantics, transparency, and iterative visual refinement.
+  - Use physics_state_cache_replay_guideline and render_replay_consistency_guideline whenever final look-dev reuses accepted simulated motion.
+  - Final path tracing is iterative. A technically successful first RayTracer output is a preview, not automatic visual acceptance; repair the responsible rendering, scene, or existing material parameters and rerun until final_render.status is passed.
+  - Render-only look-dev should preserve accepted physics and geometry. Return to physics repair only for a severe, fundamental physical error that final rendering or replay repair cannot reasonably resolve.
+  - Final render_stats.json must record path_tracing.enabled, render_profile, runtime validation status, look-dev validation status, camera, frame count, final_render status, and replay/cache provenance when replay is used.
+restrictions:
+  - Do not finish a case from debug raster evidence when final path tracing is required.
+  - Do not treat successful renderer startup as proof that framing, lighting, materials, motion, or replay consistency are acceptable.
+  - Do not weaken runtime or replay validation to obtain a visually plausible final video.
 checks:
-  - Inspect start, mid, and end frames for cropping, visible lights, overexposure, missing actors, and material readability.
-  - Check that LD_LIBRARY_PATH in final execution puts /opt/nvidia-optix-595/lib before /usr/lib/wsl/lib when running under WSL.
-  - Check render_stats.json confirms RayTracer, WavePathIntegrator, camera_denoise=true, and the intended spp.
-  - Check that the final background is a deliberate light studio choice, not an accidental default inherited from debug raster evidence.
-  - Check for visible soft shadows and lighting hierarchy; reject flat uniformly lit final renders when the image lacks path-traced depth.
-  - Require render_stats.json light_visibility_checks for sphere/mesh/emissive lights, including world bounds, tested camera frames, frustum_intersects, and minimum frame clearance. Reject missing checks or any intersection.
-  - Check transparent objects for true refractive/transmissive material use rather than alpha-only raster-style transparency.
-  - Check that render-only look-dev did not add, hide, delete, or replace geometry. If final geometry is semantically wrong, require scene/body repair and a new cache instead of accepting a render-only geometry workaround.
-  - Check that hollow transparent objects have actual hollow/thin-shell geometry; reject solid primitive Glass volumes when the prompt calls for a hollow shell or container.
-  - Check screen/window/plate primitive dimensions before accepting physics/cache; reject transparent geometry whose depth fills the enclosing mechanism instead of forming a thin layer.
-  - When prompt-required objects are white, preserve that color but require contrasting window, wall, floor, support, or background roles so silhouettes and motion remain readable.
-  - Check render-only look-dev outputs have replay_only=true and physics_cache_manifest when they are derived from an accepted state cache.
+  - Check that raytracer_runtime_contract_guideline and path_traced_lookdev_guideline were both applied to the final pass.
+  - Inspect start, mid, and end frames for cropping, missing actors, unreadable motion, and visual regressions.
+  - Check render_stats.json records path_tracing.enabled=true and final_render.status=passed together with runtime and look-dev evidence.
+  - For replay outputs, check replay_only=true and physics_cache_manifest and require render_replay_consistency_guideline to pass.
 dispatch_hints:
-  - Send to rendering for final look-dev and camera/lights.
-  - Send to scene/body when material or backdrop choices must be encoded in generated source.
-  - Send to Critic when evaluating final render quality and metadata.
+  - Send to Planner whenever physics has passed and final rendering remains.
+  - Send to rendering for final-pass coordination and repeated look-dev execution.
+  - Send to Critic for the final aggregate acceptance decision.
 provenance:
-  source: rigid_sphere_twisting_edge_slide_contact_path_tracing_debug
-  motivation: Capture the successful OptiX/GPU path tracing and look-dev recipe.
+  source: path_tracing_workflow
+  motivation: Keep final delivery mandatory while delegating technical runtime and visual look-dev details to focused cards.

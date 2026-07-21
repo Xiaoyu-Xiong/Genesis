@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from concurrent.futures import ThreadPoolExecutor
 import json
 import textwrap
@@ -24,27 +25,27 @@ WORKERS: dict[WorkerRole, WorkerSpec] = {
 }
 
 PLACEHOLDER_MODULES: dict[WorkerRole, str] = {
-    "scene": '''from __future__ import annotations
+    "scene": """from __future__ import annotations
 
 
-def create_scene(backend: str, *, sim_dt: float, sim_substeps: int, deformable_cfg: dict):
+def create_scene(backend: str, *, sim_dt: float, sim_substeps: int, rigid_options, deformable_cfg: dict):
     raise NotImplementedError("scene worker did not replace this placeholder")
-''',
-    "body": '''from __future__ import annotations
+""",
+    "body": """from __future__ import annotations
 
 
 def create_bodies(scene, task: str, *, deformable_cfg: dict):
     raise NotImplementedError("body worker did not replace this placeholder")
-''',
-    "action": '''from __future__ import annotations
+""",
+    "action": """from __future__ import annotations
 
 from pathlib import Path
 
 
 def run_actions(scene, actors, *, out_dir: Path, steps: int, render_state=None):
     raise NotImplementedError("action worker did not replace this placeholder")
-''',
-    "rendering": '''from __future__ import annotations
+""",
+    "rendering": """from __future__ import annotations
 
 from pathlib import Path
 
@@ -70,7 +71,7 @@ def capture_frame(render_state: dict, step: int) -> None:
 
 def finalize_rendering(render_state: dict, *, event_log_path: Path | None = None, metrics_path: Path | None = None):
     raise NotImplementedError("rendering worker did not replace this placeholder")
-''',
+""",
 }
 
 
@@ -163,7 +164,7 @@ def write_worker_dispatch_report(case_dir: Path, results: list[WorkerDispatchRes
                 "error_message": item.error_message,
             }
             for item in results
-        ]
+        ],
     }
     path = case_dir / "reports" / "worker_dispatch.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -205,6 +206,7 @@ def _run_worker(
         task=task,
         planner_output=planner_output,
         asset_manifest=_load_asset_manifest(case_dir),
+        rigid_config=_load_rigid_config(case_dir),
         deformable_config=_load_deformable_config(case_dir),
         genesis_context=_load_genesis_context(case_dir),
         spec=spec,
@@ -235,6 +237,9 @@ def _run_worker(
             "Generated worker source references forbidden Genesis built-in assets: "
             + "; ".join(builtin_asset_violations),
         )
+    rigid_options_violations = _scene_rigid_options_contract_violations(target_source) if spec.role == "scene" else []
+    if rigid_options_violations:
+        error_message = _append_error_message(error_message, "; ".join(rigid_options_violations))
     ok = (
         result.success
         and worker_report is not None
@@ -245,6 +250,7 @@ def _run_worker(
         and target_path.stat().st_size > 0
         and "NotImplementedError" not in target_source
         and not builtin_asset_violations
+        and not rigid_options_violations
     )
     return WorkerDispatchResult(
         role=spec.role,
@@ -262,6 +268,7 @@ def _worker_prompt(
     task: str,
     planner_output: dict[str, object],
     asset_manifest: dict[str, object],
+    rigid_config: dict[str, object],
     deformable_config: dict[str, object],
     genesis_context: str,
     spec: WorkerSpec,
@@ -304,6 +311,9 @@ def _worker_prompt(
 
         Asset manifest:
         {json.dumps(asset_manifest, indent=2)}
+
+        Forced rigid solver config (informational; scene.py receives the already-built `rigid_options` object):
+        {json.dumps(rigid_config, indent=2)}
 
         Effective FEM/IPC capability/config:
         {json.dumps(deformable_config, indent=2)}
@@ -368,10 +378,24 @@ def _load_asset_manifest(case_dir: Path) -> dict[str, object]:
 def _load_deformable_config(case_dir: Path) -> dict[str, object]:
     path = case_dir / "contracts" / "deformable_config.json"
     if not path.exists():
-        return {"enabled": False, "ipc_enabled": False, "unresolved_risks": [f"Missing deformable config contract: {path}"]}
+        return {
+            "enabled": False,
+            "ipc_enabled": False,
+            "unresolved_risks": [f"Missing deformable config contract: {path}"],
+        }
     payload = load_json_object(path)
     if payload is None:
         return {"enabled": False, "ipc_enabled": False, "unresolved_risks": [f"Invalid deformable config JSON: {path}"]}
+    return payload
+
+
+def _load_rigid_config(case_dir: Path) -> dict[str, object]:
+    path = case_dir / "contracts" / "rigid_config.json"
+    if not path.exists():
+        return {"unresolved_risks": [f"Missing rigid config contract: {path}"]}
+    payload = load_json_object(path)
+    if payload is None:
+        return {"unresolved_risks": [f"Invalid rigid config JSON: {path}"]}
     return payload
 
 
@@ -425,6 +449,37 @@ def _append_error_message(current: str | None, addition: str) -> str:
     if current:
         return current + "\n" + addition
     return addition
+
+
+def _scene_rigid_options_contract_violations(source: str) -> list[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    create_scene = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "create_scene"
+        ),
+        None,
+    )
+    if create_scene is None:
+        return ["scene.py must define create_scene"]
+    parameters = [*create_scene.args.posonlyargs, *create_scene.args.args, *create_scene.args.kwonlyargs]
+    if not any(parameter.arg == "rigid_options" for parameter in parameters):
+        return ["create_scene must accept the forced rigid_options parameter"]
+    for node in ast.walk(create_scene):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or node.func.attr != "Scene":
+            continue
+        if any(
+            keyword.arg == "rigid_options"
+            and isinstance(keyword.value, ast.Name)
+            and keyword.value.id == "rigid_options"
+            for keyword in node.keywords
+        ):
+            return []
+    return ["create_scene must pass rigid_options=rigid_options directly to gs.Scene"]
 
 
 def _changed_files_include_target(worker_report: dict[str, object], target_file: str) -> bool:

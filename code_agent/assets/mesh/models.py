@@ -323,7 +323,9 @@ class MeshTextureTransferResult:
             "output_mesh_path": None if self.output_mesh_path is None else str(self.output_mesh_path),
             "output_mtl_path": None if self.output_mtl_path is None else str(self.output_mtl_path),
             "output_texture_path": None if self.output_texture_path is None else str(self.output_texture_path),
-            "alignment_translation": list(self.alignment_translation) if self.alignment_translation is not None else None,
+            "alignment_translation": list(self.alignment_translation)
+            if self.alignment_translation is not None
+            else None,
             "source_texture_size": list(self.source_texture_size) if self.source_texture_size is not None else None,
             "parameterization_filter": self.parameterization_filter,
             "transfer_filter": self.transfer_filter,
@@ -377,6 +379,12 @@ class MeshGenesisFEMImportResult:
     surface_visual_uv_shape: tuple[int, int] | None = None
     render_vertex_count: int | None = None
     render_face_count: int | None = None
+    render_unique_source_vertex_count: int | None = None
+    render_duplicate_source_vertex_count: int | None = None
+    render_source_indices_in_bounds: bool | None = None
+    render_face_indices_in_bounds: bool | None = None
+    seam_mapping_required: bool | None = None
+    seam_mapping_ok: bool | None = None
     texture_path: Path | None = None
     returncode: int | None = None
     stdout_tail: str | None = None
@@ -399,7 +407,51 @@ class MeshGenesisFEMImportResult:
             ),
             "render_vertex_count": self.render_vertex_count,
             "render_face_count": self.render_face_count,
+            "render_unique_source_vertex_count": self.render_unique_source_vertex_count,
+            "render_duplicate_source_vertex_count": self.render_duplicate_source_vertex_count,
+            "render_source_indices_in_bounds": self.render_source_indices_in_bounds,
+            "render_face_indices_in_bounds": self.render_face_indices_in_bounds,
+            "seam_mapping_required": self.seam_mapping_required,
+            "seam_mapping_ok": self.seam_mapping_ok,
             "texture_path": None if self.texture_path is None else str(self.texture_path),
+            "returncode": self.returncode,
+            "stdout_tail": self.stdout_tail,
+            "stderr_tail": self.stderr_tail,
+            "error": self.error,
+        }
+
+
+@dataclass(slots=True)
+class MeshGenesisRigidImportResult:
+    ok: bool
+    runtime_path: Path
+    visual_path: Path | None
+    scale: tuple[float, float, float] | None
+    file_meshes_are_zup: bool | None
+    collision_geom_count: int = 0
+    visual_geom_count: int = 0
+    visual_vertex_count: int = 0
+    visual_face_count: int = 0
+    visual_uv_count: int = 0
+    texture_attached: bool = False
+    returncode: int | None = None
+    stdout_tail: str | None = None
+    stderr_tail: str | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "runtime_path": str(self.runtime_path),
+            "visual_path": None if self.visual_path is None else str(self.visual_path),
+            "scale": None if self.scale is None else list(self.scale),
+            "file_meshes_are_zup": self.file_meshes_are_zup,
+            "collision_geom_count": self.collision_geom_count,
+            "visual_geom_count": self.visual_geom_count,
+            "visual_vertex_count": self.visual_vertex_count,
+            "visual_face_count": self.visual_face_count,
+            "visual_uv_count": self.visual_uv_count,
+            "texture_attached": self.texture_attached,
             "returncode": self.returncode,
             "stdout_tail": self.stdout_tail,
             "stderr_tail": self.stderr_tail,
@@ -419,6 +471,15 @@ class MeshGenesisClothImportResult:
     surface_vertex_count: int = 0
     surface_face_count: int = 0
     surface_visual_uv_shape: tuple[int, int] | None = None
+    render_vertex_count: int | None = None
+    render_face_count: int | None = None
+    render_unique_source_vertex_count: int | None = None
+    render_duplicate_source_vertex_count: int | None = None
+    render_source_indices_in_bounds: bool | None = None
+    render_face_indices_in_bounds: bool | None = None
+    seam_mapping_required: bool | None = None
+    seam_mapping_ok: bool | None = None
+    texture_path: Path | None = None
     returncode: int | None = None
     stdout_tail: str | None = None
     stderr_tail: str | None = None
@@ -438,6 +499,15 @@ class MeshGenesisClothImportResult:
             "surface_visual_uv_shape": (
                 None if self.surface_visual_uv_shape is None else list(self.surface_visual_uv_shape)
             ),
+            "render_vertex_count": self.render_vertex_count,
+            "render_face_count": self.render_face_count,
+            "render_unique_source_vertex_count": self.render_unique_source_vertex_count,
+            "render_duplicate_source_vertex_count": self.render_duplicate_source_vertex_count,
+            "render_source_indices_in_bounds": self.render_source_indices_in_bounds,
+            "render_face_indices_in_bounds": self.render_face_indices_in_bounds,
+            "seam_mapping_required": self.seam_mapping_required,
+            "seam_mapping_ok": self.seam_mapping_ok,
+            "texture_path": None if self.texture_path is None else str(self.texture_path),
             "returncode": self.returncode,
             "stdout_tail": self.stdout_tail,
             "stderr_tail": self.stderr_tail,

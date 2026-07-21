@@ -34,8 +34,10 @@
     "runtime_path is the strict-manifold simulation/collision mesh.",
     "visual_path is a seam-aware textured render mesh attached to the same rigid entity, not a separate object to instantiate as an independent simulation body.",
     "texture_path is evidence metadata for the transferred base-color image and texture preview checks.",
+    "When entry.remesh.status == applied, runtime_path, visual_path, and texture_path are the validated remesh outputs; entry.remesh.base_* and source_* fields retain original high-quality geometry and texture provenance for later Planner target changes.",
+    "When automatic remesh reports skipped_not_needed, the source was already at or below the configured face target. When it reports failed_fallback_original, the listed original paths remain authoritative and their readiness is decided by the subsequent normal Genesis import validation.",
     "Use the manifest's logical names, scale factors, coordinate metadata, texture paths, and simulation roles instead of guessing mesh paths, sizes, or orientation.",
-    "If a generated mesh manifest entry is missing, failed, invalid, or cannot be imported, fail clearly and report that Planner should regenerate the mesh asset; do not edit mesh files or approximate the object with ad hoc primitives."
+    "If a generated mesh manifest entry is missing, failed, invalid, or cannot be imported, fail clearly. Planner may use remesh_mesh_assets only for a source-manifold-valid density/import-cost problem; otherwise Planner should regenerate the mesh asset. Do not edit mesh files or approximate the object with ad hoc primitives."
   ],
   "dispatch_hints": [
     "Send to body/rendering when generated mesh assets are being instantiated.",

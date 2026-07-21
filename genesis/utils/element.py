@@ -27,9 +27,39 @@ def _mesh_to_elements_texture_key(file, scale, tet_cfg: dict, file_meshes_are_zu
 
 
 def get_mesh_to_elements_render_artifact(file, scale=1.0, tet_cfg=dict(), file_meshes_are_zup=True):
-    return _TEXTURED_RENDER_ARTIFACTS.get(
-        _mesh_to_elements_texture_key(file, scale, tet_cfg, file_meshes_are_zup)
+    return _TEXTURED_RENDER_ARTIFACTS.get(_mesh_to_elements_texture_key(file, scale, tet_cfg, file_meshes_are_zup))
+
+
+def register_surface_mesh_render_artifact(
+    *,
+    file,
+    vertices,
+    faces,
+    scale=1.0,
+    tet_cfg=dict(),
+    file_meshes_are_zup=True,
+):
+    """Register seam-aware visual vertices for a non-tetrahedralized FEM surface."""
+
+    texture_key = _mesh_to_elements_texture_key(file, scale, tet_cfg, file_meshes_are_zup)
+    textured_mesh, texture_path = _load_existing_repaired_textured_source(
+        file=file,
+        target_vertices=vertices,
+        file_meshes_are_zup=file_meshes_are_zup,
     )
+    if textured_mesh is None or texture_path is None:
+        _TEXTURED_RENDER_ARTIFACTS[texture_key] = {}
+        return {}
+
+    artifact = _build_render_artifact(
+        remeshed_textured_mesh=textured_mesh,
+        tet_verts=np.asarray(vertices, dtype=np.float64),
+        tet_boundary_faces=np.asarray(faces, dtype=np.int32),
+        tet_elems=np.empty((0, 4), dtype=np.int32),
+        texture_path=str(texture_path),
+    )
+    _TEXTURED_RENDER_ARTIFACTS[texture_key] = artifact
+    return artifact
 
 
 def _locate_textured_source_assets(file) -> tuple[Path | None, Path | None]:
@@ -290,9 +320,7 @@ def mesh_to_elements(file, pos=(0, 0, 0), scale=1.0, tet_cfg=dict(), file_meshes
                 else:
                     mu.tetrahedralize_mesh(remeshed, candidate_cfg)
             except Exception as exc:  # noqa: BLE001
-                remesh_error = (
-                    f"attempt {attempt_index}: remeshed surface failed tetgen check with edge_len_abs={target_edge}: {exc}"
-                )
+                remesh_error = f"attempt {attempt_index}: remeshed surface failed tetgen check with edge_len_abs={target_edge}: {exc}"
                 continue
 
             mesh = remeshed
@@ -564,7 +592,7 @@ def _primitive_tet_resolution(tet_cfg: dict) -> int:
 
 def _primitive_target_edge(*, feature_sizes, resolution: int) -> float:
     min_feature = max(float(min(feature_sizes)), 1e-6)
-    return min_feature / float(2 * resolution + 1)
+    return min_feature / float(resolution + 1)
 
 
 def _primitive_tet_cfg(tet_cfg: dict, *, target_edge: float) -> dict:

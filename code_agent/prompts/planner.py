@@ -24,6 +24,8 @@ def planner_fem_ipc_capability_section(
     deformable_enabled: bool,
     ipc_enabled: bool,
     physics_modes: tuple[str, ...],
+    rigid_config_path: object,
+    rigid_config_text: str,
     deformable_config_path: object,
     deformable_config_text: str,
 ) -> str:
@@ -32,6 +34,9 @@ Physics mode capability:
 - Current FEM deformable enabled: {deformable_enabled}
 - Current IPC contact/coupling enabled: {ipc_enabled} (forced on whenever FEM deformable is enabled)
 - Planner may choose among these physics modes this turn: {", ".join(physics_modes)}
+- Forced rigid solver config: {rigid_config_path}
+- Forced rigid solver values (Planner and workers must not override these):
+{rigid_config_text}
 - Effective config contract: {deformable_config_path}
 - Effective config values:
 {deformable_config_text}
@@ -67,16 +72,17 @@ Available actions:
   Prefer a dispatch_graph that enables code-writing workers to run together after required assets are ready. Add serial
   edges only for concrete dependencies that truly require seeing another worker's completed source or report.
   Module contract required exports must match the current implementation interfaces exactly:
-  scene=`create_scene(backend, *, sim_dt, sim_substeps, deformable_cfg)`;
+  scene=`create_scene(backend, *, sim_dt, sim_substeps, rigid_options, deformable_cfg)`;
   body=`create_bodies(scene, task, *, deformable_cfg)`;
   action=`run_actions(scene, actors, *, out_dir, steps, render_state=None)`;
   rendering=`setup_rendering(..., render_every_n_steps, render_res)`, `capture_frame`, and `finalize_rendering`.
 - start_mesh_assets: start Planner-requested generated mesh assets and procedural FEM cloth mesh assets in the
   background and return immediately. Use `asset_names` to restrict generation to specific asset request names, or
   null/[] to generate all generated_mesh and cloth_mesh requests. Procedural FEM.Cloth cloth_mesh assets only support
-  four basic shape families: square sheet, rectangle/ribbon/strip sheet, cylinder/tube/sleeve shell, and sphere/balloon
-  shell. Use asset_type `cloth_mesh_square`, `cloth_mesh_rectangle`, `cloth_mesh_cylinder`, `cloth_mesh_sphere`, or
-  generic `cloth_mesh` only when one of those basic shapes is acceptable; generic `cloth_mesh` is not an arbitrary
+  five basic shape families: square sheet, rectangle/ribbon/strip sheet, circular disk/membrane, cylinder/tube/sleeve
+  shell, and sphere/balloon shell. Use asset_type `cloth_mesh_square`, `cloth_mesh_rectangle`, `cloth_mesh_disk`,
+  `cloth_mesh_cylinder`, `cloth_mesh_sphere`, or generic `cloth_mesh` only when one of those basic shapes is acceptable;
+  generic `cloth_mesh` is not an arbitrary
   contour generator. Do not request icons, logos, animals, character profiles, custom cutouts, or complex open cloth
   silhouettes through procedural cloth_mesh, because the generator will hard-fail unsupported shapes instead of silently
   approximating them. For complex closed manifold FEM.Cloth shells whose visual shape matters more than regular grid
@@ -94,6 +100,16 @@ Available actions:
   assets/asset_manifest.json.
 - update_mesh_asset_metadata: synchronously update ready generated mesh manifest metadata without modifying or
   regenerating mesh files. Use this only when geometry is acceptable and runtime scale/bbox metadata is wrong.
+- remesh_mesh_assets: synchronously isotropically downsample one or more explicit Meshy-generated assets without
+  requesting new geometry. It accepts ready assets and can rescue an import-failed entry only when its repaired source
+  already passed manifold/TetGen preflight. Set `asset_names` to a non-empty list and exactly one of top-level
+  `target_face_count` or `target_edge_length`; use `target_face_tolerance` only to override the configured 0.50
+  face-count tolerance.
+  Use this when inspection shows that semantic shape and topology are acceptable but mesh density makes simulation or
+  import unnecessarily expensive. A successful action atomically switches runtime/visual/texture manifest paths to the
+  validated remesh. A failed asset keeps its previous paths unchanged; read the returned report, then choose a new
+  target or keep the original mesh. Do not use remesh to fix wrong morphology, missing parts, non-manifold source
+  geometry, or procedural open cloth sheets.
 - start_xml_assets: start Planner-requested XML/MJCF assets in the background and return immediately. Use `asset_names`
   to restrict generation to specific XML/MJCF asset request names, or null/[] to generate all XML/MJCF requests. If
   retrying with changed XML prompt or actuator/body-tree specification, include a complete revised `planner_output`.
@@ -133,12 +149,14 @@ Action policy:
   wait_xml_assets when the next useful step requires the manifest.
 - If any generation worker is missing or failed, choose spawn_workers or request_repair for the relevant owner.
 - Use SimDebug asset, IPC, and source-aware repair cards to decide inspect_assets vs update_mesh_asset_metadata vs
-  start_mesh_assets/start_xml_assets vs body/action/scene repair.
+  remesh_mesh_assets vs start_mesh_assets/start_xml_assets vs body/action/scene repair.
 - To improve speed, prefer grouping all currently missing writer roles into one spawn_workers action. Keep dependencies
   serial only when a specific worker must inspect another worker's completed source/report.
 - Only choose run_integrator after scene/body/action/rendering are all ok.
 - Only choose run_execution after integration is current.
 - Only choose run_critic after execution is current.
+- When execution reports `execution.insufficient_frame_progress`, run the Critic on the partial evidence, then request
+  the source-aware repair it recommends. Do not merely increase the timeout or blindly rerun unchanged code.
 - A physics/debug-raster critic pass is not sufficient for final success. When rendering is required, final pass also
   requires an accepted `final_path_traced` execution and critic review. Continue routing rendering/body/scene repairs
   and rerunning final_path_traced until the final image is path-traced and visually polished.

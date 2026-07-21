@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from code_agent.utils.local_execution import LocalRunConfig, run_local
+from code_agent.evaluation.deterministic import DeterministicEvaluationConfig, evaluate_artifacts
 
 
 def test_run_local_timeout_kills_child_process_tree(tmp_path: Path) -> None:
@@ -53,6 +54,135 @@ time.sleep(30)
     assert report["timed_out"] is True
     assert report["timeout_process_tree"]["process_group"] is True
     assert not (tmp_path / "child_survived.txt").exists()
+
+
+def test_run_local_frame_progress_watchdog_rejects_slow_run_and_ignores_stale_frames(tmp_path: Path) -> None:
+    frames_dir = tmp_path / "artifacts" / "frames"
+    frames_dir.mkdir(parents=True)
+    stale_frame = frames_dir / "frame_000.png"
+    stale_frame.write_bytes(b"stale")
+    old_mtime = time.time() - 3600.0
+    os.utime(stale_frame, (old_mtime, old_mtime))
+    (tmp_path / "main.py").write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+
+    report = run_local(
+        LocalRunConfig(
+            workspace_dir=tmp_path,
+            timeout_sec=1.0,
+            python_executable=sys.executable,
+            progress_frames_dir=frames_dir,
+            progress_target_frames=10,
+            progress_checkpoints=((0.25, 0.10), (0.50, 0.40)),
+        )
+    )
+
+    assert report["status"] == "failed"
+    assert report["exit_code"] == 125
+    assert report["timed_out"] is False
+    assert report["failure_class"] == "execution.insufficient_frame_progress"
+    assert report["rework_required"] is True
+    assert report["progress_watchdog"]["triggered"] is True
+    checkpoint = report["progress_watchdog"]["checkpoints"][0]
+    assert checkpoint["required_frames"] == 1
+    assert checkpoint["observed_frames"] == 0
+    assert checkpoint["status"] == "failed"
+
+
+def test_run_local_frame_progress_watchdog_enforces_second_checkpoint(tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_text(
+        """
+from pathlib import Path
+import time
+
+frames = Path("artifacts/frames")
+frames.mkdir(parents=True)
+(frames / "frame_000.png").write_bytes(b"fresh")
+time.sleep(30)
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    report = run_local(
+        LocalRunConfig(
+            workspace_dir=tmp_path,
+            timeout_sec=1.0,
+            python_executable=sys.executable,
+            progress_frames_dir=Path("artifacts/frames"),
+            progress_target_frames=10,
+            progress_checkpoints=((0.25, 0.10), (0.50, 0.40)),
+        )
+    )
+
+    checkpoints = report["progress_watchdog"]["checkpoints"]
+    assert report["exit_code"] == 125
+    assert checkpoints[0]["status"] == "passed"
+    assert checkpoints[1]["required_frames"] == 4
+    assert checkpoints[1]["observed_frames"] == 1
+    assert checkpoints[1]["status"] == "failed"
+
+
+def test_run_local_frame_progress_watchdog_accepts_sufficient_progress(tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_text(
+        """
+from pathlib import Path
+import time
+
+frames = Path("artifacts/frames")
+frames.mkdir(parents=True)
+for index in range(4):
+    (frames / f"frame_{index:03d}.png").write_bytes(b"fresh")
+time.sleep(0.75)
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    report = run_local(
+        LocalRunConfig(
+            workspace_dir=tmp_path,
+            timeout_sec=1.2,
+            python_executable=sys.executable,
+            progress_frames_dir=tmp_path / "artifacts" / "frames",
+            progress_target_frames=10,
+            progress_checkpoints=((0.25, 0.10), (0.50, 0.40)),
+        )
+    )
+
+    assert report["status"] == "passed"
+    assert report["progress_watchdog"]["triggered"] is False
+    assert [item["status"] for item in report["progress_watchdog"]["checkpoints"]] == ["passed", "passed"]
+
+
+def test_frame_progress_failure_is_preserved_by_deterministic_evaluation(tmp_path: Path) -> None:
+    reports_dir = tmp_path / "reports"
+    artifacts_dir = tmp_path / "artifacts"
+    reports_dir.mkdir()
+    artifacts_dir.mkdir()
+    (artifacts_dir / "summary.json").write_text("{}\n", encoding="utf-8")
+    (artifacts_dir / "metrics.json").write_text("{}\n", encoding="utf-8")
+    execution_report = {
+        "exit_code": 125,
+        "timed_out": False,
+        "failure_class": "execution.insufficient_frame_progress",
+        "failure_reason": "Only 2 of 40 required frames were rendered. Rework required.",
+        "artifact_paths": [
+            str(artifacts_dir / "summary.json"),
+            str(artifacts_dir / "metrics.json"),
+        ],
+    }
+    report_path = reports_dir / "execution_report.json"
+    report_path.write_text(json.dumps(execution_report), encoding="utf-8")
+
+    result = evaluate_artifacts(
+        DeterministicEvaluationConfig(
+            run_dir=tmp_path,
+            execution_report_path=report_path,
+            require_render=False,
+        )
+    )
+
+    assert "execution.insufficient_frame_progress" in result["failure_classes"]
+    assert result["recommended_owner"] == "none"
+    assert "Do not merely increase the timeout" in result["repair_summary"]
 
 
 def test_run_local_filters_stale_artifacts(tmp_path: Path) -> None:

@@ -46,6 +46,7 @@
           "enum": [
             "start_mesh_assets",
             "update_mesh_asset_metadata",
+            "remesh_mesh_assets",
             "start_xml_assets",
             "inspect_assets",
             null

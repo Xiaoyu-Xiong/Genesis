@@ -59,13 +59,16 @@ def render_initial_without_ipc(
         scene_cfg = dict(default_cfg)
         scene_cfg["ipc_enabled"] = False
         scene_cfg["ipc_contact_enable"] = False
+        rigid_options = main_module.build_rigid_options(main_module.DEFAULT_RIGID_CFG)
 
         scene = main_module.create_scene(
             backend,
             sim_dt=float(sim_dt),
             sim_substeps=int(sim_substeps),
+            rigid_options=rigid_options,
             deformable_cfg=scene_cfg,
         )
+        main_module.assert_scene_rigid_options(scene, rigid_options)
         actors = main_module.create_bodies(scene, getattr(main_module, "TASK", ""), deformable_cfg=body_cfg)
         render_state = main_module.setup_rendering(
             scene,

@@ -25,7 +25,7 @@ Current Planner actions:
 
 Current generated module interfaces:
 
-- `scene.create_scene(backend, *, sim_dt, sim_substeps, deformable_cfg)`
+- `scene.create_scene(backend, *, sim_dt, sim_substeps, rigid_options, deformable_cfg)`
 - `body.create_bodies(scene, task, *, deformable_cfg)`
 - `action.run_actions(scene, actors, *, out_dir, steps, render_state=None)`
 - `rendering.setup_rendering(...)`
@@ -41,6 +41,10 @@ Current generated module interfaces:
 `contracts/deformable_config.json` carries the effective FEM/IPC contract derived from that plan. `enabled` gates FEM
 deformables, and `ipc_enabled` gates `gs.options.IPCCouplerOptions`; FEM enabled forces IPC enabled. These are derived
 execution-contract fields, not config-level switches.
+
+`contracts/rigid_config.json` records the repository-owned `RigidConfigs` values. The harness converts this contract to
+`gs.options.RigidOptions`, passes it to `scene.create_scene`, and verifies that generated scene code applied it without
+changes. Runtime `dt` remains owned by `SimOptions`; gravity remains a task-specific Agent choice in `SimOptions`.
 
 The contract provides FEM material ranges/defaults for `E`, `nu`, and `rho`, plus shared FEM/IPC options such as
 `fem_model`, hydroelastic/contact-resistance settings, tet resolution, precision, and IPC solver/contact parameters.

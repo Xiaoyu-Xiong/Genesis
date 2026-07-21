@@ -3,7 +3,7 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from code_agent.configs import CONFIGS, deformable_config_dict
+from code_agent.configs import CONFIGS, deformable_config_dict, rigid_config_dict
 from code_agent.utils.codex import DEFAULT_REPO_ROOT
 
 
@@ -19,6 +19,7 @@ def write_main(
     default_render_res: tuple[int, int] | None = None,
     default_duration_sec: float | None,
     default_target_video_frames: int | None,
+    rigid_cfg: dict[str, object] | None = None,
     deformable_cfg: dict[str, object] | None = None,
 ) -> Path:
     """Write the stable entrypoint that wires Codex-authored modules together."""
@@ -35,6 +36,7 @@ def write_main(
         else int(default_render_every_n_steps)
     )
     resolved_render_res = CONFIGS.runtime.render_res if default_render_res is None else tuple(default_render_res)
+    default_rigid_cfg = dict(rigid_cfg or rigid_config_dict())
     default_deformable_cfg = dict(deformable_cfg or deformable_config_dict())
     main_py.write_text(
         textwrap.dedent(
@@ -51,6 +53,7 @@ def write_main(
 
             from code_agent.utils.adaptive_ipc import adaptive_contact_d_hat_report, apply_adaptive_contact_d_hat
             from code_agent.utils.render_replay import run_render_only_replay
+            from code_agent.utils.rigid_options import assert_scene_rigid_options, build_rigid_options
             from code_agent.utils.state_cache import (
                 StateCacheWriter,
                 attach_state_cache_capture,
@@ -64,6 +67,7 @@ def write_main(
 
 
             TASK = {task!r}
+            DEFAULT_RIGID_CFG = {default_rigid_cfg!r}
             DEFAULT_DEFORMABLE_CFG = {default_deformable_cfg!r}
 
 
@@ -147,15 +151,18 @@ def write_main(
                 if args.deformable_config is not None:
                     deformable_cfg.update(json.loads(args.deformable_config.read_text(encoding="utf-8")))
                 _apply_adaptive_contact_d_hat(deformable_cfg, args.out_dir)
+                rigid_options = build_rigid_options(DEFAULT_RIGID_CFG)
 
                 scene = _call_with_optional_render_profile(
                     create_scene,
                     args.backend,
                     sim_dt=args.sim_dt,
                     sim_substeps=args.sim_substeps,
+                    rigid_options=rigid_options,
                     deformable_cfg=deformable_cfg,
                     render_profile=args.render_profile,
                 )
+                assert_scene_rigid_options(scene, rigid_options)
                 actors = _call_with_optional_render_profile(
                     create_bodies,
                     scene,

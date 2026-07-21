@@ -21,6 +21,7 @@ from code_agent.assets.mesh.cloth import (
 )
 from code_agent.assets.mesh.models import MeshyApiConfig, MeshyPromptLengthError, MeshyRequestError
 from code_agent.assets.mesh.pipeline import download_meshy_mesh_from_text, process_downloaded_meshy_mesh
+from code_agent.assets.mesh.remesh_integration import apply_automatic_remesh_to_entry
 from code_agent.assets.mesh.request_adapter import (
     mesh_prompt_from_request,
     mesh_repair_config,
@@ -276,11 +277,7 @@ def update_mesh_asset_metadata_for_episode(
 
 
 def _entries_by_logical_name(entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {
-        str(entry.get("logical_name", "")): entry
-        for entry in entries
-        if entry.get("logical_name")
-    }
+    return {str(entry.get("logical_name", "")): entry for entry in entries if entry.get("logical_name")}
 
 
 def _generate_cloth_mesh_assets(
@@ -318,7 +315,9 @@ def _download_mesh_assets(
                 output_root=output_root,
                 api_config=api_config,
             )
-            progress_report["api_assets"] = [_api_progress_entry(result) for result in api_results if result is not None]
+            progress_report["api_assets"] = [
+                _api_progress_entry(result) for result in api_results if result is not None
+            ]
             dump_json(progress_report, report_path)
         return api_results
 
@@ -337,7 +336,9 @@ def _download_mesh_assets(
         }
         for future in as_completed(futures):
             api_results[futures[future]] = future.result()
-            progress_report["api_assets"] = [_api_progress_entry(result) for result in api_results if result is not None]
+            progress_report["api_assets"] = [
+                _api_progress_entry(result) for result in api_results if result is not None
+            ]
             dump_json(progress_report, report_path)
     return api_results
 
@@ -599,23 +600,36 @@ def _process_one_mesh_asset(api_result: dict[str, Any]) -> dict[str, Any]:
             downloaded=api_result["downloaded"],
             repair_config=mesh_repair_config(),
         )
-        if is_meshy_generated_cloth_request(request):
+        is_generated_cloth = is_meshy_generated_cloth_request(request)
+        if is_generated_cloth:
             pre_validation_entry = manifest_entry_from_generated_cloth_bundle(request, bundle)
+        else:
+            pre_validation_entry = manifest_entry_from_bundle(request, bundle)
+        remeshed_entry, auto_remesh = apply_automatic_remesh_to_entry(pre_validation_entry, bundle=bundle)
+        if auto_remesh.get("applied"):
+            manifest_entry = remeshed_entry
+        elif is_generated_cloth:
             genesis_validation = run_genesis_cloth_import_validation(pre_validation_entry)
             bundle.genesis_cloth_import = genesis_validation
             _write_genesis_cloth_validation_artifacts(bundle)
-            manifest_entry = manifest_entry_from_generated_cloth_bundle(request, bundle)
+            manifest_entry = _entry_with_auto_remesh_metadata(
+                manifest_entry_from_generated_cloth_bundle(request, bundle),
+                remeshed_entry,
+            )
         else:
-            pre_validation_entry = manifest_entry_from_bundle(request, bundle)
             genesis_validation = run_genesis_fem_import_validation(pre_validation_entry)
             bundle.genesis_fem_import = genesis_validation
             _write_genesis_validation_artifacts(bundle)
-            manifest_entry = manifest_entry_from_bundle(request, bundle)
+            manifest_entry = _entry_with_auto_remesh_metadata(
+                manifest_entry_from_bundle(request, bundle),
+                remeshed_entry,
+            )
         return {
             "ok": manifest_entry["status"] == "ready",
             "request": request,
             "mesh_prompt": api_result.get("mesh_prompt", ""),
             "manifest_entry": manifest_entry,
+            "auto_remesh": auto_remesh,
             "api_phase": _api_progress_entry(api_result),
             "bundle": bundle.to_dict(),
         }
@@ -629,6 +643,21 @@ def _process_one_mesh_asset(api_result: dict[str, Any]) -> dict[str, Any]:
             "api_phase": _api_progress_entry(api_result),
             "error": manifest_entry["notes"][0],
         }
+
+
+def _entry_with_auto_remesh_metadata(
+    validated_entry: dict[str, Any],
+    remesh_attempt_entry: dict[str, Any],
+) -> dict[str, Any]:
+    remesh_metadata = remesh_attempt_entry.get("remesh")
+    if isinstance(remesh_metadata, dict):
+        validated_entry["remesh"] = remesh_metadata
+    notes = list(validated_entry.get("notes") or [])
+    for note in remesh_attempt_entry.get("notes") or []:
+        if isinstance(note, str) and note not in notes:
+            notes.append(note)
+    validated_entry["notes"] = notes
+    return validated_entry
 
 
 def _metadata_update_result(entry: dict[str, Any] | None, request: dict[str, Any]) -> dict[str, Any]:
@@ -705,16 +734,12 @@ def _metadata_update_manifest(
     *,
     skipped_names: list[str],
 ) -> dict[str, Any]:
-    assumptions = [
-        str(item)
-        for item in raw_manifest.get("assumptions", [])
-        if isinstance(item, str) and item.strip()
-    ]
-    assumptions.append("Mesh asset metadata update reused existing mesh geometry; runtime mesh files were not modified.")
+    assumptions = [str(item) for item in raw_manifest.get("assumptions", []) if isinstance(item, str) and item.strip()]
+    assumptions.append(
+        "Mesh asset metadata update reused existing mesh geometry; runtime mesh files were not modified."
+    )
     unresolved_risks = [
-        str(item)
-        for item in raw_manifest.get("unresolved_risks", [])
-        if isinstance(item, str) and item.strip()
+        str(item) for item in raw_manifest.get("unresolved_risks", []) if isinstance(item, str) and item.strip()
     ]
     if skipped_names:
         unresolved_risks.append(f"Requested asset names were not generated_mesh requests: {', '.join(skipped_names)}")
@@ -800,13 +825,7 @@ def _merge_manifest_entries(
 
 
 def _failure_classes_from_results(results: list[dict[str, Any]]) -> list[str]:
-    return sorted(
-        {
-            str(result.get("failure_class"))
-            for result in results
-            if result.get("failure_class")
-        }
-    )
+    return sorted({str(result.get("failure_class")) for result in results if result.get("failure_class")})
 
 
 def _prompt_length_report_message(asset_names: list[str]) -> str:
@@ -823,8 +842,8 @@ def _unsupported_cloth_shape_report_message(asset_names: list[str]) -> str:
     return (
         f"Procedural cloth_mesh requested unsupported complex open cloth shape(s): {names}. Planner should rewrite the "
         "affected FEM.Cloth asset request to one of the supported basic procedural shapes "
-        "(square, rectangle/ribbon/strip, cylinder/tube/sleeve, sphere/balloon), switch only truly closed manifold cloth "
-        "shells to generated_mesh with explicit cloth-shell wording, or finish fail/inconclusive if the prompt requires "
+        "(square, rectangle/ribbon/strip, disk/circle, cylinder/tube/sleeve, sphere/balloon), switch only truly closed "
+        "manifold cloth shells to generated_mesh with explicit cloth-shell wording, or finish fail/inconclusive if the prompt requires "
         "an unsupported arbitrary open cloth silhouette."
     )
 

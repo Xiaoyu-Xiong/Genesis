@@ -52,6 +52,7 @@ def test_execution_debug_raster_mode_uses_default_environment(tmp_path: Path, mo
         sim_substeps=1,
         render_every_n_steps=1,
         render_res=(64, 48),
+        target_video_frames=2,
     )
 
     config = captured[0]
@@ -60,6 +61,9 @@ def test_execution_debug_raster_mode_uses_default_environment(tmp_path: Path, mo
     assert "--require-state-cache" in config.extra_args
     assert "GENESIS_PATH_TRACING_OPTIX_DIR" not in config.env
     assert config.env["GENESIS_RENDER_PROFILE"] == "debug_raster"
+    assert config.progress_frames_dir == tmp_path / "case" / "artifacts" / "frames"
+    assert config.progress_target_frames == 2
+    assert config.progress_checkpoints == ((0.25, 0.10), (0.50, 0.40))
 
 
 def test_execution_final_path_traced_mode_sets_optix_environment(tmp_path: Path, monkeypatch):

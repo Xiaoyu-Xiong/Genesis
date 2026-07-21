@@ -116,8 +116,16 @@ def _check_exit_code(execution_report: Any, checks: list[dict[str, Any]]) -> Non
     if exit_code == 0 and timed_out is False:
         checks.append(_check("exit_code", "pass", None, "Execution exited successfully."))
         return
-    reason = "execution.timeout" if timed_out else "execution.nonzero_exit"
-    checks.append(_check("exit_code", "fail", reason, f"exit_code={exit_code}, timed_out={timed_out}."))
+    failure_class = execution_report.get("failure_class")
+    reason = (
+        "execution.timeout"
+        if timed_out
+        else str(failure_class)
+        if failure_class == "execution.insufficient_frame_progress"
+        else "execution.nonzero_exit"
+    )
+    message = execution_report.get("failure_reason") or f"exit_code={exit_code}, timed_out={timed_out}."
+    checks.append(_check("exit_code", "fail", reason, str(message)))
 
 
 def _check_json_object(label: str, payload: Any, checks: list[dict[str, Any]]) -> None:
@@ -171,6 +179,14 @@ def _classify_repair_hint(execution_report: Any, run_dir: Path, checks: list[dic
     exit_code = execution_report.get("exit_code")
     if exit_code == 0 and not execution_report.get("timed_out", False):
         return {"recommended_owner": "none", "repair_summary": None}
+
+    if execution_report.get("failure_class") == "execution.insufficient_frame_progress":
+        summary = (
+            "Execution failed the frame-progress watchdog. Do not merely increase the timeout. Inspect the fresh "
+            "partial frames, progress timing, generated source, geometry complexity, solver/contact settings, and "
+            "render cost, then route a source-aware repair to scene, body, action, or rendering before rerunning."
+        )
+        return {"recommended_owner": "none", "repair_summary": summary}
 
     output_text = "\n".join(
         text

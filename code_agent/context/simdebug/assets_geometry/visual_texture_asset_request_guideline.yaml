@@ -23,7 +23,7 @@
   "guidance": [
     "Any non-cloth object whose requested appearance depends on texture, patterned surface detail, decorative material variation, image-like surface content, or nontrivial visual ornamentation should be represented by a Meshy-generated asset request, even when the task does not explicitly say mesh.",
     "If a non-cloth object has a complex recognizable shape, organic silhouette, decorative pattern, or texture, and it does not need joints, actuators, or articulation, prefer a Meshy generated_mesh asset instead of approximating it with many primitives or plain colors.",
-    "For FEM.Cloth assets, follow fem_cloth_shell_guideline first: procedural cloth_mesh is limited to square, rectangle/ribbon/strip, cylinder/tube/sleeve, and sphere/balloon shapes; Meshy generated_mesh is only for complex closed manifold cloth shells explicitly requested as cloth shells.",
+    "For FEM.Cloth assets, follow fem_cloth_shell_guideline first: procedural cloth_mesh is limited to square, rectangle/ribbon/strip, disk/circle, cylinder/tube/sleeve, and sphere/balloon shapes; Meshy generated_mesh is only for complex closed manifold cloth shells explicitly requested as cloth shells.",
     "Do not ask writers to fake texture-dependent objects with plain primitive colors or simple Genesis surfaces.",
     "When visual appearance matters, include texture needs and simulation role in the asset request so downstream workers can use manifest texture metadata and critic can verify rendered texture evidence."
   ],

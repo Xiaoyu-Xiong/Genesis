@@ -20,6 +20,9 @@ Decide whether the run passes as a generated Genesis simulation result. Compare 
 source, execution artifacts, metrics, event logs, render stats, visual evidence, generated assets, and Planner-dispatched
 SimDebug cards. Prioritize execution correctness, required artifacts, plausible movement, physically coherent staging,
 task match, and readable evidence.
+When `failure_class=execution.insufficient_frame_progress`, require source-aware rework rather than recommending a
+larger timeout or a blind retry. Inspect fresh partial frames, frame timing, geometry complexity, solver/contact behavior,
+and render cost, then route the repair to scene, body, action, or rendering according to the actual bottleneck.
 """.strip()
 
 

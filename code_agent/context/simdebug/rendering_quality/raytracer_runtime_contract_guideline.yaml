@@ -1,0 +1,53 @@
+schema_version: 1
+id: raytracer_runtime_contract_guideline
+title: Validate the GPU RayTracer runtime and geometry upload contract
+summary: Final path tracing must construct the complete Genesis RayTracer configuration and validate every renderer-facing mesh channel before native upload.
+scopes: [planner, scene, body, rendering, critic]
+physics_modes: [any]
+task_tags:
+  - path_tracing
+  - raytracer
+  - optix
+  - denoise
+  - renderer_api
+  - mesh_channels
+  - uv
+failure_tags:
+  - optix_stub
+  - denoise_failed
+  - raytracer_constructor_failed
+  - raytracer_surface_field_conflict
+  - invalid_raytracer_mesh_channels
+  - invalid_raytracer_uv_channel
+  - native_renderer_geometry_rejected
+guidance:
+  - Final renders must use GPU gs.renderers.RayTracer with WavePathIntegrator or an equivalent validated path-tracing integrator.
+  - Use camera_denoise=True for final outputs. Treat OptiX denoiser failures as runtime defects to repair, not permission to silently disable denoising.
+  - Use low spp only for previews. Final outputs should use 512 spp or higher when runtime allows, with tracing_depth in the 16-32 range; 24 is a validated practical default.
+  - Under WSL, place the real OptiX runtime directory before the WSL stub directory in LD_LIBRARY_PATH and record the selected runtime in execution evidence.
+  - Validate the complete nested gs.renderers.RayTracer configuration that will be passed into scene construction. Successfully constructing an isolated surface, texture, or integrator does not prove that parent-model revalidation will succeed.
+  - For renderer models that expose both convenience fields and resolved texture fields, provide exactly one source of truth. Do not pass a shortcut field together with the texture field produced from that shortcut.
+  - For a constant RayTracer environment, construct gs.surfaces.Emission with only emissive_texture=gs.textures.ColorTexture(...). Leave the color and emissive shortcut fields unset; they must not coexist with emissive_texture during nested RayTracer validation.
+  - Before initial upload and every deformable update, normalize vertices to a finite C-contiguous floating array of shape (N, 3), triangles to a C-contiguous integer array of shape (M, 3), and verify triangle indices are in range.
+  - Normalize normals to an empty floating array of shape (0, 3) or a finite vertex-aligned array of shape (N, 3).
+  - Normalize UVs to an empty C-contiguous floating array of shape (0, 2) or a finite vertex-aligned array of shape (N, 2). Convert missing UV data such as None to (0, 2); never pass a scalar, object array, or singleton UV channel to the native renderer.
+  - Do not invent UV coordinates when no valid vertex-aligned map exists. An untextured mesh should use the explicit empty UV representation without changing its geometry.
+  - Reject invalid renderer-facing channels in Python with the actor name, channel name, dtype, shape, and expected contract before entering native LuisaRender code.
+  - Technical render metadata must record backend, integrator, spp, tracing depth, denoise, OptiX runtime, complete-constructor validation, and per-actor mesh-channel validation.
+restrictions:
+  - Do not validate only leaf configuration objects when the final nested RayTracer options have not been constructed.
+  - Do not pass None, object arrays, malformed empty arrays, or mismatched vertex channels across the native renderer boundary.
+  - Do not repair renderer upload failures by altering accepted physics geometry or fabricating unrelated topology.
+checks:
+  - Construct the exact RayTracer options used by the final scene and require that construction to succeed before the full render begins.
+  - Check a constant Emission environment has exactly one emissive source and uses no conflicting shortcut fields.
+  - Check every actor's vertex, triangle, normal, and UV shapes, dtypes, finite values, contiguity, and index ranges before upload.
+  - Check untextured meshes use empty arrays with the correct second dimension rather than None or singleton channels.
+  - Check render_stats.json confirms the intended GPU backend, integrator, denoiser, spp, tracing depth, OptiX runtime, and channel-validation result.
+dispatch_hints:
+  - Send to scene/rendering when constructing RayTracer options, environment surfaces, cameras, or renderer settings.
+  - Send to body/rendering when preparing rigid, articulated, FEM, deformable, or cloth geometry channels for RayTracer.
+  - Send to Critic for renderer startup, denoiser, configuration-validation, or native geometry failures.
+provenance:
+  source: path_tracing_runtime_audit
+  motivation: Turn recurring nested configuration and mesh-channel failures into explicit renderer-boundary contracts.

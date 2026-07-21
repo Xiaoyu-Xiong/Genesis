@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "ipc_fem_external_force_guideline",
   "title": "Use verified libuipc external-force attributes for FEM forces",
-  "summary": "For FEM+IPC scenes that truly need direct physical force on a deformable body, register uipc.constitution.FiniteElementExternalForce on FEM IPC geometries before IPC world initialization, then update vertices.external_force and vertices.is_constrained with shape checks, sync, and motion evidence.",
+  "summary": "For FEM+IPC scenes that need direct physical force, register uipc.constitution.FiniteElementExternalForce before IPC world initialization and prevent its vertices.is_constrained mask from also activating SoftPositionConstraint: disable vertex constraints when no real anchors are needed, or preserve real anchors and set vertices.strength_ratio=0 on every force-only vertex before IPC advance.",
   "scopes": ["planner", "body", "action", "critic", "opt"],
   "physics_modes": ["fem_ipc"],
   "task_tags": [
@@ -17,7 +17,11 @@
     "deformable",
     "push",
     "wind",
-    "actuation"
+    "actuation",
+    "vertex_constraint",
+    "soft_position_constraint",
+    "is_constrained",
+    "strength_ratio"
   ],
   "failure_tags": [
     "unsupported_fem_force_shape",
@@ -25,9 +29,14 @@
     "fem_force_not_registered_before_world_init",
     "missing_external_force_attr",
     "missing_is_constrained_attr",
+    "missing_strength_ratio_attr",
     "world_sync_missing",
     "static_soft_body",
-    "hidden_proxy_force"
+    "hidden_proxy_force",
+    "external_force_soft_constraint_mask_collision",
+    "force_only_strength_nonzero",
+    "external_force_aim_position_tether",
+    "force_constraint_ordering_error"
   ],
   "guidance": [
     "Use direct FEM external force only when force is part of the requested physical scene or a clearly modeled disturbance. Prefer FEMEntity.set_vertex_constraints for pinned or driven boundary conditions, and prefer contact-driven rigid tools for rollers, plates, grippers, impacts, squeezing, and contact mechanisms.",
@@ -36,42 +45,59 @@
     "Find target FEM geometries with uipc.backend.SceneVisitor(coupler._ipc_scene), uipc.geometry.SimplicialComplexSlot, and genesis.engine.couplers.ipc_coupler.utils.read_ipc_geometry_metadata; apply this card only to metadata entries with solver_type == 'fem' unless cloth force support is separately verified.",
     "Create and insert a FiniteElementExternalForce instance in coupler._ipc_constitution_tabular, then call external_force.apply_to(fem_geom, np.zeros(3, dtype=np.float64)). Verify that fem_geom.vertices().find('external_force') and fem_geom.vertices().find('is_constrained') both exist.",
     "Normalize the external_force attribute to a per-vertex (N, 3) writable view. In the local smoke test, pyuipc exposed vertices.external_force as shape (N, 3, 1), so generated code should handle shape variants such as (N, 3, 1), (N, 3), (3, N), or a flat 3N layout instead of assuming one fixed shape.",
-    "When applying a total force to a selected vertex patch, divide by the selected vertex count, write that per-vertex vector into external_force for selected vertices, set the corresponding is_constrained mask entries to 1, and zero force/mask entries for all unforced vertices.",
-    "After writing force attributes, call coupler._ipc_world.sync() before scene.step(), or register a coupler._ipc_animator callback that updates force attributes before IPC advance.",
-    "Clear or update force and mask attributes after each step unless the intended physics is a persistent force field.",
-    "Record force evidence including attempted force count, successful application count, selected vertex count, external_force shape, mask nonzero count, total force or impulse, per-vertex force, and FEM COM/bbox/vertex displacement."
+    "FiniteElementExternalForce and SoftPositionConstraint share vertices.is_constrained. When gs.options.FEMOptions(enable_vertex_constraints=True), setting the external-force mask to 1 can also activate a soft spring toward vertices.aim_position with the current vertices.strength_ratio. Treat this as an attribute collision that must be resolved explicitly, not as harmless implementation detail.",
+    "If the scene has no legitimate pinned, driven, link-following, or target-following FEM/cloth boundary vertices, set gs.options.FEMOptions(enable_vertex_constraints=False). Do not enable vertex constraints merely because FiniteElementExternalForce uses an attribute named is_constrained.",
+    "If legitimate vertex constraints and direct external force coexist, keep an explicit protected_constraint_mask containing only the real boundary constraints. For every update compute force_only = force_mask & ~protected_constraint_mask and require strength_ratio[force_only] = 0. Real protected constraints retain their intended aim_position and nonzero strength; an intentionally forced-and-constrained overlap must be declared separately rather than silently treated as force-only.",
+    "When applying a total force to a selected vertex patch, divide by the selected vertex count, write that per-vertex vector into external_force, set is_constrained for the selected force vertices, preserve is_constrained for protected real constraints, and leave every other mask entry at 0.",
+    "Install the runtime force writer after real FEMEntity.set_vertex_constraints calls are known. Derive protected_constraint_mask from the intended Genesis constraint data or explicit constraint metadata, never from a UIPC mask that may already contain force-only entries.",
+    "Genesis may rewrite is_constrained, aim_position, and strength_ratio during IPCCoupler._update_fem_vertex_constraint_targets. The safe per-step order is: call the original Genesis constraint update; rewrite external_force and the union of protected and force masks; set strength_ratio to 0 on force-only vertices; call coupler._ipc_world.sync(); then allow IPC advance. A wrapper around _update_fem_vertex_constraint_targets may implement this order.",
+    "When a force pulse ends, zero external_force, restore is_constrained to protected_constraint_mask rather than clearing all entries, preserve real constraint targets and strengths, keep non-constraint strength irrelevant or zero, and sync before the next IPC advance.",
+    "Treat sudden stretching, snapping toward the origin or rest pose, unexpected stiffness, or a one-frame shape jump exactly when a force mask activates as a likely external-force/soft-position-constraint collision before tuning force magnitude, material stiffness, TetGen, or IPC contact parameters.",
+    "Record force evidence including attempted and successful application counts, selected vertex count, external_force shape, protected constraint count, force-only count, force-only strength nonzero count, mask nonzero count, total force or impulse, per-vertex force, and FEM COM/bbox/vertex displacement. force_only_strength_nonzero must remain 0 on every forced step."
   ],
   "restrictions": [
     "Do not rely on scene.add_force_field for FEM+IPC external force unless that path has been separately verified in the current simulator.",
     "Do not use FEMEntity.set_vertex_constraints as the external-force path for distributed forces or impulses. It is allowed for explicit pinned or driven FEM/cloth boundary conditions under IPCCoupler when gs.options.FEMOptions(enable_vertex_constraints=True) is set and target-tracking evidence is recorded.",
+    "Do not set is_constrained=1 for a force-only vertex while leaving a nonzero SoftPositionConstraint strength_ratio. A run that does this is physically confounded even if it completes and its video is accepted.",
+    "Do not clear the entire is_constrained mask when stopping external force if real anchors or driven boundary constraints must remain active.",
+    "Do not enable FEM vertex constraints in a force-only scene. With no real call to FEMEntity.set_vertex_constraints, enable_vertex_constraints=True still installs SoftPositionConstraint and can tether forced vertices to their initialized aim positions.",
+    "Do not write external force before Genesis updates vertex-constraint targets if that update can overwrite the force mask or restore force-only strength. Reapply the force state after the original constraint update on every step.",
     "Do not write private or guessed UIPC force slots. Require a successful attribute check for vertices.external_force and vertices.is_constrained before claiming force support.",
     "Do not use hidden goal-following forces, target-tracking proxy forces, or forces that directly encode the desired outcome rather than a physical mechanism.",
-    "Do not mark FEM force actuation successful unless force_applications is nonzero, selected vertices are nonzero, and FEM state evidence shows corresponding COM, bbox, or vertex displacement."
+    "Do not mark FEM force actuation successful unless force_applications is nonzero, selected vertices are nonzero, force_only_strength_nonzero is 0, and FEM state evidence shows corresponding COM, bbox, or vertex displacement."
   ],
   "checks": [
     "Confirm FiniteElementExternalForce was registered before IPC world initialization.",
     "Confirm the target FEM geometry was found through IPC metadata and not by fragile object-order assumptions.",
     "Confirm external_force and is_constrained attributes exist on vertices.",
     "Confirm external_force shape was normalized correctly; the verified local shape is (N, 3, 1).",
-    "Confirm coupler._ipc_world.sync() or an IPC animator callback transfers updated attributes before IPC advance.",
+    "Inspect gs.options.FEMOptions(enable_vertex_constraints=...). If true, identify every actual FEMEntity.set_vertex_constraints use and verify vertices.strength_ratio and vertices.aim_position exist on the same IPC geometry.",
+    "For every forced step with vertex constraints enabled, reconstruct protected_constraint_mask and force_mask, verify force_only = force_mask & ~protected_constraint_mask, and reject the run if any force-only vertex has strength_ratio > 0.",
+    "Confirm the original IPCCoupler._update_fem_vertex_constraint_targets runs before the force writer, and confirm coupler._ipc_world.sync() transfers the final force, mask, and strength attributes before IPC advance.",
+    "After force clearing, confirm protected anchors remain masked and retain their intended target and strength while force-only entries are no longer masked.",
     "Compare a no-force baseline or pre-force frames against forced frames when possible; the smoke test moved the FEM COM by +0.0186076 m in x over 30 steps while the no-force baseline stayed at 0.",
-    "Inspect logs for force_event_count, applied_vertices, mask_nonzero, total_force, per_vertex_force, and FEM COM displacement."
+    "Inspect logs for force_event_count, applied_vertices, protected_constraint_count, force_only_count, force_only_strength_nonzero, mask_nonzero, total_force, per_vertex_force, and FEM COM displacement.",
+    "Critic must reject a claimed FEM external-force success when enable_vertex_constraints=True and the artifacts do not prove force-only strength is zero; visual plausibility or a completed run does not waive this check."
   ],
   "dispatch_hints": [
     "Send to body when the generated scene must install libuipc FEM force attributes during IPC build.",
     "Send to action when writing force schedules, force masks, impulses, persistent fields, or animator callbacks.",
-    "Send to critic when a run claims FEM external force was applied or when a soft body remains static despite scheduled force.",
+    "Send to critic when a run claims FEM external force was applied, when a soft body remains static despite scheduled force, or when force activation coincides with sudden stretching, snapping, collapse, or unexpected tethering.",
     "Send to opt when force magnitude, selected patch, impulse duration, ramp profile, or clearing schedule are tunable physical parameters.",
     "Send to planner for FEM+IPC tasks that explicitly mention wind, thrust, impulse, disturbance, direct force, or force-driven soft-body motion."
   ],
   "provenance": {
-    "source": "local_smoke_test",
+    "source": "local_smoke_test_and_historical_workspace_audit",
     "script": "code_agent/workspaces/suites/debug_cards/ipc_fem_external_force_smoke.py",
     "summary_path": "code_agent/workspaces/suites/debug_cards/ipc_fem_external_force_smoke_20260610_123425/summary.json",
     "verified_details": [
       "uipc.constitution.FiniteElementExternalForce is available in the local pyuipc package.",
       "FiniteElementExternalForce.apply_to creates vertices.external_force and vertices.is_constrained on a volumetric FEM SimplicialComplex.",
       "The observed vertices.external_force layout in the smoke test is (N, 3, 1).",
+      "Applying SoftPositionConstraint and FiniteElementExternalForce to the same local tetrahedral geometry showed that they share vertices.is_constrained; a force-masked vertex retained aim_position at its rest position and strength_ratio=100 until explicitly changed.",
+      "Genesis IPCCoupler initializes FEM vertex-constraint strength to 100 and may rewrite is_constrained, aim_position, and strength_ratio during _update_fem_vertex_constraint_targets, so force-only strength must be cleared after that update.",
+      "Historical clean passes used either enable_vertex_constraints=False (green dragon post field, purple bunny, blue bunny) or strength_ratio=0 on force-only vertices while preserving real anchors (localized green dragon, giraffe, planar snap-through cloth).",
+      "Historical double-helix and desert-shrub runs completed without this guard but mixed external force with a soft positional tether; completion and visual acceptance are therefore not proof that the force channel is uncontaminated.",
       "Writing +x force to all 1657 FEM vertices for 30 steps and calling coupler._ipc_world.sync() produced +0.0186076 m FEM COM displacement over a no-force baseline of 0.0 m."
     ]
   }

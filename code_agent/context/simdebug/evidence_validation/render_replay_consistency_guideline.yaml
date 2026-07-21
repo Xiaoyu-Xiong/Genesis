@@ -1,7 +1,7 @@
 schema_version: 1
 id: render_replay_consistency_guideline
 title: Validate render-only replay against accepted physics cache
-summary: A replayed final video must cite a fresh, validated state cache from an accepted physical run and must not silently step or alter physics.
+summary: A replayed final video must cite a fresh accepted cache, apply every dynamic actor state through a verified path, preserve static actors without unnecessary setters, and never silently step or alter physics.
 scopes: [planner, rendering, critic, opt]
 physics_modes: [any]
 task_tags:
@@ -10,6 +10,7 @@ task_tags:
   - final_render
   - state_cache
   - artifact
+  - actor_contract
 failure_tags:
   - replay_without_cache
   - replay_stepped_physics
@@ -18,30 +19,43 @@ failure_tags:
   - missing_replay_metadata
   - articulated_motion_missing_from_replay
   - replay_actor_state_incomplete
+  - static_actor_replay_misclassified
+  - replay_state_application_unsupported
+  - articulated_replay_capability_mismatch
 guidance:
   - Render-only replay should use a cache manifest produced by the latest accepted physical run.
-  - Replay code must apply cached states and render frames without calling scene.step().
-  - Final render_stats.json should record replay_only=true, physics_cache_manifest, cache frame count, source hashes, and source run result when available.
+  - Replay code must apply cached dynamic states and render frames without calling scene.step().
+  - Final render_stats.json should record replay_only=true, physics_cache_manifest, cache frame count, source hashes, source run result, actor-contract validation, and state-application validation.
   - Cache creation must preserve source snapshots alongside source hashes so a later mismatch can be reviewed as a concrete old-to-current diff.
   - A source-hash mismatch is mandatory Critic evidence, not automatic cache invalidation. Critic must read each diff and classify it as render_only, physics_affecting, or indeterminate from source semantics rather than filenames.
   - A render_only mismatch may reuse the accepted cache only when the changes cannot alter geometry, collision, physical materials, solver settings, initialization, forces, controls, actions, or simulated state. Physics-affecting or indeterminate changes require a fresh physics run and state cache.
-  - Compare the manifest actor contracts with the rebuilt scene before rendering. Final replay must fail when an articulated actor lacks qpos/DOF state, a deformable actor lacks vertex state, or a required setter cannot apply the cached state.
-  - Compare task-critical cached motion with rendered motion. Joint-driven rollers, drums, paddles, robot links, gates, and similar articulated actors must visibly follow their cached generalized coordinates rather than remaining at their initial pose.
+  - Compare manifest actor contracts with the rebuilt scene by physical role: fixed/static, dynamic rigid, articulated, and deformable or cloth actors have different required replay behavior.
+  - A replay_mode=none actor must be demonstrably fixed/static and match its rebuilt identity and initial state. It does not need or permit a per-frame pose setter merely because dynamic actors use setters.
+  - A dynamic actor passes only when its declared setter or state path is actually invoked successfully on frame 0 and at least one frame whose cached state differs. Method existence or a no-op return is insufficient.
+  - An articulated actor passes only when complete qpos or DOF state is present and changing cached generalized coordinates produces the corresponding link-transform or rendered-link motion. Root-only motion cannot substitute for joint replay.
+  - A deformable or cloth actor passes only when complete shape-stable vertex state is applied and the rendered geometry follows cached deformation.
+  - Legacy static-pose normalization is acceptable only with finite, shape-stable, frame-invariant pose evidence and a tight documented match to the rebuilt actor; otherwise classify the cache as requiring regeneration.
+  - A setter or state-application failure is a replay implementation or actor-contract failure, not by itself evidence that the accepted physics was invalid. Route repair to cache/replay ownership and do not recommend changing geometry solely to make a setter available.
+  - Compare task-critical cached motion with rendered motion. Joint-driven rollers, drums, paddles, robot links, gates, and similar actors must visibly follow their cached state rather than remaining at the initial pose.
 restrictions:
   - Do not accept a final replay video that lacks cache provenance in render_stats.json.
   - Do not accept replay output after a physics-affecting source change without a new cache. Do not assume that every edit in scene.py or body.py affects physics; inspect the changed code.
   - Do not classify a mismatch as render_only from filenames or hashes alone. Missing snapshots or insufficient logs must be classified indeterminate unless other concrete evidence proves the change is visual-only.
   - Do not use stale videos or frame directories to mask replay failures.
-  - Do not accept replay_valid=true from file existence alone; every required actor-state array must be present, finite, shape-consistent, and successfully applied.
+  - Do not accept replay_valid=true from file existence alone; every required actor-state array must be present, finite, shape-consistent, and successfully applied according to its replay mode.
+  - Do not convert dynamic or articulated actors to replay_mode=none to bypass unsupported state application.
 checks:
   - Check replay_only and physics_cache_manifest fields in render_stats.json.
   - Check frame count and video duration match the validated cache and requested fps.
   - Check cache manifest freshness against execution_report and source hashes; for mismatches, inspect cached snapshots, current files, generated diffs, and relevant worker logs.
   - Check Critic records cache_source_consistency.classification, mismatched_files, physics_rerun_required, rationale, and concrete evidence.
-  - Check actor_contracts and per-frame required arrays, then inspect task-critical articulated and deformable motion in start/mid/end replay frames.
+  - Check replay_mode=none actors have fixed/static evidence, rebuilt-state consistency, and no per-frame setter calls.
+  - Check dynamic actors apply frame 0 and a different cached frame, then compare resulting pose, link transforms, or vertices with the requested state.
+  - Check articulated qpos/DOF changes produce corresponding link-transform and rendered-motion changes.
+  - Inspect task-critical articulated and deformable motion in start, mid, and end replay frames rather than accepting only state-application logs.
 dispatch_hints:
-  - Send to rendering when replay mode is requested.
-  - Send to Critic when judging final path-traced replay evidence.
+  - Send to rendering when replay mode is requested or state application fails.
+  - Send to Critic when judging final path-traced replay evidence and separating replay defects from physics defects.
 provenance:
-  source: path_tracing_debug_card_workflow
-  motivation: Make final render replay auditable and resistant to stale artifacts.
+  source: path_tracing_workflow
+  motivation: Make final render replay auditable across static, rigid, articulated, and deformable actor contracts.

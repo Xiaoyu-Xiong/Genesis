@@ -450,6 +450,23 @@ class FEMEntity(Entity):
                 self._uvs = None
                 if isinstance(mesh.visual, trimesh.visual.texture.TextureVisuals) and mesh.visual.uv is not None:
                     self._uvs = mesh.visual.uv.astype(gs.np_float, copy=False)
+                render_artifact = eu.register_surface_mesh_render_artifact(
+                    file=self._morph.file,
+                    vertices=verts,
+                    faces=faces,
+                    scale=self._morph.scale,
+                    tet_cfg=self.tet_cfg,
+                    file_meshes_are_zup=self._morph.file_meshes_are_zup,
+                )
+                baked_texture_path = render_artifact.get("texture_path")
+                if baked_texture_path is not None and not self._surface.requires_uv:
+                    self._surface.update_texture(
+                        color_texture=gs.textures.ImageTexture(
+                            image_path=baked_texture_path,
+                            encoding="srgb",
+                        ),
+                        force=True,
+                    )
             else:
                 gs.raise_exception(f"Cloth material only supports Mesh morph. Got: {self.morph}.")
         else:

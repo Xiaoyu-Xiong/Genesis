@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import math
 import os
 import runpy
 import signal
@@ -50,6 +51,9 @@ class LocalRunConfig:
     artifact_file_names: tuple[str, ...] = DEFAULT_ARTIFACT_FILE_NAMES
     extra_artifact_paths: tuple[str, ...] = ()
     env: dict[str, str] = field(default_factory=dict)
+    progress_frames_dir: Path | None = None
+    progress_target_frames: int | None = None
+    progress_checkpoints: tuple[tuple[float, float], ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -59,6 +63,7 @@ class _CommandRunResult:
     stderr: str
     timed_out: bool
     timeout_process_tree: dict[str, Any] | None = None
+    progress_watchdog: dict[str, Any] | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -86,6 +91,9 @@ def run_local(config: LocalRunConfig) -> dict[str, Any]:
     started_at = time.time()
     command = _build_command(config)
     run_env = _build_env(config.env)
+    progress_frames_dir = config.progress_frames_dir
+    if progress_frames_dir is not None and not progress_frames_dir.is_absolute():
+        progress_frames_dir = workspace_dir / progress_frames_dir
 
     if not main_path.is_file():
         duration_sec = time.time() - started_at
@@ -117,6 +125,10 @@ def run_local(config: LocalRunConfig) -> dict[str, Any]:
         cwd=workspace_dir,
         env=run_env,
         timeout_sec=config.timeout_sec,
+        progress_frames_dir=progress_frames_dir,
+        progress_target_frames=config.progress_target_frames,
+        progress_checkpoints=config.progress_checkpoints,
+        progress_min_mtime=started_at,
     )
 
     duration_sec = time.time() - started_at
@@ -154,6 +166,17 @@ def run_local(config: LocalRunConfig) -> dict[str, Any]:
     _apply_artifact_validation(report, workspace_dir, output_dir, artifact_paths)
     if completed.timeout_process_tree is not None:
         report["timeout_process_tree"] = completed.timeout_process_tree
+    if completed.progress_watchdog is not None:
+        report["progress_watchdog"] = completed.progress_watchdog
+        if completed.progress_watchdog.get("triggered"):
+            report.update(
+                {
+                    "failure_class": "execution.insufficient_frame_progress",
+                    "failure_reason": completed.progress_watchdog.get("failure_reason"),
+                    "rework_required": True,
+                }
+            )
+            report.setdefault("diagnostics", {})["progress_watchdog"] = completed.progress_watchdog
     _write_json(report_path, report)
     return report
 
@@ -317,6 +340,10 @@ def _run_command_with_process_group(
     cwd: Path,
     env: dict[str, str],
     timeout_sec: float,
+    progress_frames_dir: Path | None = None,
+    progress_target_frames: int | None = None,
+    progress_checkpoints: tuple[tuple[float, float], ...] = (),
+    progress_min_mtime: float | None = None,
 ) -> _CommandRunResult:
     process = subprocess.Popen(
         command,
@@ -328,32 +355,71 @@ def _run_command_with_process_group(
         start_new_session=True,
     )
     process_group_id = process.pid
-    try:
-        stdout, stderr = process.communicate(timeout=timeout_sec)
-    except subprocess.TimeoutExpired as timeout_exc:
-        kill_report: dict[str, Any] = {
-            "process_group": True,
-            "pid": process.pid,
-            "pgid": process_group_id,
-            "grace_sec": PROCESS_TREE_TERMINATION_GRACE_SEC,
-            "signals": [],
-        }
-        _send_process_group_signal(process, process_group_id, signal.SIGTERM, kill_report)
+    started_monotonic = time.monotonic()
+    watchdog = _frame_progress_watchdog(
+        frames_dir=progress_frames_dir,
+        target_frames=progress_target_frames,
+        timeout_sec=timeout_sec,
+        checkpoints=progress_checkpoints,
+    )
+    latest_timeout_exc: subprocess.TimeoutExpired | None = None
+
+    for checkpoint in watchdog.get("checkpoints", []):
+        deadline_sec = float(checkpoint["deadline_sec"])
+        remaining_sec = max(0.0, deadline_sec - (time.monotonic() - started_monotonic))
         try:
-            stdout, stderr = process.communicate(timeout=PROCESS_TREE_TERMINATION_GRACE_SEC)
-            kill_report["terminated_after_sigterm"] = True
-        except subprocess.TimeoutExpired as sigterm_exc:
-            kill_report["terminated_after_sigterm"] = False
-            kill_report["escalated_to_sigkill"] = True
-            _send_process_group_signal(process, process_group_id, signal.SIGKILL, kill_report)
-            try:
-                stdout, stderr = process.communicate(timeout=PROCESS_TREE_TERMINATION_GRACE_SEC)
-                kill_report["terminated_after_sigkill"] = True
-            except subprocess.TimeoutExpired as sigkill_exc:
-                kill_report["terminated_after_sigkill"] = False
-                stdout = _latest_timeout_stream(sigkill_exc.stdout, sigterm_exc.stdout, timeout_exc.stdout)
-                stderr = _latest_timeout_stream(sigkill_exc.stderr, sigterm_exc.stderr, timeout_exc.stderr)
-        kill_report["returncode_after_kill"] = process.returncode
+            stdout, stderr = process.communicate(timeout=remaining_sec)
+            return _CommandRunResult(
+                exit_code=int(process.returncode or 0),
+                stdout=stdout,
+                stderr=stderr,
+                timed_out=False,
+                progress_watchdog=watchdog or None,
+            )
+        except subprocess.TimeoutExpired as timeout_exc:
+            latest_timeout_exc = timeout_exc
+
+        observed_frames = _fresh_frame_count(progress_frames_dir, min_mtime=progress_min_mtime)
+        checkpoint.update(
+            {
+                "observed_frames": observed_frames,
+                "checked_at_elapsed_sec": time.monotonic() - started_monotonic,
+                "status": "passed" if observed_frames >= int(checkpoint["required_frames"]) else "failed",
+            }
+        )
+        if checkpoint["status"] == "failed":
+            reason = (
+                f"Frame progress watchdog failed at {checkpoint['timeout_fraction']:.0%} of timeout: "
+                f"found {observed_frames}/{progress_target_frames} fresh frames, but at least "
+                f"{checkpoint['required_frames']} ({checkpoint['frame_fraction']:.0%}) were required. Rework required."
+            )
+            kill_report, stdout, stderr = _terminate_process_tree(
+                process,
+                process_group_id,
+                latest_timeout_exc,
+            )
+            watchdog.update(
+                {
+                    "triggered": True,
+                    "failure_class": "execution.insufficient_frame_progress",
+                    "failure_reason": reason,
+                    "rework_required": True,
+                    "process_tree_termination": kill_report,
+                }
+            )
+            return _CommandRunResult(
+                exit_code=125,
+                stdout=stdout,
+                stderr=_append_stderr_line(stderr, reason),
+                timed_out=False,
+                progress_watchdog=watchdog,
+            )
+
+    remaining_sec = max(0.0, timeout_sec - (time.monotonic() - started_monotonic))
+    try:
+        stdout, stderr = process.communicate(timeout=remaining_sec)
+    except subprocess.TimeoutExpired as timeout_exc:
+        kill_report, stdout, stderr = _terminate_process_tree(process, process_group_id, timeout_exc)
         stderr = _append_stderr_line(stderr, f"Timed out after {timeout_sec:.3f} seconds.")
         return _CommandRunResult(
             exit_code=124,
@@ -361,13 +427,99 @@ def _run_command_with_process_group(
             stderr=stderr,
             timed_out=True,
             timeout_process_tree=kill_report,
+            progress_watchdog=watchdog or None,
         )
     return _CommandRunResult(
         exit_code=int(process.returncode or 0),
         stdout=stdout,
         stderr=stderr,
         timed_out=False,
+        progress_watchdog=watchdog or None,
     )
+
+
+def _frame_progress_watchdog(
+    *,
+    frames_dir: Path | None,
+    target_frames: int | None,
+    timeout_sec: float,
+    checkpoints: tuple[tuple[float, float], ...],
+) -> dict[str, Any]:
+    if frames_dir is None or target_frames is None or target_frames <= 0 or not checkpoints:
+        return {}
+    normalized = sorted((float(time_fraction), float(frame_fraction)) for time_fraction, frame_fraction in checkpoints)
+    if any(
+        not 0.0 < time_fraction < 1.0 or not 0.0 < frame_fraction <= 1.0 for time_fraction, frame_fraction in normalized
+    ):
+        raise ValueError("Frame progress checkpoints must contain fractions in (0, 1), with frame fractions <= 1.")
+    return {
+        "enabled": True,
+        "frames_dir": str(frames_dir.resolve()),
+        "target_frames": int(target_frames),
+        "triggered": False,
+        "checkpoints": [
+            {
+                "timeout_fraction": time_fraction,
+                "frame_fraction": frame_fraction,
+                "deadline_sec": timeout_sec * time_fraction,
+                "required_frames": math.ceil(target_frames * frame_fraction),
+                "status": "pending",
+            }
+            for time_fraction, frame_fraction in normalized
+        ],
+    }
+
+
+def _fresh_frame_count(frames_dir: Path | None, *, min_mtime: float | None) -> int:
+    if frames_dir is None or not frames_dir.is_dir():
+        return 0
+    count = 0
+    for path in frames_dir.glob("frame_*.png"):
+        try:
+            if path.is_file() and (min_mtime is None or path.stat().st_mtime >= min_mtime - ARTIFACT_MTIME_EPSILON_SEC):
+                count += 1
+        except OSError:
+            continue
+    return count
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[str],
+    process_group_id: int,
+    timeout_exc: subprocess.TimeoutExpired | None,
+) -> tuple[dict[str, Any], str, str]:
+    kill_report: dict[str, Any] = {
+        "process_group": True,
+        "pid": process.pid,
+        "pgid": process_group_id,
+        "grace_sec": PROCESS_TREE_TERMINATION_GRACE_SEC,
+        "signals": [],
+    }
+    _send_process_group_signal(process, process_group_id, signal.SIGTERM, kill_report)
+    try:
+        stdout, stderr = process.communicate(timeout=PROCESS_TREE_TERMINATION_GRACE_SEC)
+        kill_report["terminated_after_sigterm"] = True
+    except subprocess.TimeoutExpired as sigterm_exc:
+        kill_report["terminated_after_sigterm"] = False
+        kill_report["escalated_to_sigkill"] = True
+        _send_process_group_signal(process, process_group_id, signal.SIGKILL, kill_report)
+        try:
+            stdout, stderr = process.communicate(timeout=PROCESS_TREE_TERMINATION_GRACE_SEC)
+            kill_report["terminated_after_sigkill"] = True
+        except subprocess.TimeoutExpired as sigkill_exc:
+            kill_report["terminated_after_sigkill"] = False
+            stdout = _latest_timeout_stream(
+                sigkill_exc.stdout,
+                sigterm_exc.stdout,
+                None if timeout_exc is None else timeout_exc.stdout,
+            )
+            stderr = _latest_timeout_stream(
+                sigkill_exc.stderr,
+                sigterm_exc.stderr,
+                None if timeout_exc is None else timeout_exc.stderr,
+            )
+    kill_report["returncode_after_kill"] = process.returncode
+    return kill_report, stdout, stderr
 
 
 def _send_process_group_signal(

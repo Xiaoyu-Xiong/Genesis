@@ -42,6 +42,7 @@
           "control_interface": { "type": "object" },
           "base": { "type": "object" },
           "validation": { "type": "object" },
+          "remesh": { "type": "object" },
           "asset_request": { "type": "object" },
           "simulation_role": { "type": "string", "minLength": 1 },
           "status": { "type": "string", "enum": ["ready", "pending", "failed"] },

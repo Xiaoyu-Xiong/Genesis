@@ -575,7 +575,7 @@ def test_run_opt_agent_uses_parseable_payload_even_if_codex_times_out(tmp_path, 
     result = opt_agent.run_opt_agent(OptAgentRequest(case_dir=case_dir, original_prompt="test"))
 
     assert result.status == "success"
-    assert result.best == {"success": True}
+    assert result.best == payload["best"]
     report = json.loads((case_dir / "reports" / "opt_subagent_report.json").read_text(encoding="utf-8"))
     assert report["result"]["status"] == "success"
 
@@ -1294,6 +1294,29 @@ def test_planner_schemas_accept_cloth_target_edge_length(tmp_path):
     assert not session.validate_json_schema(action, Path("code_agent/specs/planner_action.schema.json"))
 
 
+def test_codex_output_schemas_avoid_unsupported_composition_keywords():
+    schema_paths = [
+        Path("code_agent/specs/planner_action.schema.json"),
+        Path("code_agent/specs/worker_report.schema.json"),
+        Path("code_agent/specs/xml_worker_report.schema.json"),
+        Path("code_agent/specs/critic_report.schema.json"),
+        Path("code_agent/specs/opt_schema/opt_subagent_report.schema.json"),
+        Path("code_agent/scores/physical/sbar_report.schema.json"),
+        *sorted(Path("code_agent/dataset/schemas").glob("*.schema.json")),
+    ]
+    forbidden = {"allOf", "oneOf", "not", "if", "then", "else"}
+
+    for schema_path in schema_paths:
+        pending = [json.loads(schema_path.read_text(encoding="utf-8"))]
+        while pending:
+            node = pending.pop()
+            if isinstance(node, dict):
+                assert not forbidden.intersection(node), schema_path
+                pending.extend(node.values())
+            elif isinstance(node, list):
+                pending.extend(node)
+
+
 def test_planner_output_physics_plan_updates_deformable_contract(tmp_path):
     session = PlannerSession(
         PlannerSessionConfig(
@@ -1442,6 +1465,7 @@ def test_planner_update_mesh_asset_metadata_action_reuses_ready_geometry(tmp_pat
         "purpose": "one closed soft asset",
         "scale": 1.0,
         "bbox": [2.0, 1.0, 1.0],
+        "cloth_target_edge_length": None,
         "texture_needs": None,
         "simulation_role": "test role",
     }
@@ -1537,6 +1561,16 @@ def test_generate_procedural_cloth_mesh_assets(tmp_path):
             "simulation_role": "dynamic FEM cloth rectangle",
         },
         {
+            "name": "cloth_disk",
+            "asset_type": "cloth_mesh_disk",
+            "purpose": "circular FEM cloth target membrane for a panda projectile",
+            "scale": 1.0,
+            "bbox": [0.6, 0.6, 0.001],
+            "cloth_target_edge_length": 0.05,
+            "texture_needs": None,
+            "simulation_role": "dynamic open circular FEM cloth membrane",
+        },
+        {
             "name": "cloth_cylinder",
             "asset_type": "cloth_mesh_cylinder",
             "purpose": "cylindrical FEM cloth shell",
@@ -1591,12 +1625,17 @@ def test_generate_procedural_cloth_mesh_assets(tmp_path):
         assert "\nv " in "\n" + text
         assert "\nf " in "\n" + text
         validation = entry["validation"]["cloth_mesh"]
-        assert validation["shape"] in {"square", "rectangle", "cylinder", "sphere"}
+        assert validation["shape"] in {"square", "rectangle", "disk", "cylinder", "sphere"}
         assert validation["face_count"] <= deformable_config_dict()["cloth_max_faces"]
         if request.get("cloth_target_edge_length") is not None:
             assert validation["target_edge_length"] == request["cloth_target_edge_length"]
             assert validation["target_edge_length_source"] == "asset_request"
-            assert validation["face_count"] == 200
+            if validation["shape"] == "square":
+                assert validation["face_count"] == 200
+            elif validation["shape"] == "disk":
+                assert validation["vertex_count"] - validation["edge_count"] + validation["face_count"] == 1
+                assert validation["bbox_size"] == [0.6, 0.6, 0.0]
+                assert validation["face_count"] == 288
 
 
 def test_procedural_cloth_mesh_rejects_complex_open_silhouette(tmp_path):
@@ -1923,12 +1962,18 @@ def _planner_action(
     action: str,
     planner_output: dict[str, object] | None = None,
     asset_names: list[str] | None = None,
+    target_face_count: int | None = None,
+    target_edge_length: float | None = None,
+    target_face_tolerance: float | None = None,
 ) -> dict[str, object]:
     return {
         "action": action,
         "rationale": "test",
         "planner_output": planner_output,
         "asset_names": asset_names,
+        "target_face_count": target_face_count,
+        "target_edge_length": target_edge_length,
+        "target_face_tolerance": target_face_tolerance,
         "roles": None,
         "owner": None,
         "repair_brief": None,
@@ -2098,7 +2143,7 @@ def create_bodies(scene, task, *, deformable_cfg):
     expected_diag = math.sqrt(0.44**2 + 0.44**2 + 2.4**2)
     assert report["selected_asset"] == "src/body.py:Cylinder"
     assert report["selected_source_kind"] == "direct_primitive_morph"
-    assert math.isclose(report["median_feature_length"], 0.44 / 5.0, rel_tol=1e-9)
+    assert math.isclose(report["median_feature_length"], 0.44 / 3.0, rel_tol=1e-9)
     assert math.isclose(report["global_bbox_diag"], expected_diag, rel_tol=1e-9)
     assert math.isclose(report["selected_bbox_diag"], expected_diag, rel_tol=1e-9)
     assert math.isclose(report["ipc_contact_d_hat"], 2e-3 * expected_diag, rel_tol=1e-9)
@@ -2142,7 +2187,7 @@ def main():
     assert report["source"] == "generated source primitive morphs"
     assert report["selected_asset"] == "src/main.py:Cylinder"
     assert report["selected_source_kind"] == "direct_primitive_morph"
-    assert math.isclose(report["median_feature_length"], 0.084 / 5.0, rel_tol=1e-9)
+    assert math.isclose(report["median_feature_length"], 0.084 / 3.0, rel_tol=1e-9)
     assert math.isclose(report["global_bbox_diag"], expected_diag, rel_tol=1e-9)
     assert math.isclose(report["ipc_contact_d_hat"], 2e-3 * expected_diag, rel_tol=1e-9)
 

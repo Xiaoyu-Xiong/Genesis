@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from code_agent.configs import CONFIGS
 from code_agent.io_utils import decode_process_stream, load_json_object
 from code_agent.utils.local_execution import LocalRunConfig, build_local_execution_env, run_local
 
@@ -28,6 +29,10 @@ class ExecutionReport:
     stderr_path: str
     artifacts: dict[str, str]
     diagnostics: dict[str, object] | None = None
+    failure_class: str | None = None
+    failure_reason: str | None = None
+    rework_required: bool = False
+    progress_watchdog: dict[str, object] | None = None
     lock_wait_sec: float = 0.0
     lock_path: str | None = None
 
@@ -44,6 +49,10 @@ class ExecutionReport:
             "stderr_path": self.stderr_path,
             "artifacts": self.artifacts,
             "diagnostics": self.diagnostics or {},
+            "failure_class": self.failure_class,
+            "failure_reason": self.failure_reason,
+            "rework_required": self.rework_required,
+            "progress_watchdog": self.progress_watchdog or {},
             "lock_wait_sec": self.lock_wait_sec,
             "lock_path": self.lock_path,
             "ok": self.ok,
@@ -121,7 +130,9 @@ def run_generated_simulation(
         extra_args.extend(("--deformable-config", str(deformable_config_path.relative_to(run_dir))))
     extra_args.append(render_arg)
     with _exclusive_genesis_execution_lock(execution_lock_path) as lock_info:
-        env_overrides = _execution_env_overrides(backend=backend, render_profile=render_profile, replay_cache=replay_cache)
+        env_overrides = _execution_env_overrides(
+            backend=backend, render_profile=render_profile, replay_cache=replay_cache
+        )
         raw_report = run_local(
             LocalRunConfig(
                 workspace_dir=run_dir,
@@ -132,6 +143,13 @@ def run_generated_simulation(
                 extra_args=tuple(extra_args),
                 extra_artifact_paths=("artifacts",),
                 env=env_overrides,
+                progress_frames_dir=run_dir / "artifacts" / "frames" if render and target_video_frames else None,
+                progress_target_frames=target_video_frames if render else None,
+                progress_checkpoints=(
+                    CONFIGS.harness.frame_progress_checkpoints
+                    if render and target_video_frames and CONFIGS.harness.frame_progress_watchdog_enabled
+                    else ()
+                ),
             )
         )
         diagnostic_report = _maybe_render_initial_without_ipc(
@@ -158,9 +176,19 @@ def run_generated_simulation(
         stderr_path=str(raw_report["stderr_path"]),
         artifacts=artifacts,
         diagnostics=diagnostics,
+        failure_class=_optional_report_str(raw_report.get("failure_class")),
+        failure_reason=_optional_report_str(raw_report.get("failure_reason")),
+        rework_required=bool(raw_report.get("rework_required", False)),
+        progress_watchdog=(
+            raw_report.get("progress_watchdog") if isinstance(raw_report.get("progress_watchdog"), dict) else None
+        ),
         lock_wait_sec=float(lock_info["wait_sec"]),
         lock_path=str(lock_info["path"]),
     )
+
+
+def _optional_report_str(value: object) -> str | None:
+    return str(value) if isinstance(value, str) and value else None
 
 
 def _execution_env_overrides(

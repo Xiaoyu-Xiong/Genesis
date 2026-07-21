@@ -28,6 +28,8 @@ class EpisodeActionExecutor:
                 return self.assets.wait_mesh_assets(action)
             if name == "update_mesh_asset_metadata":
                 return self.assets.update_mesh_asset_metadata(action)
+            if name == "remesh_mesh_assets":
+                return self.assets.remesh_mesh_assets(action)
             if name == "start_xml_assets":
                 return self.assets.start_xml_assets(action)
             if name == "wait_xml_assets":

@@ -31,7 +31,9 @@ Genesis rigid primitive API constraints:
 - Initialize with `gs.init(backend=gs.cpu if backend == "cpu" else gs.gpu, precision="32",
   performance_mode=True, logging_level="warning")`.
 - Create a scene with `gs.Scene(sim_options=gs.options.SimOptions(dt=sim_dt, substeps=sim_substeps), ...,
-  show_viewer=False, show_FPS=False)` using the `sim_dt` and `sim_substeps` arguments passed into `create_scene`.
+  rigid_options=rigid_options, show_viewer=False, show_FPS=False)` using the timing and repository-owned
+  `rigid_options` arguments passed into `create_scene`. Pass it directly without creating, copying, mutating, replacing,
+  or selectively unpacking it in generated code.
 - Add a ground plane with `scene.add_entity(gs.morphs.Plane())`.
 - If `deformable_cfg["ipc_enabled"]` is true for a rigid/articulated scene, route contact through IPC by constructing
   `gs.Scene(..., coupler_options=gs.options.IPCCouplerOptions(...))` and mapping IPC values from `deformable_cfg`.

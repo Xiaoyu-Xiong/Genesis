@@ -7,6 +7,7 @@ Short references for the current Planner-led pipeline:
 - [Evaluation](evaluation.md)
 - [Mesh Pipeline](mesh.md)
 - [Opt Agent](opt.md)
+- [Path Tracing](path_tracing.md)
 - [Prompts](prompts.md)
 - [Scripts and Suites](scripts.md)
 - [Specs](specs.md)

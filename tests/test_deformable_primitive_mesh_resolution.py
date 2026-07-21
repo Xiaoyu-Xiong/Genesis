@@ -35,7 +35,7 @@ def test_deformable_primitive_box_uses_boosted_target_edge(monkeypatch):
 
     eu.box_to_elements(size=(1.0, 1.0, 1.0), tet_cfg={"tet_resolution": 2})
 
-    target_edge = 1.0 / 7.0
+    target_edge = 1.0 / 4.0
     assert calls["remesh"][0]["edge_len_abs"] == pytest.approx(target_edge)
     assert calls["remesh"][0]["fix"] is False
     tet_cfg = calls["tetrahedralize"][0]["tet_cfg"]
@@ -48,7 +48,7 @@ def test_deformable_primitive_sphere_uses_boosted_subdivisions(monkeypatch):
     eu.sphere_to_elements(radius=0.5, tet_cfg={"tet_resolution": 2})
 
     mesh = calls["remesh"][0]["mesh"]
-    assert calls["remesh"][0]["edge_len_abs"] == pytest.approx(1.0 / 7.0)
+    assert calls["remesh"][0]["edge_len_abs"] == pytest.approx(1.0 / 4.0)
     assert len(mesh.faces) == 20 * 4**3
 
 
@@ -61,7 +61,7 @@ def test_deformable_primitive_cylinder_uses_higher_minimum_sections(monkeypatch)
     radii = np.linalg.norm(np.asarray(mesh.vertices)[:, :2], axis=1)
     angles = np.round(np.mod(np.arctan2(mesh.vertices[:, 1], mesh.vertices[:, 0]), 2.0 * math.pi), decimals=6)
     section_count = len(np.unique(angles[radii > 0.49]))
-    assert calls["remesh"][0]["edge_len_abs"] == pytest.approx(1.0 / 7.0)
+    assert calls["remesh"][0]["edge_len_abs"] == pytest.approx(1.0 / 4.0)
     assert section_count == 32
 
 
@@ -80,5 +80,5 @@ def test_mesh_file_tetrahedralization_keeps_unboosted_tet_resolution(tmp_path, m
 
     eu.mesh_to_elements(mesh_path, tet_cfg={"tet_resolution": 2})
 
-    target_edge = 1.0 / 5.0
+    target_edge = 1.0 / 3.0
     assert calls[0]["tet_cfg"]["maxvolume"] == pytest.approx((target_edge**3) * math.sqrt(2.0) / 12.0)

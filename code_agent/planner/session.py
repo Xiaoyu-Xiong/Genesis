@@ -13,7 +13,7 @@ except ImportError:  # pragma: no cover - the uv environment normally has jsonsc
     Draft202012Validator = None  # type: ignore[assignment]
 
 from code_agent.assets.builtin_guard import builtin_asset_violations
-from code_agent.configs import CONFIGS, deformable_config_dict
+from code_agent.configs import CONFIGS, deformable_config_dict, rigid_config_dict
 from code_agent.io_utils import dump_json
 from code_agent.utils.codex import CODEX_INFRA_ERROR_TYPES, DEFAULT_REPO_ROOT
 from code_agent.utils.timing import TimingPlan, resolve_timing
@@ -53,12 +53,14 @@ class PlannerSession:
         self.logs_dir = self.case_dir / "logs"
         self.command_dir = self.reports_dir / "planner_commands"
         self.deformable_config_path = self.contracts_dir / "deformable_config.json"
+        self.rigid_config_path = self.contracts_dir / "rigid_config.json"
         self.action_history_path = self.reports_dir / "planner_actions.jsonl"
         self.dispatch_history_path = self.reports_dir / "dispatch_history.jsonl"
         self.state_path = self.reports_dir / "episode_state.json"
         self.summary_path = self.case_dir / "summary.json"
         self.timing: TimingPlan | None = None
         self.deformable_config = deformable_config_dict()
+        self.rigid_config = rigid_config_dict()
         max_turns = config.max_planner_turns or max(12, 7 + config.repair_rounds * 5)
         self.state: dict[str, Any] = {
             "schema_version": 1,
@@ -75,6 +77,7 @@ class PlannerSession:
                 "deformable_scope": "FEM volumetric and FEM.Cloth thin-shell when enabled; MPM/PBD/SPH remain out of scope.",
                 "ipc_scope": "IPC may be enabled for rigid/articulated contact; deformable forces IPC on.",
                 "deformable_config_path": str(self.deformable_config_path),
+                "rigid_config_path": str(self.rigid_config_path),
             },
             "control": {
                 "needs_integration": False,
@@ -167,6 +170,7 @@ class PlannerSession:
         for path in (self.contracts_dir, self.reports_dir, self.logs_dir, self.command_dir):
             path.mkdir(parents=True, exist_ok=True)
         self.write_deformable_config_contract()
+        self.write_rigid_config_contract()
         self.actions.assets.adopt_layout_asset_manifest()
         for path in (self.action_history_path, self.dispatch_history_path):
             if path.exists():
@@ -174,6 +178,9 @@ class PlannerSession:
 
     def write_deformable_config_contract(self) -> None:
         dump_json(self.deformable_config, self.deformable_config_path)
+
+    def write_rigid_config_contract(self) -> None:
+        dump_json(self.rigid_config, self.rigid_config_path)
 
     def resolve_planner_physics_plan(self, planner_output: dict[str, Any]) -> dict[str, Any]:
         raw_plan = planner_output.get("physics_plan")
@@ -236,6 +243,7 @@ class PlannerSession:
                 "deformable_enabled": bool(physics_plan.get("deformable_enabled")),
                 "ipc_enabled": bool(physics_plan.get("ipc_enabled")),
                 "deformable_config_path": str(self.deformable_config_path),
+                "rigid_config_path": str(self.rigid_config_path),
             }
         )
 

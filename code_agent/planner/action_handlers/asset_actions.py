@@ -7,6 +7,7 @@ from typing import Any
 
 from code_agent.assets.inspection import inspect_generated_assets
 from code_agent.assets.mesh.episode import generate_mesh_assets_for_episode, update_mesh_asset_metadata_for_episode
+from code_agent.assets.mesh.remesh_integration import remesh_mesh_assets_for_episode
 from code_agent.assets.xml.episode import generate_xml_assets_for_episode
 from code_agent.io_utils import dump_json
 
@@ -93,6 +94,25 @@ class AssetActionHandler:
         payload = self._finalize_asset_result("mesh", result)
         payload["metadata_updated_asset_names"] = result.get("metadata_updated_asset_names", [])
         return payload
+
+    def remesh_mesh_assets(self, action: dict[str, Any]) -> dict[str, Any]:
+        future = self._asset_futures.get("mesh")
+        if future is not None and not future.done():
+            return {
+                "ok": False,
+                "status": "precondition_failed",
+                "message": "Cannot remesh assets while mesh asset generation is running.",
+                "asset_generation_report_path": self._asset_job_report_path_text("mesh"),
+                "background": True,
+            }
+        result = remesh_mesh_assets_for_episode(
+            case_dir=self.session.case_dir,
+            asset_names=self._asset_names_from_action(action),
+            target_face_count=action.get("target_face_count"),
+            target_edge_length=action.get("target_edge_length"),
+            target_face_tolerance=action.get("target_face_tolerance"),
+        )
+        return self._record_mesh_remesh_result(result)
 
     def start_xml_assets(self, action: dict[str, Any]) -> dict[str, Any]:
         return self._start_asset_job(
@@ -402,7 +422,14 @@ class AssetActionHandler:
             "planner_output_path": self.session.state.get("planner_output_path"),
         }
 
-    def _finalize_asset_result(self, kind: str, result: dict[str, Any]) -> dict[str, Any]:
+    def _finalize_asset_result(
+        self,
+        kind: str,
+        result: dict[str, Any],
+        *,
+        preserve_ready_manifest: bool = False,
+        combine_manifest: bool = True,
+    ) -> dict[str, Any]:
         manifest_path = Path(str(result.get("asset_manifest_path") or self._default_partial_manifest_path(kind)))
         manifest = self.session.load_json(manifest_path)
         schema_errors = []
@@ -413,20 +440,25 @@ class AssetActionHandler:
                 manifest,
                 Path("code_agent/specs/asset_manifest.schema.json"),
             )
-        ok = bool(result.get("ok")) and not schema_errors
+        action_ok = bool(result.get("ok")) and not schema_errors
+        entries = manifest.get("assets", []) if isinstance(manifest, dict) else []
+        manifest_ready = not schema_errors and all(
+            isinstance(entry, dict) and entry.get("status") == "ready" for entry in entries
+        )
+        job_ok = action_ok or (preserve_ready_manifest and manifest_ready)
         assets = self._ensure_assets_state()
         jobs = assets.setdefault("jobs", {})
         previous_job = jobs.get(kind) if isinstance(jobs.get(kind), dict) else {}
         jobs[kind] = {
-            "status": "ready" if ok else "failed",
-            "ok": ok,
+            "status": "ready" if job_ok else "failed",
+            "ok": job_ok,
             "kind": kind,
             "asset_manifest_path": str(manifest_path),
             "asset_generation_report_path": result.get("asset_generation_report_path"),
             "message": result.get("message"),
             "recommended_owner": result.get("recommended_owner"),
             "repair_summary": result.get("repair_summary"),
-            "failure_classes": result.get("failure_classes", []),
+            "failure_classes": [] if job_ok and not action_ok else result.get("failure_classes", []),
             "selected_asset_names": result.get("selected_asset_names", []),
             "skipped_asset_names": result.get("skipped_asset_names", []),
             "num_assets": result.get("num_assets", 0),
@@ -436,10 +468,13 @@ class AssetActionHandler:
             "updated_at_unix": time.time(),
             "background": False,
         }
-        combined_path, combined_errors = self._write_combined_asset_manifest()
+        if combine_manifest:
+            combined_path, combined_errors = self._write_combined_asset_manifest()
+        else:
+            combined_path, combined_errors = manifest_path, schema_errors
         self._refresh_asset_state(combined_path=combined_path, combined_schema_errors=combined_errors)
         return {
-            "ok": ok,
+            "ok": action_ok,
             "status": result.get("status", f"{kind}_assets_generated"),
             "asset_manifest_path": str(combined_path),
             "partial_asset_manifest_path": str(manifest_path),
@@ -456,6 +491,28 @@ class AssetActionHandler:
             "planner_output_updated": previous_job.get("planner_output_updated", False),
             "planner_output_path": previous_job.get("planner_output_path"),
         }
+
+    def _record_mesh_remesh_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Record the action without making a failed optional remesh invalidate ready source assets."""
+
+        payload = self._finalize_asset_result(
+            "mesh",
+            result,
+            preserve_ready_manifest=True,
+            combine_manifest=bool(result.get("remeshed_asset_names")),
+        )
+        payload["ok"] = bool(payload["ok"] and not payload["combined_schema_errors"])
+        job = self._ensure_assets_state()["jobs"]["mesh"]
+        job.update(
+            {
+                "last_remesh_status": result.get("status"),
+                "last_remesh_ok": payload["ok"],
+                "last_remesh_report_path": result.get("asset_generation_report_path"),
+                "last_remesh_failure_classes": result.get("failure_classes", []),
+            }
+        )
+        payload["remeshed_asset_names"] = result.get("remeshed_asset_names", [])
+        return payload
 
     def _ensure_assets_state(self) -> dict[str, Any]:
         assets = self.session.state.get("assets")

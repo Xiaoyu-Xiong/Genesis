@@ -156,7 +156,7 @@ Available actions:
   layout/entity/timing detail; add serial edges only for concrete dependencies that truly require seeing another
   worker's generated source or report.
   Module contract required exports must match the current implementation interfaces exactly:
-  scene=`create_scene(backend, *, sim_dt, sim_substeps, deformable_cfg)`;
+  scene=`create_scene(backend, *, sim_dt, sim_substeps, rigid_options, deformable_cfg)`;
   body=`create_bodies(scene, task, *, deformable_cfg)`;
   action=`run_actions(scene, actors, *, out_dir, steps, render_state=None)`;
   rendering=`setup_rendering(..., render_every_n_steps, render_res)`, `capture_frame`, and `finalize_rendering`.

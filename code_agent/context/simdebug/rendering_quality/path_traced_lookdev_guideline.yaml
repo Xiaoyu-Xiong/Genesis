@@ -1,0 +1,57 @@
+schema_version: 1
+id: path_traced_lookdev_guideline
+title: Refine path-traced lighting and materials for final look-dev
+summary: Final path-traced images should use deliberate light-studio composition, visible soft-shadow hierarchy, semantically varied materials, and renderer-native refraction.
+scopes: [planner, scene, body, rendering, critic]
+physics_modes: [any]
+task_tags:
+  - path_tracing
+  - final_render
+  - lookdev
+  - lighting
+  - soft_shadow
+  - material
+  - glass
+failure_tags:
+  - visible_light_mesh
+  - missing_light_visibility_check
+  - light_frustum_intersection
+  - overexposed_render
+  - flat_lighting
+  - diffuse_only_materials
+  - alpha_fake_glass
+  - low_contrast_palette_retry_loop
+  - one_shot_final_render
+guidance:
+  - Prefer light studio backdrops such as warm light gray, pale blue-gray, soft off-white, or other neutral high-key backgrounds, with non-pure-white matte floors when such support geometry already exists.
+  - Do not inherit the debug raster pure-white background fallback as the final look. Use pure white only when the prompt or a required visual comparison calls for it.
+  - Build a visible key, fill, and rim hierarchy with controlled exposure and soft contact shadows. Avoid uniform ambient lighting that removes tonal depth and the characteristic softness of path tracing.
+  - Use large sphere, mesh, or emissive area lights for soft shadows and readable highlights, while keeping their renderable geometry outside the swept final camera frustum.
+  - Treat RayTracer sphere lights as renderable geometry. Project each sphere radius or emissive-mesh world bbox through every final camera pose, or conservatively test it against the swept frustum; pixel inspection alone is insufficient because a white light can disappear against a white background.
+  - Choose semantically varied materials instead of defaulting to diffuse surfaces. Use metal or satin response for metal, rough plastic or rubber for suitable rigid/soft objects, cloth-like roughness for textiles, and controlled highlights for tools and fixtures.
+  - For transparent or semi-transparent objects, do not fake glass with only RGBA alpha or Smooth.opacity. Use renderer-native path-traced transmission or refraction such as gs.surfaces.Glass or an appropriate Glass/Water-derived surface.
+  - For Genesis Glass, tune color or tint, roughness, and IOR according to object thickness and readability. A practical starting range is roughness 0.0-0.06 and IOR 1.2-1.5, followed by image-based adjustment.
+  - Material changes cannot make a solid primitive geometrically hollow. Geometry semantics, thin-screen thickness, and shell topology belong to generated_asset_shape_fidelity_guideline and must be accepted before physics/cache acceptance.
+  - Render-only look-dev may adjust renderer settings, camera, lights, exposure, and existing surface/material parameters only. It must not add, hide, delete, or replace geometry.
+  - Tune roughness and material response for readability; avoid mirror-like choices that erase small or low-contrast actors in reflected environments.
+  - Do not remain trapped in an all-white or near-white retry loop. After repeated low-contrast rejection, make a substantive palette, background value, roughness, exposure, or lighting-hierarchy change while preserving prompt-specified object colors.
+  - Iterate on start, mid, and end frames until lighting, materials, framing, transparency, and motion readability are polished rather than accepting the first technically successful render.
+  - Look-dev metadata must record background_style, floor_material, lights, light_visibility_checks, material notes, transparent_materials, alpha_rgba_used=false for refractive materials, camera, and changes made between attempts.
+restrictions:
+  - Do not accept visible light spheres, emissive meshes, or light-frustum intersections in final frames.
+  - Do not use alpha-only transparency when the intended material requires refraction or transmission.
+  - Do not alter geometry during render-only look-dev to disguise collision proxies, helper cages, solid glass volumes, or missing shell structure.
+checks:
+  - Inspect start, mid, and end frames for overexposure, visible lights, flat illumination, weak shadows, low contrast, and material readability.
+  - Check light_visibility_checks includes world bounds, tested camera frames, frustum_intersects, and minimum clearance for every sphere, mesh, or emissive light; reject missing checks or any intersection.
+  - Check important objects use prompt-appropriate diffuse, metallic, rough, satin, cloth, rubber, plastic, or refractive responses rather than one default material.
+  - Check transparent objects use native refraction/transmission and remain readable through their full range of camera views.
+  - Check render-only look-dev did not add, hide, delete, replace, or reshape accepted geometry.
+  - Check repeated attempts made substantive visual changes and that the accepted render_stats.json records the final lighting and material decisions.
+dispatch_hints:
+  - Send to rendering for camera, background, exposure, lighting, and final material tuning.
+  - Send to scene/body only for render-only corrections to existing visual material assignments during look-dev.
+  - Send to Critic for final lighting, material, transparency, light-visibility, and iterative-quality acceptance.
+provenance:
+  source: path_tracing_lookdev_workflow
+  motivation: Keep final visual-quality guidance focused and separate from renderer startup and data-contract failures.

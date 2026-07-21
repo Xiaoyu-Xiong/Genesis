@@ -88,11 +88,16 @@ def _run_main(main_py: Path, run_dir: Path, *args: str) -> None:
 def _write_fake_case_modules(src_dir: Path, mode: str) -> None:
     (src_dir / "scene.py").write_text(
         """
+import genesis as gs
+
+
 class FakeScene:
-    def __init__(self, sim_dt):
+    def __init__(self, sim_dt, sim_substeps, rigid_options):
         self.dt = sim_dt
         self.t = 0.0
         self.built = False
+        self.sim_options = gs.options.SimOptions(dt=sim_dt, substeps=sim_substeps)
+        self.rigid_options = rigid_options.model_copy_from(self.sim_options)
 
     def build(self):
         self.built = True
@@ -101,8 +106,8 @@ class FakeScene:
         self.t += self.dt
 
 
-def create_scene(backend: str, *, sim_dt: float, sim_substeps: int, deformable_cfg: dict):
-    return FakeScene(sim_dt)
+def create_scene(backend: str, *, sim_dt: float, sim_substeps: int, rigid_options, deformable_cfg: dict):
+    return FakeScene(sim_dt, sim_substeps, rigid_options)
 """.lstrip(),
         encoding="utf-8",
     )

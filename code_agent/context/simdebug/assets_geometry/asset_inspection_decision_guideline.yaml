@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "asset_inspection_decision_guideline",
   "title": "Inspect assets when failures may come from generated geometry or mechanism affordances",
-  "summary": "Planner should choose inspect_assets when execution evidence cannot distinguish body/action bugs from generated mesh/XML defects, then route metadata updates, regeneration, or local repair based on inspection evidence.",
+  "summary": "Planner should choose inspect_assets when execution evidence cannot distinguish body/action bugs from generated mesh/XML defects, then route metadata updates, remeshing, regeneration, or local repair based on inspection evidence.",
   "scopes": ["planner", "critic"],
   "physics_modes": ["any"],
   "task_tags": [
@@ -15,6 +15,8 @@
     "scale",
     "bbox",
     "topology",
+    "mesh_density",
+    "remesh_mesh_assets",
     "mechanism"
   ],
   "failure_tags": [
@@ -23,23 +25,27 @@
     "invalid_topology",
     "cannot_grasp",
     "initial_geometry_failure",
-    "wrong_bbox_metadata"
+    "wrong_bbox_metadata",
+    "excessive_mesh_density"
   ],
   "guidance": [
     "Use inspect_assets when logs/video/metrics suggest a generated asset may be the cause but the evidence does not yet prove whether the problem is intrinsic asset quality or local placement/control.",
     "Inspect generated meshes when failures involve wrong scale, impossible clearance, unexpected collision shape, missing texture, bad orientation, failed FEM import, or topology that cannot provide the requested contact.",
     "Inspect XML/MJCF assets when failures involve missing actuator affordances, wrong joint axes, impossible grasp cages, invalid link hierarchy, or morphology that cannot perform the task.",
     "If inspection shows geometry is acceptable but scale/bbox metadata is wrong, use update_mesh_asset_metadata.",
+    "If inspection shows semantic shape, connected parts, and source topology are acceptable but face count is unnecessarily high, use remesh_mesh_assets with an explicit Planner-selected target.",
     "If inspection shows intrinsic mesh/XML defects, revise the affected asset request and use start_mesh_assets or start_xml_assets.",
     "If inspection shows assets are usable, route repair to scene/body/action/rendering according to the source-level evidence."
   ],
   "restrictions": [
     "Do not repeatedly ask body/action to repair around an asset whose morphology or topology cannot perform the task.",
-    "Do not regenerate assets for metadata-only sizing mistakes when update_mesh_asset_metadata is sufficient."
+    "Do not regenerate assets for metadata-only sizing mistakes when update_mesh_asset_metadata is sufficient.",
+    "Do not use remesh_mesh_assets to repair wrong morphology, missing parts, invalid source topology, or mechanism affordance defects."
   ],
   "checks": [
     "Check asset_manifest entries, validation reports, preview images, contact sheets, bbox/scale metadata, and generated XML source before choosing the repair owner.",
-    "Check whether the failure persists after plausible placement/clearance fixes before declaring an asset intrinsically unsuitable."
+    "Check whether the failure persists after plausible placement/clearance fixes before declaring an asset intrinsically unsuitable.",
+    "Check runtime face count and simulation/import cost before choosing remesh_mesh_assets; visual complexity alone is not sufficient evidence."
   ],
   "dispatch_hints": [
     "Send to Planner after asset-related execution or critic failures.",

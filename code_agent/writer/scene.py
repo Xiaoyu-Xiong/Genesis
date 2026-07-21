@@ -12,11 +12,15 @@ SPEC = WorkerSpec(
         "and scene lifecycle"
     ),
     prompt_body="""
-    Write `create_scene(backend: str, *, sim_dt: float, sim_substeps: int, deformable_cfg: dict, render_profile: str = "debug_raster")`.
+    Write `create_scene(backend: str, *, sim_dt: float, sim_substeps: int, rigid_options, deformable_cfg: dict,
+    render_profile: str = "debug_raster")`.
     The function must initialize Genesis and return an unbuilt `gs.Scene`.
     It must pass the supplied timing parameters into Genesis with
     `gs.options.SimOptions(dt=sim_dt, substeps=sim_substeps)` when constructing the scene. Do not hardcode local
     timestep or substep defaults.
+    Pass `rigid_options=rigid_options` directly to `gs.Scene`. This object is constructed by the harness from
+    `RigidConfigs`; do not instantiate `gs.options.RigidOptions`, mutate the supplied object, or override any of its
+    fields in generated source.
     If `deformable_cfg["ipc_enabled"]` is true, configure IPC through Genesis scene options and map IPC option values
     from `deformable_cfg` into `gs.options.IPCCouplerOptions(...)`. This applies both to FEM+IPC deformable scenes and
     to rigid/articulated scenes whose contacts should be handled by IPC.

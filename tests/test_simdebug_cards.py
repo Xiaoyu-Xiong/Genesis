@@ -37,6 +37,8 @@ def test_simdebug_catalog_loads_prompt_derived_cards():
     assert "rigid_contact_metrics_guideline" in ids
     assert "two_stage_rendering_workflow_guideline" in ids
     assert "final_path_tracing_siggraph_guideline" in ids
+    assert "raytracer_runtime_contract_guideline" in ids
+    assert "path_traced_lookdev_guideline" in ids
     assert "physics_state_cache_replay_guideline" in ids
     assert "render_replay_consistency_guideline" in ids
     assert "controller_schedule_guideline" in ids
@@ -44,6 +46,7 @@ def test_simdebug_catalog_loads_prompt_derived_cards():
     assert "soft_body_robust_layout_guideline" in ids
     assert "fem_cloth_shell_guideline" in ids
     assert "asset_inspection_decision_guideline" in ids
+    assert "planner_mesh_remesh_tool_guideline" in ids
     assert "ipc_world_invalid_failure_signature_guideline" in ids
     assert all("provenance" in card for card in catalog["cards"])
     assert all("kind" not in card for card in catalog["cards"])
@@ -71,32 +74,52 @@ def test_render_background_cards_distinguish_debug_and_final_profiles():
 
     evidence_text = json.dumps(cards["render_visual_evidence_restriction"], ensure_ascii=False)
     final_text = json.dumps(cards["final_path_tracing_siggraph_guideline"], ensure_ascii=False)
+    runtime_text = json.dumps(cards["raytracer_runtime_contract_guideline"], ensure_ascii=False)
+    lookdev_text = json.dumps(cards["path_traced_lookdev_guideline"], ensure_ascii=False)
     workflow_text = json.dumps(cards["two_stage_rendering_workflow_guideline"], ensure_ascii=False)
     ground_text = json.dumps(cards["non_white_ground_on_white_background_guideline"], ensure_ascii=False)
 
     assert "Pure white is a fallback for fast inspection, not a hard requirement" in evidence_text
     assert "final_path_traced or replay_render" in evidence_text
     assert "do not inherit the debug evidence pure-white fallback" in evidence_text
-    assert "Prefer light studio backdrops" in final_text
-    assert "soft off-white" in final_text
-    assert "Do not inherit the debug raster pure-white background fallback" in final_text
-    assert "background_style" in final_text
+    assert "raytracer_runtime_contract_guideline" in final_text
+    assert "path_traced_lookdev_guideline" in final_text
     assert "path_tracing.enabled=false" in final_text
-    assert "iterative look-dev" in final_text
-    assert "RGBA alpha" in final_text
-    assert "soft contact shadows" in final_text
-    assert "RayTracer sphere lights as renderable geometry" in final_text
-    assert "light_visibility_checks" in final_text
-    assert "white background does not waive this check" in final_text
-    assert "Glass(color=(1.0, 1.0, 1.0)" in final_text
-    assert "Render-only replay must not add, hide, delete, or replace geometry" in final_text
-    assert "single Glass sphere renders as a solid glass volume" in final_text
-    assert "screen, window pane, or transparent plate" in final_text
-    assert "alpha_rgba_used=false" in final_text
+    assert "Final path tracing is iterative" in final_text
     assert "replay_only=true" in final_text
+    assert "emissive_texture=gs.textures.ColorTexture" in runtime_text
+    assert "Leave the color and emissive shortcut fields unset" in runtime_text
+    assert "shape (0, 2)" in runtime_text
+    assert "never pass a scalar, object array, or singleton UV channel" in runtime_text
+    assert "Prefer light studio backdrops" in lookdev_text
+    assert "soft off-white" in lookdev_text
+    assert "Do not inherit the debug raster pure-white background fallback" in lookdev_text
+    assert "RGBA alpha" in lookdev_text
+    assert "soft contact shadows" in lookdev_text
+    assert "RayTracer sphere lights as renderable geometry" in lookdev_text
+    assert "light_visibility_checks" in lookdev_text
+    assert "white light can disappear against a white background" in lookdev_text
+    assert "roughness 0.0-0.06" in lookdev_text
+    assert "must not add, hide, delete, or replace geometry" in lookdev_text
+    assert "alpha_rgba_used=false" in lookdev_text
     assert "does not mean the case can finish" in workflow_text
     assert "first RayTracer output" in workflow_text
     assert "This card does not require a white background" in ground_text
+
+
+def test_ipc_fem_external_force_card_guards_shared_constraint_mask():
+    cards = {card["id"]: card for card in build_simdebug_catalog()["cards"]}
+    force_text = json.dumps(cards["ipc_fem_external_force_guideline"], ensure_ascii=False)
+
+    assert "share vertices.is_constrained" in force_text
+    assert "enable_vertex_constraints=False" in force_text
+    assert "force_only = force_mask & ~protected_constraint_mask" in force_text
+    assert "strength_ratio[force_only] = 0" in force_text
+    assert "original Genesis constraint update" in force_text
+    assert "restore is_constrained to protected_constraint_mask" in force_text
+    assert "force_only_strength_nonzero must remain 0" in force_text
+    assert "visual plausibility or a completed run does not waive this check" in force_text
+    assert "zero force/mask entries for all unforced vertices" not in force_text
 
 
 def test_camera_palette_geometry_and_cache_cards_include_hard_replay_checks():
@@ -116,7 +139,33 @@ def test_camera_palette_geometry_and_cache_cards_include_hard_replay_checks():
     assert "Articulated rigid bodies must save" in cache_text
     assert "Root pose alone is insufficient" in cache_text
     assert "actor contract" in cache_text
-    assert "articulated actor lacks qpos/DOF state" in replay_text
+    assert "replay_mode=none" in cache_text
+    assert "Getter availability, setter attribute existence" in cache_text
+    assert "frame 0 plus at least one different cached frame" in cache_text
+    assert "Method existence or a no-op return is insufficient" in replay_text
+    assert "not by itself evidence that the accepted physics was invalid" in replay_text
+    assert "Do not convert dynamic or articulated actors to replay_mode=none" in replay_text
+
+
+def test_mesh_remesh_card_documents_auto_fallback_and_planner_target_ownership():
+    cards = {card["id"]: card for card in build_simdebug_catalog()["cards"]}
+    remesh_text = json.dumps(cards["planner_mesh_remesh_tool_guideline"], ensure_ascii=False)
+    retry_text = json.dumps(cards["planner_asset_retry_guideline"], ensure_ascii=False)
+    inspection_text = json.dumps(cards["asset_inspection_decision_guideline"], ensure_ascii=False)
+
+    assert "auto_remesh_target_face_count" in remesh_text
+    assert "defaults to 5000" in remesh_text
+    assert "PyMeshLab is not invoked and no remesh output is created" in remesh_text
+    assert "failed_fallback_original" in remesh_text
+    assert "before the potentially expensive original Genesis import" in remesh_text
+    assert "may rescue an entry whose original Genesis import failed" in remesh_text
+    assert "leaves that asset's current manifest entry unchanged" in remesh_text
+    assert "exactly one of target_face_count or target_edge_length" in remesh_text
+    assert "tool does not silently relax or replace a failed target" in remesh_text
+    assert "rigid, volumetric FEM, and cloth Genesis imports" in remesh_text
+    assert "texture" in remesh_text
+    assert "remesh_mesh_assets" in retry_text
+    assert "excessive_mesh_density" in inspection_text
 
 
 def test_simdebug_selector_picks_fem_material_cards_for_soft_ipc_task():
@@ -448,6 +497,7 @@ def test_worker_and_opt_prompts_receive_planner_dispatched_cards(tmp_path):
         task=session.config.task,
         planner_output={"module_contracts": []},
         asset_manifest={"assets": []},
+        rigid_config=session.rigid_config,
         deformable_config=session.deformable_config,
         genesis_context="Genesis context pointer",
         spec=WORKERS["body"],

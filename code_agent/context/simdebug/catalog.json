@@ -3,13 +3,13 @@
   "library": "simdebug",
   "description": "Planner-selected human debugging experience cards for Genesis simulation generation.",
   "library_dir": "code_agent/context/simdebug",
-  "card_count": 51,
+  "card_count": 54,
   "cards": [
     {
       "schema_version": 1,
       "id": "asset_inspection_decision_guideline",
       "title": "Inspect assets when failures may come from generated geometry or mechanism affordances",
-      "summary": "Planner should choose inspect_assets when execution evidence cannot distinguish body/action bugs from generated mesh/XML defects, then route metadata updates, regeneration, or local repair based on inspection evidence.",
+      "summary": "Planner should choose inspect_assets when execution evidence cannot distinguish body/action bugs from generated mesh/XML defects, then route metadata updates, remeshing, regeneration, or local repair based on inspection evidence.",
       "scopes": [
         "planner",
         "critic"
@@ -27,6 +27,8 @@
         "scale",
         "bbox",
         "topology",
+        "mesh_density",
+        "remesh_mesh_assets",
         "mechanism"
       ],
       "failure_tags": [
@@ -35,23 +37,27 @@
         "invalid_topology",
         "cannot_grasp",
         "initial_geometry_failure",
-        "wrong_bbox_metadata"
+        "wrong_bbox_metadata",
+        "excessive_mesh_density"
       ],
       "guidance": [
         "Use inspect_assets when logs/video/metrics suggest a generated asset may be the cause but the evidence does not yet prove whether the problem is intrinsic asset quality or local placement/control.",
         "Inspect generated meshes when failures involve wrong scale, impossible clearance, unexpected collision shape, missing texture, bad orientation, failed FEM import, or topology that cannot provide the requested contact.",
         "Inspect XML/MJCF assets when failures involve missing actuator affordances, wrong joint axes, impossible grasp cages, invalid link hierarchy, or morphology that cannot perform the task.",
         "If inspection shows geometry is acceptable but scale/bbox metadata is wrong, use update_mesh_asset_metadata.",
+        "If inspection shows semantic shape, connected parts, and source topology are acceptable but face count is unnecessarily high, use remesh_mesh_assets with an explicit Planner-selected target.",
         "If inspection shows intrinsic mesh/XML defects, revise the affected asset request and use start_mesh_assets or start_xml_assets.",
         "If inspection shows assets are usable, route repair to scene/body/action/rendering according to the source-level evidence."
       ],
       "restrictions": [
         "Do not repeatedly ask body/action to repair around an asset whose morphology or topology cannot perform the task.",
-        "Do not regenerate assets for metadata-only sizing mistakes when update_mesh_asset_metadata is sufficient."
+        "Do not regenerate assets for metadata-only sizing mistakes when update_mesh_asset_metadata is sufficient.",
+        "Do not use remesh_mesh_assets to repair wrong morphology, missing parts, invalid source topology, or mechanism affordance defects."
       ],
       "checks": [
         "Check asset_manifest entries, validation reports, preview images, contact sheets, bbox/scale metadata, and generated XML source before choosing the repair owner.",
-        "Check whether the failure persists after plausible placement/clearance fixes before declaring an asset intrinsically unsuitable."
+        "Check whether the failure persists after plausible placement/clearance fixes before declaring an asset intrinsically unsuitable.",
+        "Check runtime face count and simulation/import cost before choosing remesh_mesh_assets; visual complexity alone is not sufficient evidence."
       ],
       "dispatch_hints": [
         "Send to Planner after asset-related execution or critic failures.",
@@ -216,7 +222,7 @@
         "Use procedural primitives or simple CAD-like geometry for plain boxes, cuboids, cylinders, rods, plates, pads, blocks, cups, gauges, and other simple shapes instead of generating decorative meshes.",
         "For generated mesh assets, inspect preview images, manifest bbox, aspect ratios, orientation, thickness, semantic silhouette, texture visibility, and mesh complexity before body/action tuning.",
         "For volumetric FEM/deformable-body generated mesh assets, reject assets that pass manifold or FEM import checks but are too thin, too small, overcomplex, spiky, high-element-count, or semantically unlike the requested object.",
-        "For FEM.Cloth assets, defer shape capability and validation rules to fem_cloth_shell_guideline. Procedural cloth_mesh assets are allowed to be thin/open surfaces when their shape is one of square, rectangle, cylinder, or sphere; do not apply volumetric deformable-body thickness rejection to them.",
+        "For FEM.Cloth assets, defer shape capability and validation rules to fem_cloth_shell_guideline. Procedural cloth_mesh assets are allowed to be thin/open surfaces when their shape is one of square, rectangle, disk, cylinder, or sphere; do not apply volumetric deformable-body thickness rejection to them.",
         "For XML/MJCF mechanisms, inspect whether the generated morphology exposes the required joints, actuators, collision affordances, grasp surfaces, and contact geometry.",
         "For transparent screens, windows, panes, and plates, inspect all primitive or mesh dimensions and require a bounded thin layer. A cylinder primitive is acceptable for a circular screen only when its axial half-height is small relative to its radius and does not fill the enclosing mechanism depth.",
         "For transparent shells, tubes, drums, and containers, distinguish a real thin shell or authored inner/outer surfaces from a solid transparent primitive occupying the interior volume.",
@@ -297,8 +303,10 @@
         "runtime_path is the strict-manifold simulation/collision mesh.",
         "visual_path is a seam-aware textured render mesh attached to the same rigid entity, not a separate object to instantiate as an independent simulation body.",
         "texture_path is evidence metadata for the transferred base-color image and texture preview checks.",
+        "When entry.remesh.status == applied, runtime_path, visual_path, and texture_path are the validated remesh outputs; entry.remesh.base_* and source_* fields retain original high-quality geometry and texture provenance for later Planner target changes.",
+        "When automatic remesh reports skipped_not_needed, the source was already at or below the configured face target. When it reports failed_fallback_original, the listed original paths remain authoritative and their readiness is decided by the subsequent normal Genesis import validation.",
         "Use the manifest's logical names, scale factors, coordinate metadata, texture paths, and simulation roles instead of guessing mesh paths, sizes, or orientation.",
-        "If a generated mesh manifest entry is missing, failed, invalid, or cannot be imported, fail clearly and report that Planner should regenerate the mesh asset; do not edit mesh files or approximate the object with ad hoc primitives."
+        "If a generated mesh manifest entry is missing, failed, invalid, or cannot be imported, fail clearly. Planner may use remesh_mesh_assets only for a source-manifold-valid density/import-cost problem; otherwise Planner should regenerate the mesh asset. Do not edit mesh files or approximate the object with ad hoc primitives."
       ],
       "dispatch_hints": [
         "Send to body/rendering when generated mesh assets are being instantiated.",
@@ -323,7 +331,7 @@
       "schema_version": 1,
       "id": "planner_asset_retry_guideline",
       "title": "Planner asset retries should rewrite the owning asset request, not patch around bad assets",
-      "summary": "Planner should distinguish intrinsic generated-asset defects from metadata-only issues and route retries through the correct mesh/XML asset action with a complete revised planner_output.",
+      "summary": "Planner should distinguish intrinsic generated-asset defects, excessive but valid mesh density, and metadata-only issues, then route each through regeneration, remeshing, or metadata update respectively.",
       "scopes": [
         "planner",
         "critic",
@@ -343,7 +351,8 @@
         "mjcf",
         "asset_manifest",
         "metadata",
-        "planner_output"
+        "planner_output",
+        "remesh_mesh_assets"
       ],
       "failure_tags": [
         "mesh_prompt_too_long",
@@ -353,13 +362,16 @@
         "wrong_generated_topology",
         "wrong_bbox_metadata",
         "underspecified_xml",
-        "asset_intrinsic_defect"
+        "asset_intrinsic_defect",
+        "excessive_mesh_density"
       ],
       "guidance": [
         "Meshy mesh generation accepts at most 800 characters in the final mesh-agent prompt; keep each generated_mesh request concise enough for the assembled prompt.",
         "When mesh feedback requires a different prompt, rewrite the affected asset request into a concise integrated description instead of appending repair text.",
         "Put the revised complete planner_output directly on the start_mesh_assets action that retries generation; action rationale, notes, and repair_brief are not sent to the mesh agent.",
-        "Mesh asset generation owns mesh validity. If manifold validation, texture transfer, Genesis FEM import validation, or generated topology fails, regenerate through the mesh asset action.",
+        "Mesh asset generation owns source mesh validity. If source manifold validation, texture transfer, morphology, or generated topology fails, regenerate through the mesh asset action. If a reasonably sized remesh still fails Genesis import, regeneration or a different asset representation is appropriate.",
+        "If a ready Meshy-generated asset is semantically and topologically correct but too dense for the planned simulation, use remesh_mesh_assets with explicit asset_names and exactly one Planner-selected target_face_count or target_edge_length. The same action may rescue an import-failed entry only when its repaired source already passed manifold/TetGen preflight.",
+        "A remesh failure returns directly to Planner and leaves the current manifest paths unchanged; inspect its failure stage and select a different reasonable target or retain the original mesh. Do not expect the tool to guess a replacement target.",
         "Do not ask body/scene/action/rendering workers to rewrite, procedurally repair, reshape, retopologize, or approximate mesh-intrinsic defects.",
         "If a ready generated mesh has acceptable geometry but wrong runtime scale/bbox metadata, use update_mesh_asset_metadata with a complete revised planner_output rather than retrying mesh generation.",
         "For XML/MJCF asset feedback, rewrite the affected XML asset request in a revised complete planner_output and put it directly on start_xml_assets; do not rely on rationale, notes, or repair_brief to reach the XML asset worker."
@@ -376,6 +388,78 @@
         ]
       },
       "source_path": "code_agent/context/simdebug/assets_geometry/planner_asset_retry_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "planner_mesh_remesh_tool_guideline",
+      "title": "Use the Planner remesh tool only for valid generated meshes whose density is too expensive",
+      "summary": "Meshy-generated meshes receive a configurable automatic 5000-face remesh attempt, and Planner may later choose an explicit isotropic remesh target without risking the current ready asset.",
+      "scopes": [
+        "planner",
+        "critic",
+        "body"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "generated_mesh",
+        "cloth_mesh",
+        "remesh_mesh_assets",
+        "mesh_density",
+        "face_count",
+        "simulation_cost",
+        "texture_transfer",
+        "asset_manifest"
+      ],
+      "failure_tags": [
+        "excessive_mesh_density",
+        "simulation_timeout",
+        "slow_fem_import",
+        "remesh_failed",
+        "target_too_aggressive",
+        "cloth_face_budget"
+      ],
+      "guidance": [
+        "After every manifold-valid Meshy-generated mesh is repaired and textured, and before the potentially expensive original Genesis import, the pipeline checks CONFIGS.mesh_repair.auto_remesh_enabled and normally attempts a local isotropic remesh to CONFIGS.mesh_repair.auto_remesh_target_face_count, which defaults to 5000.",
+        "If the current runtime mesh is already at or below the automatic target, status is skipped_not_needed and the original asset remains in use; PyMeshLab is not invoked and no remesh output is created. Procedural open cloth sheets are outside this closed-manifold tool and are not forced through it.",
+        "If automatic remesh passes target tolerance, manifold/winding/TetGen checks, texture transfer, and rigid, volumetric FEM, and cloth Genesis imports, status is applied and the manifest paths switch to the remesh output.",
+        "If automatic remesh fails or raises, status is failed_fallback_original; generation still succeeds with the previously validated original runtime, visual, and texture paths.",
+        "Choose remesh_mesh_assets only after inspection shows that semantic morphology, connected components, collision affordances, and source validity are already correct but face count is too expensive.",
+        "remesh_mesh_assets accepts ready entries and may rescue an entry whose original Genesis import failed due to density only when its repaired source already passed manifold/winding/TetGen preflight; a successful remesh returns that entry to ready.",
+        "For remesh_mesh_assets, provide a non-empty asset_names list and exactly one of target_face_count or target_edge_length. target_face_tolerance may be null to use the configured 0.50 tolerance.",
+        "Planner owns target selection. Use the object's scale, feature thickness, contact detail, deformation needs, and current face count to choose a reasonable target; the tool does not silently relax or replace a failed target.",
+        "On success, the action atomically switches runtime_path, visual_path, and texture_path for that asset and records original base geometry, original Meshy textured source, base color, alignment translation, report path, and achieved counts under entry.remesh.",
+        "On failure, the action returns ok=false with failure_stage/error/report_path and leaves that asset's current manifest entry unchanged. Choose another target or keep the current mesh.",
+        "For a multi-asset action, successful assets are committed independently and failed assets retain their prior entries; the overall action reports mesh_asset_remesh_partial until every requested asset succeeds.",
+        "A target at or above the original face count is an invalid downsampling request. A target that destroys manifoldness, winding, TetGen readiness, texture mapping, or any required Genesis import is a validation failure, not permission to repair or substitute geometry.",
+        "Meshy-generated closed FEM.Cloth shells may use this tool, but the remeshed result must also stay within CONFIGS.deformable.cloth_max_faces. Procedural open cloth assets should instead be regenerated with an appropriate cloth_target_edge_length."
+      ],
+      "restrictions": [
+        "Do not use remesh_mesh_assets for wrong silhouettes, missing parts, incorrect articulation, invalid source topology, or prompt mismatch; revise and regenerate the owning asset request.",
+        "Do not instantiate entry.remesh.base_visual_path as a second body. The manifest runtime_path and visual_path remain the single authoritative geometry pair.",
+        "Do not overwrite or delete original mesh/texture files, and do not chain remeshes from prior reduced output; each new Planner target must use the recorded original source provenance.",
+        "Do not treat a remesh failure as making an otherwise ready source asset unusable."
+      ],
+      "checks": [
+        "Inspect source/output face counts, target_check, manifold_validation, texture_validation, and genesis_fem_import_validation in remesh_report.json.",
+        "For textured assets, confirm the remesh report preserves a non-uniform base-color texture and a valid many-to-one seam-aware visual-to-physical vertex mapping.",
+        "Before simulation, confirm asset_manifest runtime_path, visual_path, texture_path, scale, bbox, and remesh.status are mutually consistent."
+      ],
+      "dispatch_hints": [
+        "Send to Planner when a ready generated mesh may be causing import, tetrahedralization, IPC, or simulation cost due to face count.",
+        "Send to Critic when recommending remesh_mesh_assets rather than regeneration.",
+        "Send to Body when consuming a manifest entry whose geometry paths were switched by remeshing."
+      ],
+      "provenance": {
+        "source": "local_isotropic_remesh_pipeline_integration",
+        "implementation": [
+          "code_agent/assets/mesh/remesh.py",
+          "code_agent/assets/mesh/remesh_integration.py",
+          "code_agent/planner/action_handlers/asset_actions.py"
+        ]
+      },
+      "source_path": "code_agent/context/simdebug/assets_geometry/planner_mesh_remesh_tool_guideline.yaml"
     },
     {
       "schema_version": 1,
@@ -409,7 +493,7 @@
       "guidance": [
         "Any non-cloth object whose requested appearance depends on texture, patterned surface detail, decorative material variation, image-like surface content, or nontrivial visual ornamentation should be represented by a Meshy-generated asset request, even when the task does not explicitly say mesh.",
         "If a non-cloth object has a complex recognizable shape, organic silhouette, decorative pattern, or texture, and it does not need joints, actuators, or articulation, prefer a Meshy generated_mesh asset instead of approximating it with many primitives or plain colors.",
-        "For FEM.Cloth assets, follow fem_cloth_shell_guideline first: procedural cloth_mesh is limited to square, rectangle/ribbon/strip, cylinder/tube/sleeve, and sphere/balloon shapes; Meshy generated_mesh is only for complex closed manifold cloth shells explicitly requested as cloth shells.",
+        "For FEM.Cloth assets, follow fem_cloth_shell_guideline first: procedural cloth_mesh is limited to square, rectangle/ribbon/strip, disk/circle, cylinder/tube/sleeve, and sphere/balloon shapes; Meshy generated_mesh is only for complex closed manifold cloth shells explicitly requested as cloth shells.",
         "Do not ask writers to fake texture-dependent objects with plain primitive colors or simple Genesis surfaces.",
         "When visual appearance matters, include texture needs and simulation role in the asset request so downstream workers can use manifest texture metadata and critic can verify rendered texture evidence."
       ],
@@ -1756,7 +1840,7 @@
       "schema_version": 1,
       "id": "fem_cloth_shell_guideline",
       "title": "FEM cloth uses IPC shell meshes, not PBD or volumetric tets",
-      "summary": "Thin cloth tasks should use gs.materials.FEM.Cloth with ready cloth_mesh surface assets and IPC contact. Procedural cloth_mesh only supports four basic shape families: square sheet, rectangle/ribbon/strip sheet, cylinder/tube/sleeve shell, and sphere/balloon shell; it does not generate arbitrary silhouettes, logos, icons, animals, or other complex open cloth outlines. Complex closed manifold cloth shells may use Meshy generated_mesh requests routed back to cloth_mesh. PBD cloth and volumetric FEM substitutes remain out of scope unless the task is explicitly rewritten.",
+      "summary": "Thin cloth tasks should use gs.materials.FEM.Cloth with ready cloth_mesh surface assets and IPC contact. Procedural cloth_mesh supports five basic shape families: square sheet, rectangle/ribbon/strip sheet, circular disk/membrane, cylinder/tube/sleeve shell, and sphere/balloon shell; it does not generate arbitrary silhouettes, logos, icons, animals, or other complex open cloth outlines. Complex closed manifold cloth shells may use Meshy generated_mesh requests routed back to cloth_mesh. PBD cloth and volumetric FEM substitutes remain out of scope unless the task is explicitly rewritten.",
       "scopes": [
         "planner",
         "scene",
@@ -1790,7 +1874,7 @@
         "complex_open_cloth_silhouette"
       ],
       "guidance": [
-        "For procedural FEM.Cloth geometry, request asset_type cloth_mesh_square, cloth_mesh_rectangle, cloth_mesh_cylinder, cloth_mesh_sphere, or generic cloth_mesh only when one of the four supported basic shapes is acceptable: square sheet, rectangle/ribbon/strip sheet, cylinder/tube/sleeve shell, or sphere/balloon shell. Generic cloth_mesh is not an arbitrary contour generator.",
+        "For procedural FEM.Cloth geometry, request asset_type cloth_mesh_square, cloth_mesh_rectangle, cloth_mesh_disk, cloth_mesh_cylinder, cloth_mesh_sphere, or generic cloth_mesh only when one of the five supported basic shapes is acceptable: square sheet, rectangle/ribbon/strip sheet, circular disk/membrane, cylinder/tube/sleeve shell, or sphere/balloon shell. Generic cloth_mesh is not an arbitrary contour generator.",
         "Do not request arbitrary 2D silhouettes, icons, logos, letters, animals, character profiles, custom cutouts, or complex open cloth outlines through procedural cloth_mesh. The procedural generator must hard-fail these requests as unsupported instead of silently approximating them as a square or rectangle.",
         "For complex closed manifold FEM.Cloth shells whose visual shape matters more than regular grid control, request asset_type generated_mesh and make purpose/simulation_role explicitly say FEM.Cloth closed manifold shell or cloth shell; the Meshy-generated manifold surface is written back as source_type cloth_mesh.",
         "For cloth asset_request bbox, all three components must be positive; use a small positive thickness dimension such as 0.001 for flat square or rectangle sheets instead of 0.0.",
@@ -1811,7 +1895,7 @@
       ],
       "checks": [
         "Check generated source for gs.materials.FEM.Cloth and absence of PBD cloth APIs.",
-        "Check asset_manifest for a ready source_type cloth_mesh entry whose runtime_path exists, whose validation.cloth_mesh.shape is one of square, rectangle, cylinder, or sphere for procedural cloth, and whose face count is within budget.",
+        "Check asset_manifest for a ready source_type cloth_mesh entry whose runtime_path exists, whose validation.cloth_mesh.shape is one of square, rectangle, disk, cylinder, or sphere for procedural cloth, and whose face count is within budget.",
         "If asset generation reports cloth_mesh.unsupported_shape or validation.cloth_mesh.error mentions unsupported procedural cloth_mesh shape, route the failure to Planner task/asset request revision instead of body/action repair.",
         "Check initial layout for positive clearance relative to cloth thickness and ipc_contact_d_hat.",
         "Check video and metrics for visible bending, draping, folding, or shell deformation rather than rigid-sheet motion."
@@ -1885,7 +1969,7 @@
       "schema_version": 1,
       "id": "ipc_fem_external_force_guideline",
       "title": "Use verified libuipc external-force attributes for FEM forces",
-      "summary": "For FEM+IPC scenes that truly need direct physical force on a deformable body, register uipc.constitution.FiniteElementExternalForce on FEM IPC geometries before IPC world initialization, then update vertices.external_force and vertices.is_constrained with shape checks, sync, and motion evidence.",
+      "summary": "For FEM+IPC scenes that need direct physical force, register uipc.constitution.FiniteElementExternalForce before IPC world initialization and prevent its vertices.is_constrained mask from also activating SoftPositionConstraint: disable vertex constraints when no real anchors are needed, or preserve real anchors and set vertices.strength_ratio=0 on every force-only vertex before IPC advance.",
       "scopes": [
         "planner",
         "body",
@@ -1908,7 +1992,11 @@
         "deformable",
         "push",
         "wind",
-        "actuation"
+        "actuation",
+        "vertex_constraint",
+        "soft_position_constraint",
+        "is_constrained",
+        "strength_ratio"
       ],
       "failure_tags": [
         "unsupported_fem_force_shape",
@@ -1916,9 +2004,14 @@
         "fem_force_not_registered_before_world_init",
         "missing_external_force_attr",
         "missing_is_constrained_attr",
+        "missing_strength_ratio_attr",
         "world_sync_missing",
         "static_soft_body",
-        "hidden_proxy_force"
+        "hidden_proxy_force",
+        "external_force_soft_constraint_mask_collision",
+        "force_only_strength_nonzero",
+        "external_force_aim_position_tether",
+        "force_constraint_ordering_error"
       ],
       "guidance": [
         "Use direct FEM external force only when force is part of the requested physical scene or a clearly modeled disturbance. Prefer FEMEntity.set_vertex_constraints for pinned or driven boundary conditions, and prefer contact-driven rigid tools for rollers, plates, grippers, impacts, squeezing, and contact mechanisms.",
@@ -1927,42 +2020,59 @@
         "Find target FEM geometries with uipc.backend.SceneVisitor(coupler._ipc_scene), uipc.geometry.SimplicialComplexSlot, and genesis.engine.couplers.ipc_coupler.utils.read_ipc_geometry_metadata; apply this card only to metadata entries with solver_type == 'fem' unless cloth force support is separately verified.",
         "Create and insert a FiniteElementExternalForce instance in coupler._ipc_constitution_tabular, then call external_force.apply_to(fem_geom, np.zeros(3, dtype=np.float64)). Verify that fem_geom.vertices().find('external_force') and fem_geom.vertices().find('is_constrained') both exist.",
         "Normalize the external_force attribute to a per-vertex (N, 3) writable view. In the local smoke test, pyuipc exposed vertices.external_force as shape (N, 3, 1), so generated code should handle shape variants such as (N, 3, 1), (N, 3), (3, N), or a flat 3N layout instead of assuming one fixed shape.",
-        "When applying a total force to a selected vertex patch, divide by the selected vertex count, write that per-vertex vector into external_force for selected vertices, set the corresponding is_constrained mask entries to 1, and zero force/mask entries for all unforced vertices.",
-        "After writing force attributes, call coupler._ipc_world.sync() before scene.step(), or register a coupler._ipc_animator callback that updates force attributes before IPC advance.",
-        "Clear or update force and mask attributes after each step unless the intended physics is a persistent force field.",
-        "Record force evidence including attempted force count, successful application count, selected vertex count, external_force shape, mask nonzero count, total force or impulse, per-vertex force, and FEM COM/bbox/vertex displacement."
+        "FiniteElementExternalForce and SoftPositionConstraint share vertices.is_constrained. When gs.options.FEMOptions(enable_vertex_constraints=True), setting the external-force mask to 1 can also activate a soft spring toward vertices.aim_position with the current vertices.strength_ratio. Treat this as an attribute collision that must be resolved explicitly, not as harmless implementation detail.",
+        "If the scene has no legitimate pinned, driven, link-following, or target-following FEM/cloth boundary vertices, set gs.options.FEMOptions(enable_vertex_constraints=False). Do not enable vertex constraints merely because FiniteElementExternalForce uses an attribute named is_constrained.",
+        "If legitimate vertex constraints and direct external force coexist, keep an explicit protected_constraint_mask containing only the real boundary constraints. For every update compute force_only = force_mask & ~protected_constraint_mask and require strength_ratio[force_only] = 0. Real protected constraints retain their intended aim_position and nonzero strength; an intentionally forced-and-constrained overlap must be declared separately rather than silently treated as force-only.",
+        "When applying a total force to a selected vertex patch, divide by the selected vertex count, write that per-vertex vector into external_force, set is_constrained for the selected force vertices, preserve is_constrained for protected real constraints, and leave every other mask entry at 0.",
+        "Install the runtime force writer after real FEMEntity.set_vertex_constraints calls are known. Derive protected_constraint_mask from the intended Genesis constraint data or explicit constraint metadata, never from a UIPC mask that may already contain force-only entries.",
+        "Genesis may rewrite is_constrained, aim_position, and strength_ratio during IPCCoupler._update_fem_vertex_constraint_targets. The safe per-step order is: call the original Genesis constraint update; rewrite external_force and the union of protected and force masks; set strength_ratio to 0 on force-only vertices; call coupler._ipc_world.sync(); then allow IPC advance. A wrapper around _update_fem_vertex_constraint_targets may implement this order.",
+        "When a force pulse ends, zero external_force, restore is_constrained to protected_constraint_mask rather than clearing all entries, preserve real constraint targets and strengths, keep non-constraint strength irrelevant or zero, and sync before the next IPC advance.",
+        "Treat sudden stretching, snapping toward the origin or rest pose, unexpected stiffness, or a one-frame shape jump exactly when a force mask activates as a likely external-force/soft-position-constraint collision before tuning force magnitude, material stiffness, TetGen, or IPC contact parameters.",
+        "Record force evidence including attempted and successful application counts, selected vertex count, external_force shape, protected constraint count, force-only count, force-only strength nonzero count, mask nonzero count, total force or impulse, per-vertex force, and FEM COM/bbox/vertex displacement. force_only_strength_nonzero must remain 0 on every forced step."
       ],
       "restrictions": [
         "Do not rely on scene.add_force_field for FEM+IPC external force unless that path has been separately verified in the current simulator.",
         "Do not use FEMEntity.set_vertex_constraints as the external-force path for distributed forces or impulses. It is allowed for explicit pinned or driven FEM/cloth boundary conditions under IPCCoupler when gs.options.FEMOptions(enable_vertex_constraints=True) is set and target-tracking evidence is recorded.",
+        "Do not set is_constrained=1 for a force-only vertex while leaving a nonzero SoftPositionConstraint strength_ratio. A run that does this is physically confounded even if it completes and its video is accepted.",
+        "Do not clear the entire is_constrained mask when stopping external force if real anchors or driven boundary constraints must remain active.",
+        "Do not enable FEM vertex constraints in a force-only scene. With no real call to FEMEntity.set_vertex_constraints, enable_vertex_constraints=True still installs SoftPositionConstraint and can tether forced vertices to their initialized aim positions.",
+        "Do not write external force before Genesis updates vertex-constraint targets if that update can overwrite the force mask or restore force-only strength. Reapply the force state after the original constraint update on every step.",
         "Do not write private or guessed UIPC force slots. Require a successful attribute check for vertices.external_force and vertices.is_constrained before claiming force support.",
         "Do not use hidden goal-following forces, target-tracking proxy forces, or forces that directly encode the desired outcome rather than a physical mechanism.",
-        "Do not mark FEM force actuation successful unless force_applications is nonzero, selected vertices are nonzero, and FEM state evidence shows corresponding COM, bbox, or vertex displacement."
+        "Do not mark FEM force actuation successful unless force_applications is nonzero, selected vertices are nonzero, force_only_strength_nonzero is 0, and FEM state evidence shows corresponding COM, bbox, or vertex displacement."
       ],
       "checks": [
         "Confirm FiniteElementExternalForce was registered before IPC world initialization.",
         "Confirm the target FEM geometry was found through IPC metadata and not by fragile object-order assumptions.",
         "Confirm external_force and is_constrained attributes exist on vertices.",
         "Confirm external_force shape was normalized correctly; the verified local shape is (N, 3, 1).",
-        "Confirm coupler._ipc_world.sync() or an IPC animator callback transfers updated attributes before IPC advance.",
+        "Inspect gs.options.FEMOptions(enable_vertex_constraints=...). If true, identify every actual FEMEntity.set_vertex_constraints use and verify vertices.strength_ratio and vertices.aim_position exist on the same IPC geometry.",
+        "For every forced step with vertex constraints enabled, reconstruct protected_constraint_mask and force_mask, verify force_only = force_mask & ~protected_constraint_mask, and reject the run if any force-only vertex has strength_ratio > 0.",
+        "Confirm the original IPCCoupler._update_fem_vertex_constraint_targets runs before the force writer, and confirm coupler._ipc_world.sync() transfers the final force, mask, and strength attributes before IPC advance.",
+        "After force clearing, confirm protected anchors remain masked and retain their intended target and strength while force-only entries are no longer masked.",
         "Compare a no-force baseline or pre-force frames against forced frames when possible; the smoke test moved the FEM COM by +0.0186076 m in x over 30 steps while the no-force baseline stayed at 0.",
-        "Inspect logs for force_event_count, applied_vertices, mask_nonzero, total_force, per_vertex_force, and FEM COM displacement."
+        "Inspect logs for force_event_count, applied_vertices, protected_constraint_count, force_only_count, force_only_strength_nonzero, mask_nonzero, total_force, per_vertex_force, and FEM COM displacement.",
+        "Critic must reject a claimed FEM external-force success when enable_vertex_constraints=True and the artifacts do not prove force-only strength is zero; visual plausibility or a completed run does not waive this check."
       ],
       "dispatch_hints": [
         "Send to body when the generated scene must install libuipc FEM force attributes during IPC build.",
         "Send to action when writing force schedules, force masks, impulses, persistent fields, or animator callbacks.",
-        "Send to critic when a run claims FEM external force was applied or when a soft body remains static despite scheduled force.",
+        "Send to critic when a run claims FEM external force was applied, when a soft body remains static despite scheduled force, or when force activation coincides with sudden stretching, snapping, collapse, or unexpected tethering.",
         "Send to opt when force magnitude, selected patch, impulse duration, ramp profile, or clearing schedule are tunable physical parameters.",
         "Send to planner for FEM+IPC tasks that explicitly mention wind, thrust, impulse, disturbance, direct force, or force-driven soft-body motion."
       ],
       "provenance": {
-        "source": "local_smoke_test",
+        "source": "local_smoke_test_and_historical_workspace_audit",
         "script": "code_agent/workspaces/suites/debug_cards/ipc_fem_external_force_smoke.py",
         "summary_path": "code_agent/workspaces/suites/debug_cards/ipc_fem_external_force_smoke_20260610_123425/summary.json",
         "verified_details": [
           "uipc.constitution.FiniteElementExternalForce is available in the local pyuipc package.",
           "FiniteElementExternalForce.apply_to creates vertices.external_force and vertices.is_constrained on a volumetric FEM SimplicialComplex.",
           "The observed vertices.external_force layout in the smoke test is (N, 3, 1).",
+          "Applying SoftPositionConstraint and FiniteElementExternalForce to the same local tetrahedral geometry showed that they share vertices.is_constrained; a force-masked vertex retained aim_position at its rest position and strength_ratio=100 until explicitly changed.",
+          "Genesis IPCCoupler initializes FEM vertex-constraint strength to 100 and may rewrite is_constrained, aim_position, and strength_ratio during _update_fem_vertex_constraint_targets, so force-only strength must be cleared after that update.",
+          "Historical clean passes used either enable_vertex_constraints=False (green dragon post field, purple bunny, blue bunny) or strength_ratio=0 on force-only vertices while preserving real anchors (localized green dragon, giraffe, planar snap-through cloth).",
+          "Historical double-helix and desert-shrub runs completed without this guard but mixed external force with a soft positional tether; completion and visual acceptance are therefore not proof that the force channel is uncontaminated.",
           "Writing +x force to all 1657 FEM vertices for 30 steps and calling coupler._ipc_world.sync() produced +0.0186076 m FEM COM displacement over a no-force baseline of 0.0 m."
         ]
       },
@@ -2484,7 +2594,7 @@
       "schema_version": 1,
       "id": "render_replay_consistency_guideline",
       "title": "Validate render-only replay against accepted physics cache",
-      "summary": "A replayed final video must cite a fresh, validated state cache from an accepted physical run and must not silently step or alter physics.",
+      "summary": "A replayed final video must cite a fresh accepted cache, apply every dynamic actor state through a verified path, preserve static actors without unnecessary setters, and never silently step or alter physics.",
       "scopes": [
         "planner",
         "rendering",
@@ -2499,7 +2609,8 @@
         "render_only",
         "final_render",
         "state_cache",
-        "artifact"
+        "artifact",
+        "actor_contract"
       ],
       "failure_tags": [
         "replay_without_cache",
@@ -2508,39 +2619,54 @@
         "stale_replay",
         "missing_replay_metadata",
         "articulated_motion_missing_from_replay",
-        "replay_actor_state_incomplete"
+        "replay_actor_state_incomplete",
+        "static_actor_replay_misclassified",
+        "replay_state_application_unsupported",
+        "articulated_replay_capability_mismatch"
       ],
       "guidance": [
         "Render-only replay should use a cache manifest produced by the latest accepted physical run.",
-        "Replay code must apply cached states and render frames without calling scene.step().",
-        "Final render_stats.json should record replay_only=true, physics_cache_manifest, cache frame count, source hashes, and source run result when available.",
+        "Replay code must apply cached dynamic states and render frames without calling scene.step().",
+        "Final render_stats.json should record replay_only=true, physics_cache_manifest, cache frame count, source hashes, source run result, actor-contract validation, and state-application validation.",
         "Cache creation must preserve source snapshots alongside source hashes so a later mismatch can be reviewed as a concrete old-to-current diff.",
         "A source-hash mismatch is mandatory Critic evidence, not automatic cache invalidation. Critic must read each diff and classify it as render_only, physics_affecting, or indeterminate from source semantics rather than filenames.",
         "A render_only mismatch may reuse the accepted cache only when the changes cannot alter geometry, collision, physical materials, solver settings, initialization, forces, controls, actions, or simulated state. Physics-affecting or indeterminate changes require a fresh physics run and state cache.",
-        "Compare the manifest actor contracts with the rebuilt scene before rendering. Final replay must fail when an articulated actor lacks qpos/DOF state, a deformable actor lacks vertex state, or a required setter cannot apply the cached state.",
-        "Compare task-critical cached motion with rendered motion. Joint-driven rollers, drums, paddles, robot links, gates, and similar articulated actors must visibly follow their cached generalized coordinates rather than remaining at their initial pose."
+        {
+          "Compare manifest actor contracts with the rebuilt scene by physical role": "fixed/static, dynamic rigid, articulated, and deformable or cloth actors have different required replay behavior."
+        },
+        "A replay_mode=none actor must be demonstrably fixed/static and match its rebuilt identity and initial state. It does not need or permit a per-frame pose setter merely because dynamic actors use setters.",
+        "A dynamic actor passes only when its declared setter or state path is actually invoked successfully on frame 0 and at least one frame whose cached state differs. Method existence or a no-op return is insufficient.",
+        "An articulated actor passes only when complete qpos or DOF state is present and changing cached generalized coordinates produces the corresponding link-transform or rendered-link motion. Root-only motion cannot substitute for joint replay.",
+        "A deformable or cloth actor passes only when complete shape-stable vertex state is applied and the rendered geometry follows cached deformation.",
+        "Legacy static-pose normalization is acceptable only with finite, shape-stable, frame-invariant pose evidence and a tight documented match to the rebuilt actor; otherwise classify the cache as requiring regeneration.",
+        "A setter or state-application failure is a replay implementation or actor-contract failure, not by itself evidence that the accepted physics was invalid. Route repair to cache/replay ownership and do not recommend changing geometry solely to make a setter available.",
+        "Compare task-critical cached motion with rendered motion. Joint-driven rollers, drums, paddles, robot links, gates, and similar actors must visibly follow their cached state rather than remaining at the initial pose."
       ],
       "restrictions": [
         "Do not accept a final replay video that lacks cache provenance in render_stats.json.",
         "Do not accept replay output after a physics-affecting source change without a new cache. Do not assume that every edit in scene.py or body.py affects physics; inspect the changed code.",
         "Do not classify a mismatch as render_only from filenames or hashes alone. Missing snapshots or insufficient logs must be classified indeterminate unless other concrete evidence proves the change is visual-only.",
         "Do not use stale videos or frame directories to mask replay failures.",
-        "Do not accept replay_valid=true from file existence alone; every required actor-state array must be present, finite, shape-consistent, and successfully applied."
+        "Do not accept replay_valid=true from file existence alone; every required actor-state array must be present, finite, shape-consistent, and successfully applied according to its replay mode.",
+        "Do not convert dynamic or articulated actors to replay_mode=none to bypass unsupported state application."
       ],
       "checks": [
         "Check replay_only and physics_cache_manifest fields in render_stats.json.",
         "Check frame count and video duration match the validated cache and requested fps.",
         "Check cache manifest freshness against execution_report and source hashes; for mismatches, inspect cached snapshots, current files, generated diffs, and relevant worker logs.",
         "Check Critic records cache_source_consistency.classification, mismatched_files, physics_rerun_required, rationale, and concrete evidence.",
-        "Check actor_contracts and per-frame required arrays, then inspect task-critical articulated and deformable motion in start/mid/end replay frames."
+        "Check replay_mode=none actors have fixed/static evidence, rebuilt-state consistency, and no per-frame setter calls.",
+        "Check dynamic actors apply frame 0 and a different cached frame, then compare resulting pose, link transforms, or vertices with the requested state.",
+        "Check articulated qpos/DOF changes produce corresponding link-transform and rendered-motion changes.",
+        "Inspect task-critical articulated and deformable motion in start, mid, and end replay frames rather than accepting only state-application logs."
       ],
       "dispatch_hints": [
-        "Send to rendering when replay mode is requested.",
-        "Send to Critic when judging final path-traced replay evidence."
+        "Send to rendering when replay mode is requested or state application fails.",
+        "Send to Critic when judging final path-traced replay evidence and separating replay defects from physics defects."
       ],
       "provenance": {
-        "source": "path_tracing_debug_card_workflow",
-        "motivation": "Make final render replay auditable and resistant to stale artifacts."
+        "source": "path_tracing_workflow",
+        "motivation": "Make final render replay auditable across static, rigid, articulated, and deformable actor contracts."
       },
       "source_path": "code_agent/context/simdebug/evidence_validation/render_replay_consistency_guideline.yaml"
     },
@@ -3112,8 +3238,142 @@
     {
       "schema_version": 1,
       "id": "final_path_tracing_siggraph_guideline",
-      "title": "Tune final GPU path tracing toward SIGGRAPH-demo visual quality",
-      "summary": "Final renders must use Genesis RayTracer on GPU with denoising, light studio backgrounds, controlled lighting, readable materials, iterative look-dev, and recorded path-tracing metadata.",
+      "title": "Complete a polished final GPU path-tracing pass",
+      "summary": "Final delivery requires an accepted GPU path-traced render whose runtime contract, look-dev quality, replay provenance, and sampled frames all pass their focused SimDebug checks.",
+      "scopes": [
+        "planner",
+        "rendering",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "path_tracing",
+        "raytracer",
+        "final_render",
+        "quality_gate",
+        "iterative_lookdev"
+      ],
+      "failure_tags": [
+        "opengl_style_render",
+        "final_path_tracing_missing",
+        "cropped_final_render",
+        "one_shot_final_render",
+        "missing_final_render_metadata"
+      ],
+      "guidance": [
+        "After physical behavior is accepted, produce a final_path_traced or replay_render deliverable; debug raster evidence is not the final render.",
+        "Do not accept a final render whose render_stats.json has path_tracing.enabled=false.",
+        "Use raytracer_runtime_contract_guideline for GPU, OptiX, integrator, denoiser, renderer-construction, and mesh-channel correctness.",
+        "Use path_traced_lookdev_guideline for background, lighting, soft shadows, material semantics, transparency, and iterative visual refinement.",
+        "Use physics_state_cache_replay_guideline and render_replay_consistency_guideline whenever final look-dev reuses accepted simulated motion.",
+        "Final path tracing is iterative. A technically successful first RayTracer output is a preview, not automatic visual acceptance; repair the responsible rendering, scene, or existing material parameters and rerun until final_render.status is passed.",
+        "Render-only look-dev should preserve accepted physics and geometry. Return to physics repair only for a severe, fundamental physical error that final rendering or replay repair cannot reasonably resolve.",
+        "Final render_stats.json must record path_tracing.enabled, render_profile, runtime validation status, look-dev validation status, camera, frame count, final_render status, and replay/cache provenance when replay is used."
+      ],
+      "restrictions": [
+        "Do not finish a case from debug raster evidence when final path tracing is required.",
+        "Do not treat successful renderer startup as proof that framing, lighting, materials, motion, or replay consistency are acceptable.",
+        "Do not weaken runtime or replay validation to obtain a visually plausible final video."
+      ],
+      "checks": [
+        "Check that raytracer_runtime_contract_guideline and path_traced_lookdev_guideline were both applied to the final pass.",
+        "Inspect start, mid, and end frames for cropping, missing actors, unreadable motion, and visual regressions.",
+        "Check render_stats.json records path_tracing.enabled=true and final_render.status=passed together with runtime and look-dev evidence.",
+        "For replay outputs, check replay_only=true and physics_cache_manifest and require render_replay_consistency_guideline to pass."
+      ],
+      "dispatch_hints": [
+        "Send to Planner whenever physics has passed and final rendering remains.",
+        "Send to rendering for final-pass coordination and repeated look-dev execution.",
+        "Send to Critic for the final aggregate acceptance decision."
+      ],
+      "provenance": {
+        "source": "path_tracing_workflow",
+        "motivation": "Keep final delivery mandatory while delegating technical runtime and visual look-dev details to focused cards."
+      },
+      "source_path": "code_agent/context/simdebug/rendering_quality/final_path_tracing_siggraph_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "path_traced_lookdev_guideline",
+      "title": "Refine path-traced lighting and materials for final look-dev",
+      "summary": "Final path-traced images should use deliberate light-studio composition, visible soft-shadow hierarchy, semantically varied materials, and renderer-native refraction.",
+      "scopes": [
+        "planner",
+        "scene",
+        "body",
+        "rendering",
+        "critic"
+      ],
+      "physics_modes": [
+        "any"
+      ],
+      "task_tags": [
+        "path_tracing",
+        "final_render",
+        "lookdev",
+        "lighting",
+        "soft_shadow",
+        "material",
+        "glass"
+      ],
+      "failure_tags": [
+        "visible_light_mesh",
+        "missing_light_visibility_check",
+        "light_frustum_intersection",
+        "overexposed_render",
+        "flat_lighting",
+        "diffuse_only_materials",
+        "alpha_fake_glass",
+        "low_contrast_palette_retry_loop",
+        "one_shot_final_render"
+      ],
+      "guidance": [
+        "Prefer light studio backdrops such as warm light gray, pale blue-gray, soft off-white, or other neutral high-key backgrounds, with non-pure-white matte floors when such support geometry already exists.",
+        "Do not inherit the debug raster pure-white background fallback as the final look. Use pure white only when the prompt or a required visual comparison calls for it.",
+        "Build a visible key, fill, and rim hierarchy with controlled exposure and soft contact shadows. Avoid uniform ambient lighting that removes tonal depth and the characteristic softness of path tracing.",
+        "Use large sphere, mesh, or emissive area lights for soft shadows and readable highlights, while keeping their renderable geometry outside the swept final camera frustum.",
+        "Treat RayTracer sphere lights as renderable geometry. Project each sphere radius or emissive-mesh world bbox through every final camera pose, or conservatively test it against the swept frustum; pixel inspection alone is insufficient because a white light can disappear against a white background.",
+        "Choose semantically varied materials instead of defaulting to diffuse surfaces. Use metal or satin response for metal, rough plastic or rubber for suitable rigid/soft objects, cloth-like roughness for textiles, and controlled highlights for tools and fixtures.",
+        "For transparent or semi-transparent objects, do not fake glass with only RGBA alpha or Smooth.opacity. Use renderer-native path-traced transmission or refraction such as gs.surfaces.Glass or an appropriate Glass/Water-derived surface.",
+        "For Genesis Glass, tune color or tint, roughness, and IOR according to object thickness and readability. A practical starting range is roughness 0.0-0.06 and IOR 1.2-1.5, followed by image-based adjustment.",
+        "Material changes cannot make a solid primitive geometrically hollow. Geometry semantics, thin-screen thickness, and shell topology belong to generated_asset_shape_fidelity_guideline and must be accepted before physics/cache acceptance.",
+        "Render-only look-dev may adjust renderer settings, camera, lights, exposure, and existing surface/material parameters only. It must not add, hide, delete, or replace geometry.",
+        "Tune roughness and material response for readability; avoid mirror-like choices that erase small or low-contrast actors in reflected environments.",
+        "Do not remain trapped in an all-white or near-white retry loop. After repeated low-contrast rejection, make a substantive palette, background value, roughness, exposure, or lighting-hierarchy change while preserving prompt-specified object colors.",
+        "Iterate on start, mid, and end frames until lighting, materials, framing, transparency, and motion readability are polished rather than accepting the first technically successful render.",
+        "Look-dev metadata must record background_style, floor_material, lights, light_visibility_checks, material notes, transparent_materials, alpha_rgba_used=false for refractive materials, camera, and changes made between attempts."
+      ],
+      "restrictions": [
+        "Do not accept visible light spheres, emissive meshes, or light-frustum intersections in final frames.",
+        "Do not use alpha-only transparency when the intended material requires refraction or transmission.",
+        "Do not alter geometry during render-only look-dev to disguise collision proxies, helper cages, solid glass volumes, or missing shell structure."
+      ],
+      "checks": [
+        "Inspect start, mid, and end frames for overexposure, visible lights, flat illumination, weak shadows, low contrast, and material readability.",
+        "Check light_visibility_checks includes world bounds, tested camera frames, frustum_intersects, and minimum clearance for every sphere, mesh, or emissive light; reject missing checks or any intersection.",
+        "Check important objects use prompt-appropriate diffuse, metallic, rough, satin, cloth, rubber, plastic, or refractive responses rather than one default material.",
+        "Check transparent objects use native refraction/transmission and remain readable through their full range of camera views.",
+        "Check render-only look-dev did not add, hide, delete, replace, or reshape accepted geometry.",
+        "Check repeated attempts made substantive visual changes and that the accepted render_stats.json records the final lighting and material decisions."
+      ],
+      "dispatch_hints": [
+        "Send to rendering for camera, background, exposure, lighting, and final material tuning.",
+        "Send to scene/body only for render-only corrections to existing visual material assignments during look-dev.",
+        "Send to Critic for final lighting, material, transparency, light-visibility, and iterative-quality acceptance."
+      ],
+      "provenance": {
+        "source": "path_tracing_lookdev_workflow",
+        "motivation": "Keep final visual-quality guidance focused and separate from renderer startup and data-contract failures."
+      },
+      "source_path": "code_agent/context/simdebug/rendering_quality/path_traced_lookdev_guideline.yaml"
+    },
+    {
+      "schema_version": 1,
+      "id": "raytracer_runtime_contract_guideline",
+      "title": "Validate the GPU RayTracer runtime and geometry upload contract",
+      "summary": "Final path tracing must construct the complete Genesis RayTracer configuration and validate every renderer-facing mesh channel before native upload.",
       "scopes": [
         "planner",
         "scene",
@@ -3129,84 +3389,62 @@
         "raytracer",
         "optix",
         "denoise",
-        "final_render",
-        "lighting",
-        "material"
+        "renderer_api",
+        "mesh_channels",
+        "uv"
       ],
       "failure_tags": [
-        "opengl_style_render",
-        "noisy_path_trace",
         "optix_stub",
         "denoise_failed",
-        "visible_light_mesh",
-        "missing_light_visibility_check",
-        "light_frustum_intersection",
-        "overexposed_render",
-        "cropped_final_render",
-        "flat_lighting",
-        "diffuse_only_materials",
-        "alpha_fake_glass",
-        "solid_glass_volume_for_thin_screen",
-        "low_contrast_palette_retry_loop",
-        "one_shot_final_render"
+        "raytracer_constructor_failed",
+        "raytracer_surface_field_conflict",
+        "invalid_raytracer_mesh_channels",
+        "invalid_raytracer_uv_channel",
+        "native_renderer_geometry_rejected"
       ],
       "guidance": [
         "Final renders must use GPU gs.renderers.RayTracer with WavePathIntegrator or an equivalent validated path-tracing integrator.",
-        "Do not accept a final render whose render_stats.json has path_tracing.enabled=false. That is still debug evidence, not the final deliverable.",
-        "Use camera_denoise=True for final outputs; treat OptiX denoiser failures as runtime issues to fix, not as a reason to silently disable denoising.",
-        "Use low spp only for previews. Final outputs should use 512 spp or higher when runtime allows.",
-        "Use tracing_depth in the 16-32 range; 24 is a validated practical default.",
-        "Use large sphere, mesh, or emissive area lights for soft shadows and highlights, but project-check their renderable geometry so it cannot intersect the final camera frustum.",
-        {
-          "Treat RayTracer sphere lights as renderable geometry": "place large soft lights outside the camera frustum, typically behind/above the camera or well off-frame, and rerender if any light ball appears in a final frame."
-        },
-        "Validate light visibility from parameters as well as pixels. Project each sphere radius or emissive-mesh world bbox through every final camera pose, or conservatively test it against the swept frustum; a white background does not waive this check because a white light ball may be visually camouflaged.",
-        "Avoid flat over-lit setups. Reduce uniform ambient light, build a visible key/fill/rim hierarchy, and preserve soft contact shadows and tonal layers.",
-        "Prefer light studio backdrops such as warm light gray, pale blue-gray, soft off-white, or other neutral high-key backgrounds, with non-pure-white matte floors when such support geometry already exists, soft shadows, controlled warm key light, cool fill, and small rim accents.",
-        "Do not inherit the debug raster pure-white background fallback as the final look. Use pure white in final renders only when the prompt explicitly asks for a white stage/product-style background or when it is required for visual comparison.",
-        "Choose semantically varied materials instead of defaulting to diffuse surfaces. Use metallic/satin materials for metal objects, rougher plastic/rubber/cloth materials for soft or textile objects, and controlled specular highlights for tools and fixtures.",
-        "For transparent or semi-transparent final-render objects, do not fake glass with only RGBA alpha or Smooth.opacity. Use path-traced transmission/refraction materials such as gs.surfaces.Glass or task-appropriate Glass/Water-derived surfaces with IOR, transmission/tint, and roughness metadata.",
-        "For Genesis Glass, prefer explicit renderer-native material settings such as gs.surfaces.Glass(color=(1.0, 1.0, 1.0), roughness=0.0-0.06, ior=1.2-1.5). Use lower tint and lower IOR for thick glass that otherwise looks smoky; use stronger IOR/tint only when the refractive object remains readable.",
-        "Do not assume a Glass material can turn a solid primitive into a hollow container. A single Glass sphere renders as a solid glass volume; hollow glass shells need actual thin-shell geometry with inner and outer surfaces, authored before the accepted physics/cache run.",
-        "Interpret transparent geometry semantically before physics acceptance. A prompt-requested screen, window pane, or transparent plate must be a bounded thin layer whose thickness is small relative to its span, not a glass primitive that fills the enclosing drum, room, vessel, or container volume.",
-        "Render-only replay must not add, hide, delete, or replace geometry, including collision proxies, support floors, helper cages, or visual shells. It may adjust renderer settings, camera, lights, exposure, and existing surface/material parameters only.",
-        "If dense collision-proxy geometry or helper cages would dominate the final image, route repair to scene/body before physics acceptance so the semantic visual geometry and the cache source are correct. Do not fix that by changing geometry during final render replay.",
-        "When using a constant RayTracer environment, prefer explicit emissive_texture=gs.textures.ColorTexture(...) on gs.surfaces.Emission rather than relying on shortcut fields that may collide with texture resolution.",
-        "Tune roughness and material type for readability. Avoid mirror-like settings that make small or gray actors disappear in reflected environments.",
-        "Final path tracing is an iterative look-dev stage. Planner should repair rendering/body/scene and rerun final_path_traced until start/mid/end frames are polished, not stop after one technically successful RayTracer run.",
-        "Do not remain trapped in an all-white or near-white look-dev loop. After repeated low-contrast rejection, make a substantive palette, background value, roughness, exposure, or lighting-hierarchy change while preserving prompt-specified object colors.",
-        "Final render_stats.json must record path_tracing.enabled, backend, integrator, spp, denoise, tracing depth, render_profile, background_style, floor_material, lights, camera, material notes, transparent_materials, alpha_rgba_used=false for refractive materials, and replay/cache source when used."
+        "Use camera_denoise=True for final outputs. Treat OptiX denoiser failures as runtime defects to repair, not permission to silently disable denoising.",
+        "Use low spp only for previews. Final outputs should use 512 spp or higher when runtime allows, with tracing_depth in the 16-32 range; 24 is a validated practical default.",
+        "Under WSL, place the real OptiX runtime directory before the WSL stub directory in LD_LIBRARY_PATH and record the selected runtime in execution evidence.",
+        "Validate the complete nested gs.renderers.RayTracer configuration that will be passed into scene construction. Successfully constructing an isolated surface, texture, or integrator does not prove that parent-model revalidation will succeed.",
+        "For renderer models that expose both convenience fields and resolved texture fields, provide exactly one source of truth. Do not pass a shortcut field together with the texture field produced from that shortcut.",
+        "For a constant RayTracer environment, construct gs.surfaces.Emission with only emissive_texture=gs.textures.ColorTexture(...). Leave the color and emissive shortcut fields unset; they must not coexist with emissive_texture during nested RayTracer validation.",
+        "Before initial upload and every deformable update, normalize vertices to a finite C-contiguous floating array of shape (N, 3), triangles to a C-contiguous integer array of shape (M, 3), and verify triangle indices are in range.",
+        "Normalize normals to an empty floating array of shape (0, 3) or a finite vertex-aligned array of shape (N, 3).",
+        "Normalize UVs to an empty C-contiguous floating array of shape (0, 2) or a finite vertex-aligned array of shape (N, 2). Convert missing UV data such as None to (0, 2); never pass a scalar, object array, or singleton UV channel to the native renderer.",
+        "Do not invent UV coordinates when no valid vertex-aligned map exists. An untextured mesh should use the explicit empty UV representation without changing its geometry.",
+        "Reject invalid renderer-facing channels in Python with the actor name, channel name, dtype, shape, and expected contract before entering native LuisaRender code.",
+        "Technical render metadata must record backend, integrator, spp, tracing depth, denoise, OptiX runtime, complete-constructor validation, and per-actor mesh-channel validation."
+      ],
+      "restrictions": [
+        "Do not validate only leaf configuration objects when the final nested RayTracer options have not been constructed.",
+        "Do not pass None, object arrays, malformed empty arrays, or mismatched vertex channels across the native renderer boundary.",
+        "Do not repair renderer upload failures by altering accepted physics geometry or fabricating unrelated topology."
       ],
       "checks": [
-        "Inspect start, mid, and end frames for cropping, visible lights, overexposure, missing actors, and material readability.",
-        "Check that LD_LIBRARY_PATH in final execution puts /opt/nvidia-optix-595/lib before /usr/lib/wsl/lib when running under WSL.",
-        "Check render_stats.json confirms RayTracer, WavePathIntegrator, camera_denoise=true, and the intended spp.",
-        "Check that the final background is a deliberate light studio choice, not an accidental default inherited from debug raster evidence.",
-        "Check for visible soft shadows and lighting hierarchy; reject flat uniformly lit final renders when the image lacks path-traced depth.",
-        "Require render_stats.json light_visibility_checks for sphere/mesh/emissive lights, including world bounds, tested camera frames, frustum_intersects, and minimum frame clearance. Reject missing checks or any intersection.",
-        "Check transparent objects for true refractive/transmissive material use rather than alpha-only raster-style transparency.",
-        "Check that render-only look-dev did not add, hide, delete, or replace geometry. If final geometry is semantically wrong, require scene/body repair and a new cache instead of accepting a render-only geometry workaround.",
-        "Check that hollow transparent objects have actual hollow/thin-shell geometry; reject solid primitive Glass volumes when the prompt calls for a hollow shell or container.",
-        "Check screen/window/plate primitive dimensions before accepting physics/cache; reject transparent geometry whose depth fills the enclosing mechanism instead of forming a thin layer.",
-        "When prompt-required objects are white, preserve that color but require contrasting window, wall, floor, support, or background roles so silhouettes and motion remain readable.",
-        "Check render-only look-dev outputs have replay_only=true and physics_cache_manifest when they are derived from an accepted state cache."
+        "Construct the exact RayTracer options used by the final scene and require that construction to succeed before the full render begins.",
+        "Check a constant Emission environment has exactly one emissive source and uses no conflicting shortcut fields.",
+        "Check every actor's vertex, triangle, normal, and UV shapes, dtypes, finite values, contiguity, and index ranges before upload.",
+        "Check untextured meshes use empty arrays with the correct second dimension rather than None or singleton channels.",
+        "Check render_stats.json confirms the intended GPU backend, integrator, denoiser, spp, tracing depth, OptiX runtime, and channel-validation result."
       ],
       "dispatch_hints": [
-        "Send to rendering for final look-dev and camera/lights.",
-        "Send to scene/body when material or backdrop choices must be encoded in generated source.",
-        "Send to Critic when evaluating final render quality and metadata."
+        "Send to scene/rendering when constructing RayTracer options, environment surfaces, cameras, or renderer settings.",
+        "Send to body/rendering when preparing rigid, articulated, FEM, deformable, or cloth geometry channels for RayTracer.",
+        "Send to Critic for renderer startup, denoiser, configuration-validation, or native geometry failures."
       ],
       "provenance": {
-        "source": "rigid_sphere_twisting_edge_slide_contact_path_tracing_debug",
-        "motivation": "Capture the successful OptiX/GPU path tracing and look-dev recipe."
+        "source": "path_tracing_runtime_audit",
+        "motivation": "Turn recurring nested configuration and mesh-channel failures into explicit renderer-boundary contracts."
       },
-      "source_path": "code_agent/context/simdebug/rendering_quality/final_path_tracing_siggraph_guideline.yaml"
+      "source_path": "code_agent/context/simdebug/rendering_quality/raytracer_runtime_contract_guideline.yaml"
     },
     {
       "schema_version": 1,
       "id": "physics_state_cache_replay_guideline",
       "title": "Save physics state caches for render-only replay",
-      "summary": "Physics runs should be able to save a manifest plus per-frame npz state files so final rendering can replay accepted motion without stepping physics again.",
+      "summary": "Physics runs must save validated per-frame NPZ state with actor contracts whose replay modes reflect physical semantics and a state-application path proven on the rebuilt final scene.",
       "scopes": [
         "planner",
         "action",
@@ -3221,7 +3459,8 @@
         "replay",
         "npz",
         "render_only",
-        "final_render"
+        "final_render",
+        "actor_contract"
       ],
       "failure_tags": [
         "missing_state_cache",
@@ -3230,44 +3469,57 @@
         "replay_failed",
         "cache_source_mismatch",
         "missing_articulated_qpos",
-        "incomplete_actor_state_contract"
+        "incomplete_actor_state_contract",
+        "static_actor_replay_misclassified",
+        "replay_state_application_unsupported",
+        "articulated_replay_capability_mismatch"
       ],
       "guidance": [
         "When requested, every physics run must write artifacts/state_cache/manifest.json and artifacts/state_cache/states/frame_*.npz.",
-        "The npz files are a hard requirement. Do not accept a cache manifest whose frame entries cannot be opened as NumPy npz files.",
-        "Rigid caches should save per-frame transforms or positions/quaternions for dynamic rigid actors.",
+        "The NPZ files are a hard requirement. Do not accept a cache manifest whose frame entries cannot be opened as NumPy npz files.",
+        "Every manifest must declare an actor contract containing actor identity, physical role, fixed/static status, replay mode, required per-frame arrays, expected shapes, and DOF count when applicable.",
+        "Choose replay_mode from the actor's physical semantics and a state-application path proven against the rebuilt final scene. Getter availability, setter attribute existence, or successful capture alone does not prove replayability.",
+        "Explicitly fixed or static actors should normally use replay_mode=none. Record their identity, geometry reference, and rebuilt initial state, but do not require per-frame pose arrays or state setters for actors that cannot move.",
+        "Dynamic non-articulated rigid actors should save and replay per-frame transforms or positions and quaternions through a verified pose application path.",
         {
-          "Articulated rigid bodies must save a complete replayable generalized state on every frame": "prefer qpos and also record DOF positions when the API exposes them. Root pose alone is insufficient because it cannot reproduce joint/link motion."
+          "Articulated rigid bodies must save a complete replayable generalized state on every frame": "prefer qpos and also record DOF positions when the API exposes them. Root pose alone is insufficient because it cannot reproduce joint or link motion."
         },
-        "Every manifest must declare an actor contract with each actor's replay mode, required per-frame NPZ arrays, expected shapes, DOF count, and actor identity. Validation must reject any frame that omits or changes a required channel.",
-        "FEM, deformable, and cloth caches should save visible or state vertices, faces references, bboxes, and centers of mass when available.",
+        "An articulated replay mode is valid only when the rebuilt final scene can apply the complete cached generalized state. Verify an actual application call and resulting link transforms; do not infer support merely because set_qpos or set_dofs_position is present.",
+        "If an actor implementation does not support post-build generalized-state restoration, route support to a sanctioned replay implementation. An explicitly declared equivalent replay representation is allowed only when its identity, geometry, topology, names, link mapping, and DOF ordering were established before cache acceptance; do not invent replacement geometry during final look-dev.",
+        "FEM, deformable, and cloth actors should save complete visible or state vertices with stable shape, faces references, bboxes, and centers of mass when available, then replay them through a verified vertex-state path.",
         "Static geometry, materials, actor names, source hashes, source snapshots, sim_dt, substeps, backend, and capture steps should be recorded in the manifest.",
+        "A legacy cache that labels an actually static actor as pose may be normalized to replay_mode=none only when every cached pose is finite, shape-stable, invariant across all frames, and matches the rebuilt actor within a tight documented tolerance. Otherwise require a fresh cache.",
         "When current source hashes differ, produce a per-file old-to-current diff for Critic. Critic decides whether the edit is render_only, physics_affecting, or indeterminate by reading the changed code.",
         "Render-only replay must read a validated manifest and must not call scene.step()."
       ],
       "restrictions": [
-        "Do not run final replay from a cache that lacks readable frame npz files.",
+        "Do not run final replay from a cache that lacks readable frame NPZ files.",
         "Do not treat event_log positions alone as sufficient for final replay when full state cache was requested.",
         "Do not reuse a cache after a physics-affecting source mismatch or an indeterminate mismatch. A Critic-confirmed render_only mismatch may reuse it because the simulated state is unchanged.",
         "Do not weaken NPZ, actor-contract, finite-value, shape, or state-application validation based on a render_only source classification; those remain hard requirements.",
-        "Do not mark an articulated cache replayable when it contains only root positions/quaternions but no qpos or DOF-position channel."
+        "Do not mark an articulated cache replayable when it contains only root positions/quaternions or when complete generalized state cannot be applied to the rebuilt scene.",
+        "Do not silently skip, freeze, or root-pose-only an articulated actor whose links moved in the accepted physics run.",
+        "Do not call per-frame pose setters for replay_mode=none actors solely to satisfy a uniform replay loop."
       ],
       "checks": [
-        "Check manifest.json exists and lists every frame step and relative npz path.",
-        "Check every referenced npz file exists and np.load can open it before replay begins.",
-        "Check every actor contract against every NPZ frame; articulated qpos/DOF arrays and deformable state-position arrays must be present, finite, and shape-stable.",
-        "During replay, require each contracted actor to exist in the rebuilt scene and require the matching set_qpos, set_dofs_position, set_position, or pose setter to succeed before rendering the frame.",
-        "Check render_stats.json records replay_only, physics_cache_manifest, and physics run/source identifiers when replay is used.",
+        "Check manifest.json exists and lists every frame step and relative NPZ path.",
+        "Check every referenced NPZ file exists and np.load can open it before replay begins.",
+        "Check every actor contract against every NPZ frame; required arrays must be present, finite, and shape-stable.",
+        "For replay_mode=none, require static/fixed semantics and rebuilt identity/state consistency, and require that replay makes no per-frame state-setter call.",
+        "For every dynamic replay mode, require the contracted actor to exist and apply frame 0 plus at least one different cached frame through the declared state path before full rendering.",
+        "For articulated actors, verify changing qpos or DOF state produces corresponding link-transform changes rather than only a successful method return.",
+        "Check any legacy static-pose normalization records invariance evidence, rebuilt-state error, tolerance, and the resulting replay_mode=none decision.",
+        "Check render_stats.json records replay_only, physics_cache_manifest, actor-contract validation, state-application validation, and physics run/source identifiers when replay is used.",
         "Check source mismatch classification is content-based and that only render_only sets physics_rerun_required=false."
       ],
       "dispatch_hints": [
-        "Send to action when physics stepping should save state.",
-        "Send to rendering when final rendering should replay from cache.",
-        "Send to Critic when judging cache freshness and replay validity."
+        "Send to action when physics stepping should save state and author actor contracts.",
+        "Send to rendering when final rendering should rebuild actors and apply cached state.",
+        "Send to Critic when judging cache freshness, replay-mode classification, and state-application validity."
       ],
       "provenance": {
-        "source": "path_tracing_debug_card_workflow",
-        "motivation": "Avoid rerunning accepted physics while tuning final path-traced rendering."
+        "source": "path_tracing_workflow",
+        "motivation": "Avoid rerunning accepted physics while requiring each static, rigid, articulated, and deformable actor to have a truthful replay contract."
       },
       "source_path": "code_agent/context/simdebug/workflow_orchestration/physics_state_cache_replay_guideline.yaml"
     },
@@ -3300,11 +3552,13 @@
       "guidance": [
         "Use simdebug_cards when the current action has clear task- or evidence-specific needs; leave it null only when all role/physics-compatible candidates are useful.",
         "When physics is still failing, dispatch ordinary visual evidence and camera cards for debug renders; do not default to final path tracing.",
-        "After Critic accepts physics, dispatch two_stage_rendering_workflow_guideline, final_path_tracing_siggraph_guideline, physics_state_cache_replay_guideline, and render_replay_consistency_guideline as relevant to final rendering.",
+        "After Critic accepts physics, dispatch two_stage_rendering_workflow_guideline and final_path_tracing_siggraph_guideline for final-pass coordination, raytracer_runtime_contract_guideline for renderer correctness, path_traced_lookdev_guideline for visual refinement, and the state-cache/replay cards when accepted motion is reused.",
         "After Critic accepts physics, do not finish the case from debug raster evidence. Request or execute the mandatory final_path_traced pass, then keep dispatching final render repair cards until final_render.status is passed.",
-        "When dispatching final render work, treat final_path_tracing_siggraph_guideline as the owner of background, floor, lighting, and material look-dev. Do not let debug evidence background fallbacks override the final light studio style.",
+        "During final path-tracing refinement, prefer render-only repairs and reuse the accepted cache; revisit physics only when Critic identifies a severe, fundamental physical error rather than a renderer, look-dev, replay, or metadata defect.",
+        "When dispatching final render work, treat path_traced_lookdev_guideline as the owner of background, floor, lighting, material, transparency, and light-visibility refinement. Do not let debug evidence background fallbacks override the final light studio style.",
         "Dispatch camera_framing_subject_fill_guideline whenever final rendering uses a following camera or per-frame camera updates; require whole-body COM targeting and temporal-continuity evidence, not only subject fill.",
-        "Dispatch final_path_tracing_siggraph_guideline to rendering and Critic whenever sphere, mesh, or emissive lights are present; final acceptance requires parameter-based light-frustum checks even on white backgrounds.",
+        "Dispatch raytracer_runtime_contract_guideline whenever RayTracer configuration, OptiX, denoising, environment surfaces, native upload, or mesh channels may fail; do not route these technical defects as aesthetic look-dev feedback.",
+        "Dispatch path_traced_lookdev_guideline to rendering and Critic whenever sphere, mesh, or emissive lights, transparent materials, or final material tuning are present; final acceptance requires parameter-based light-frustum checks even on white backgrounds.",
         "If a requested screen, window, pane, plate, shell, tube, or transparent container has semantically wrong thickness or filled geometry, dispatch generated_asset_shape_fidelity_guideline and xml_asset_request_contract_guideline to Planner/body before physics acceptance. Do not defer geometry repair to render-only replay.",
         "After repeated low-contrast final-render rejection, dispatch visual_style_readability_guideline and require a substantive palette, background, material, or lighting change while preserving prompt-specified colors.",
         "Before placing a card id under simdebug_cards.<role>, check the candidate card's declared scopes and only assign it to that role when scopes includes that role or all.",
@@ -3318,7 +3572,7 @@
       "checks": [
         "Before spawn_workers, check whether each role receives cards matching its actual ownership and each selected card's declared scope.",
         "Before final render dispatch, check whether a state cache is required and whether render-only replay should be requested instead of rerunning physics.",
-        "Before final render dispatch, check that final_path_tracing_siggraph_guideline is present when background, floor, lighting, or material look-dev is being changed.",
+        "Before final render dispatch, check that final_path_tracing_siggraph_guideline, raytracer_runtime_contract_guideline, and path_traced_lookdev_guideline are present for aggregate acceptance, runtime correctness, and visual refinement respectively.",
         "Before finish pass, check final_render.status and render_stats.path_tracing.enabled; a physics-only debug raster pass is insufficient.",
         "Before request_repair, check whether the selected cards reflect the latest failure evidence.",
         "Before request_repair, check that every simdebug_cards.<role> entry is scoped to that role; Python will filter incompatible cards, but Planner should avoid sending them.",
@@ -3366,14 +3620,15 @@
         "During physics repair, prefer ordinary rasterized or low-cost evidence renders whose purpose is behavioral diagnosis, not final visual quality.",
         "After Critic accepts physical behavior, enter a separate final render pass that must use GPU path tracing, studio lighting, material look-dev, and replay from cache when available.",
         "A debug raster Critic pass means the physics is accepted; it does not mean the case can finish when rendering is requested.",
-        "The final path-traced render stage is iterative look-dev. If the first RayTracer output is flat, over-lit, noisy, materially bland, or poorly framed, repair rendering/body/scene and rerun final_path_traced until Critic accepts the final image.",
+        "The final path-traced render stage is iterative look-dev. If the first RayTracer output is flat, over-lit, noisy, materially bland, or poorly framed, repair rendering, scene look-dev, or existing visual material assignments and rerun final_path_traced until Critic accepts the final image.",
         "Planner should distinguish debug_render, final_render, and replay_render in its worker dispatch and execution mode.",
-        "Final rendering must preserve physical semantics. Do not move bodies, hide collisions, or change solver behavior merely to improve composition."
+        "Final rendering must preserve physical semantics. Do not move bodies, hide collisions, or change solver behavior merely to improve composition.",
+        "Once Critic accepts physics, prefer preserving that run and its cache throughout final look-dev. Return to physics repair only when final evidence reveals a severe, fundamental physical error that cannot reasonably be addressed by rendering or replay repair."
       ],
       "checks": [
         "Check whether the latest task state is still in physics repair or has passed physical validation before requesting final path tracing.",
         "Check that finish pass is blocked until an execution with render_profile=final_path_traced has path_tracing.enabled=true and the final Critic pass accepts visual quality.",
-        "Check that final render changes are limited to renderer, camera, lighting, materials, background, and replay mechanics unless Planner explicitly opens a physics repair."
+        "Check that final-stage repair normally remains render-only; any return to physics should cite concrete evidence of a severe, fundamental physical error."
       ],
       "dispatch_hints": [
         "Send to Planner when deciding which render mode to request.",
@@ -3381,7 +3636,7 @@
         "Send to Critic when judging whether final render changes invalidated physical evidence."
       ],
       "provenance": {
-        "source": "path_tracing_debug_card_workflow",
+        "source": "path_tracing_workflow",
         "motivation": "Separate fast physics debugging from SIGGRAPH-quality final rendering."
       },
       "source_path": "code_agent/context/simdebug/workflow_orchestration/two_stage_rendering_workflow_guideline.yaml"

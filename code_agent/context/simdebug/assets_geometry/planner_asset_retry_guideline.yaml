@@ -2,7 +2,7 @@
   "schema_version": 1,
   "id": "planner_asset_retry_guideline",
   "title": "Planner asset retries should rewrite the owning asset request, not patch around bad assets",
-  "summary": "Planner should distinguish intrinsic generated-asset defects from metadata-only issues and route retries through the correct mesh/XML asset action with a complete revised planner_output.",
+  "summary": "Planner should distinguish intrinsic generated-asset defects, excessive but valid mesh density, and metadata-only issues, then route each through regeneration, remeshing, or metadata update respectively.",
   "scopes": ["planner", "critic", "body", "action", "rendering"],
   "physics_modes": ["any"],
   "task_tags": [
@@ -14,7 +14,8 @@
     "mjcf",
     "asset_manifest",
     "metadata",
-    "planner_output"
+    "planner_output",
+    "remesh_mesh_assets"
   ],
   "failure_tags": [
     "mesh_prompt_too_long",
@@ -24,13 +25,16 @@
     "wrong_generated_topology",
     "wrong_bbox_metadata",
     "underspecified_xml",
-    "asset_intrinsic_defect"
+    "asset_intrinsic_defect",
+    "excessive_mesh_density"
   ],
   "guidance": [
     "Meshy mesh generation accepts at most 800 characters in the final mesh-agent prompt; keep each generated_mesh request concise enough for the assembled prompt.",
     "When mesh feedback requires a different prompt, rewrite the affected asset request into a concise integrated description instead of appending repair text.",
     "Put the revised complete planner_output directly on the start_mesh_assets action that retries generation; action rationale, notes, and repair_brief are not sent to the mesh agent.",
-    "Mesh asset generation owns mesh validity. If manifold validation, texture transfer, Genesis FEM import validation, or generated topology fails, regenerate through the mesh asset action.",
+    "Mesh asset generation owns source mesh validity. If source manifold validation, texture transfer, morphology, or generated topology fails, regenerate through the mesh asset action. If a reasonably sized remesh still fails Genesis import, regeneration or a different asset representation is appropriate.",
+    "If a ready Meshy-generated asset is semantically and topologically correct but too dense for the planned simulation, use remesh_mesh_assets with explicit asset_names and exactly one Planner-selected target_face_count or target_edge_length. The same action may rescue an import-failed entry only when its repaired source already passed manifold/TetGen preflight.",
+    "A remesh failure returns directly to Planner and leaves the current manifest paths unchanged; inspect its failure stage and select a different reasonable target or retain the original mesh. Do not expect the tool to guess a replacement target.",
     "Do not ask body/scene/action/rendering workers to rewrite, procedurally repair, reshape, retopologize, or approximate mesh-intrinsic defects.",
     "If a ready generated mesh has acceptable geometry but wrong runtime scale/bbox metadata, use update_mesh_asset_metadata with a complete revised planner_output rather than retrying mesh generation.",
     "For XML/MJCF asset feedback, rewrite the affected XML asset request in a revised complete planner_output and put it directly on start_xml_assets; do not rely on rationale, notes, or repair_brief to reach the XML asset worker."

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "id": "planner_mesh_remesh_tool_guideline",
+  "title": "Use the Planner remesh tool only for valid generated meshes whose density is too expensive",
+  "summary": "Meshy-generated meshes receive a configurable automatic 5000-face remesh attempt, and Planner may later choose an explicit isotropic remesh target without risking the current ready asset.",
+  "scopes": ["planner", "critic", "body"],
+  "physics_modes": ["any"],
+  "task_tags": [
+    "generated_mesh",
+    "cloth_mesh",
+    "remesh_mesh_assets",
+    "mesh_density",
+    "face_count",
+    "simulation_cost",
+    "texture_transfer",
+    "asset_manifest"
+  ],
+  "failure_tags": [
+    "excessive_mesh_density",
+    "simulation_timeout",
+    "slow_fem_import",
+    "remesh_failed",
+    "target_too_aggressive",
+    "cloth_face_budget"
+  ],
+  "guidance": [
+    "After every manifold-valid Meshy-generated mesh is repaired and textured, and before the potentially expensive original Genesis import, the pipeline checks CONFIGS.mesh_repair.auto_remesh_enabled and normally attempts a local isotropic remesh to CONFIGS.mesh_repair.auto_remesh_target_face_count, which defaults to 5000.",
+    "If the current runtime mesh is already at or below the automatic target, status is skipped_not_needed and the original asset remains in use; PyMeshLab is not invoked and no remesh output is created. Procedural open cloth sheets are outside this closed-manifold tool and are not forced through it.",
+    "If automatic remesh passes target tolerance, manifold/winding/TetGen checks, texture transfer, and rigid, volumetric FEM, and cloth Genesis imports, status is applied and the manifest paths switch to the remesh output.",
+    "If automatic remesh fails or raises, status is failed_fallback_original; generation still succeeds with the previously validated original runtime, visual, and texture paths.",
+    "Choose remesh_mesh_assets only after inspection shows that semantic morphology, connected components, collision affordances, and source validity are already correct but face count is too expensive.",
+    "remesh_mesh_assets accepts ready entries and may rescue an entry whose original Genesis import failed due to density only when its repaired source already passed manifold/winding/TetGen preflight; a successful remesh returns that entry to ready.",
+    "For remesh_mesh_assets, provide a non-empty asset_names list and exactly one of target_face_count or target_edge_length. target_face_tolerance may be null to use the configured 0.50 tolerance.",
+    "Planner owns target selection. Use the object's scale, feature thickness, contact detail, deformation needs, and current face count to choose a reasonable target; the tool does not silently relax or replace a failed target.",
+    "On success, the action atomically switches runtime_path, visual_path, and texture_path for that asset and records original base geometry, original Meshy textured source, base color, alignment translation, report path, and achieved counts under entry.remesh.",
+    "On failure, the action returns ok=false with failure_stage/error/report_path and leaves that asset's current manifest entry unchanged. Choose another target or keep the current mesh.",
+    "For a multi-asset action, successful assets are committed independently and failed assets retain their prior entries; the overall action reports mesh_asset_remesh_partial until every requested asset succeeds.",
+    "A target at or above the original face count is an invalid downsampling request. A target that destroys manifoldness, winding, TetGen readiness, texture mapping, or any required Genesis import is a validation failure, not permission to repair or substitute geometry.",
+    "Meshy-generated closed FEM.Cloth shells may use this tool, but the remeshed result must also stay within CONFIGS.deformable.cloth_max_faces. Procedural open cloth assets should instead be regenerated with an appropriate cloth_target_edge_length."
+  ],
+  "restrictions": [
+    "Do not use remesh_mesh_assets for wrong silhouettes, missing parts, incorrect articulation, invalid source topology, or prompt mismatch; revise and regenerate the owning asset request.",
+    "Do not instantiate entry.remesh.base_visual_path as a second body. The manifest runtime_path and visual_path remain the single authoritative geometry pair.",
+    "Do not overwrite or delete original mesh/texture files, and do not chain remeshes from prior reduced output; each new Planner target must use the recorded original source provenance.",
+    "Do not treat a remesh failure as making an otherwise ready source asset unusable."
+  ],
+  "checks": [
+    "Inspect source/output face counts, target_check, manifold_validation, texture_validation, and genesis_fem_import_validation in remesh_report.json.",
+    "For textured assets, confirm the remesh report preserves a non-uniform base-color texture and a valid many-to-one seam-aware visual-to-physical vertex mapping.",
+    "Before simulation, confirm asset_manifest runtime_path, visual_path, texture_path, scale, bbox, and remesh.status are mutually consistent."
+  ],
+  "dispatch_hints": [
+    "Send to Planner when a ready generated mesh may be causing import, tetrahedralization, IPC, or simulation cost due to face count.",
+    "Send to Critic when recommending remesh_mesh_assets rather than regeneration.",
+    "Send to Body when consuming a manifest entry whose geometry paths were switched by remeshing."
+  ],
+  "provenance": {
+    "source": "local_isotropic_remesh_pipeline_integration",
+    "implementation": [
+      "code_agent/assets/mesh/remesh.py",
+      "code_agent/assets/mesh/remesh_integration.py",
+      "code_agent/planner/action_handlers/asset_actions.py"
+    ]
+  }
+}

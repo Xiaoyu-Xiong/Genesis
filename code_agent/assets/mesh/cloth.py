@@ -17,6 +17,7 @@ CLOTH_MESH_ASSET_TYPES = {
     "cloth_mesh",
     "cloth_mesh_square",
     "cloth_mesh_rectangle",
+    "cloth_mesh_disk",
     "cloth_mesh_cylinder",
     "cloth_mesh_sphere",
 }
@@ -111,8 +112,9 @@ def generate_cloth_mesh_asset(
             "failure_class": "cloth_mesh.unsupported_shape",
             "recommended_owner": "planner",
             "repair_summary": (
-                "Rewrite this procedural FEM.Cloth request to square, rectangle/ribbon/strip, cylinder/tube/sleeve, "
-                "or sphere/balloon; use generated_mesh only for an explicitly closed manifold cloth shell."
+                "Rewrite this procedural FEM.Cloth request to square, rectangle/ribbon/strip, disk/circle, "
+                "cylinder/tube/sleeve, or sphere/balloon; use generated_mesh only for an explicitly closed "
+                "manifold cloth shell."
             ),
         }
     except Exception as exc:  # noqa: BLE001 - record asset-level failure.
@@ -151,11 +153,12 @@ def _cloth_shape_from_request(request: dict[str, Any]) -> str:
     if asset_type.startswith("cloth_mesh_"):
         return asset_type.removeprefix("cloth_mesh_")
     text = " ".join(
-        str(request.get(key) or "").lower()
-        for key in ("name", "purpose", "simulation_role", "texture_needs")
+        str(request.get(key) or "").lower() for key in ("name", "purpose", "simulation_role", "texture_needs")
     )
     if any(token in text for token in ("rectangular", "rectangle", "ribbon", "strip")):
         return "rectangle"
+    if any(token in text for token in ("circular", "circle", "disk", "disc")):
+        return "disk"
     if any(token in text for token in ("cylindrical", "cylinder", "tube", "sleeve")):
         return "cylinder"
     if any(token in text for token in ("spherical", "sphere", "balloon", "shell ball")):
@@ -167,8 +170,7 @@ def _cloth_shape_from_request(request: dict[str, Any]) -> str:
 
 def _unsupported_complex_cloth_shape_reason(request: dict[str, Any]) -> str | None:
     text = " ".join(
-        str(request.get(key) or "").lower()
-        for key in ("name", "purpose", "simulation_role", "texture_needs")
+        str(request.get(key) or "").lower() for key in ("name", "purpose", "simulation_role", "texture_needs")
     )
     complex_shape_tokens = (
         "silhouette",
@@ -205,6 +207,10 @@ def _unsupported_complex_cloth_shape_reason(request: dict[str, Any]) -> str | No
         "rectangle",
         "ribbon",
         "strip",
+        "circular",
+        "circle",
+        "disk",
+        "disc",
         "cylindrical",
         "cylinder",
         "tube",
@@ -219,7 +225,7 @@ def _unsupported_complex_cloth_shape_reason(request: dict[str, Any]) -> str | No
 
     return (
         "Unsupported procedural cloth_mesh shape. The local procedural FEM.Cloth mesh generator only supports "
-        "square, rectangle/ribbon/strip, cylinder/tube, and sphere/balloon surface meshes. It cannot generate "
+        "square, rectangle/ribbon/strip, disk/circle, cylinder/tube, and sphere/balloon surface meshes. It cannot generate "
         "arbitrary 2D silhouettes, icons, logos, animal-shaped cutouts, or other complex cloth outlines."
     )
 
@@ -238,6 +244,9 @@ def _build_cloth_mesh(
         width = _positive_at(bbox, 0, 1.0)
         height = _positive_at(bbox, 1, 0.5)
         return _square_or_rectangle(width=width, height=height, target_edge_length=target_edge_length)
+    if shape == "disk":
+        diameter = min(_positive_at(bbox, 0, 1.0), _positive_at(bbox, 1, 1.0))
+        return _disk(radius=0.5 * diameter, target_edge_length=target_edge_length)
     if shape == "cylinder":
         diameter = min(_positive_at(bbox, 0, 0.5), _positive_at(bbox, 1, 0.5))
         height = _positive_at(bbox, 2, 0.8)
@@ -296,6 +305,51 @@ def _cylindrical_shell(
             faces.append((a, b, d))
             faces.append((a, d, c))
     return np.asarray(vertices, dtype=np.float64), np.asarray(faces, dtype=np.int64)
+
+
+def _disk(*, radius: float, target_edge_length: float) -> tuple[np.ndarray, np.ndarray]:
+    # Eight vertices per radial band keep triangles near-uniform and put boundary
+    # vertices on both coordinate axes for an exact requested diameter.
+    ring_count = max(1, int(math.ceil(radius / target_edge_length)))
+    ring_count = min(ring_count, max(1, int(math.sqrt(CONFIGS.deformable.cloth_max_faces / 8))))
+
+    vertices = [(0.0, 0.0, 0.0)]
+    rings: list[list[int]] = []
+    for ring_index in range(1, ring_count + 1):
+        ring_radius = radius * ring_index / ring_count
+        vertex_count = 8 * ring_index
+        ring = []
+        for vertex_index in range(vertex_count):
+            theta = 2.0 * math.pi * vertex_index / vertex_count
+            ring.append(len(vertices))
+            vertices.append((ring_radius * math.cos(theta), ring_radius * math.sin(theta), 0.0))
+        rings.append(ring)
+
+    faces = [(0, rings[0][i], rings[0][(i + 1) % len(rings[0])]) for i in range(len(rings[0]))]
+    for inner, outer in zip(rings, rings[1:]):
+        faces.extend(_stitch_concentric_rings(inner, outer))
+    return np.asarray(vertices, dtype=np.float64), np.asarray(faces, dtype=np.int64)
+
+
+def _stitch_concentric_rings(inner: list[int], outer: list[int]) -> list[tuple[int, int, int]]:
+    faces: list[tuple[int, int, int]] = []
+    i = j = 0
+    while i < len(inner) or j < len(outer):
+        a, b = inner[i % len(inner)], outer[j % len(outer)]
+        inner_next = (i + 1) * len(outer)
+        outer_next = (j + 1) * len(inner)
+        if inner_next < outer_next:
+            i += 1
+            faces.append((a, b, inner[i % len(inner)]))
+        elif outer_next < inner_next:
+            j += 1
+            faces.append((a, b, outer[j % len(outer)]))
+        else:
+            i += 1
+            j += 1
+            faces.append((a, b, outer[j % len(outer)]))
+            faces.append((a, outer[j % len(outer)], inner[i % len(inner)]))
+    return faces
 
 
 def _spherical_shell(*, radius: float, target_edge_length: float) -> tuple[np.ndarray, np.ndarray]:
@@ -465,7 +519,4 @@ def _slugify(text: str) -> str:
 
 
 def _request_cloth_semantics_text(request: dict[str, Any]) -> str:
-    return " ".join(
-        str(request.get(key) or "").strip().lower()
-        for key in ("name", "purpose", "simulation_role")
-    )
+    return " ".join(str(request.get(key) or "").strip().lower() for key in ("name", "purpose", "simulation_role"))

@@ -422,9 +422,15 @@ def _execution_digest(path: Path) -> str:
         return _read_text(path, max_chars=CONFIGS.critic.prompt_inline_text_chars)
     keys = (
         "command",
+        "status",
+        "exit_code",
         "returncode",
         "timed_out",
         "duration_sec",
+        "failure_class",
+        "failure_reason",
+        "rework_required",
+        "progress_watchdog",
         "stdout_path",
         "stderr_path",
         "artifacts_dir",

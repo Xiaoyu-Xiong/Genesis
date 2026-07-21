@@ -40,9 +40,11 @@ class HarnessConfigs:
     max_parallel_cases: int | None = None
     max_parallel_workers: int | None = None
     max_repair_rounds: int = 20
-    execution_timeout_sec: float = 7200.0
+    execution_timeout_sec: float = 3600.0
     command_timeout_sec: float = 1000.0
     default_backend: str = "gpu"
+    frame_progress_watchdog_enabled: bool = True
+    frame_progress_checkpoints: tuple[tuple[float, float], ...] = ((0.25, 0.10), (0.50, 0.40))
 
 
 @dataclass(slots=True, frozen=True)
@@ -82,7 +84,7 @@ class RuntimeConfigs:
     """Genesis runtime defaults for generated simulations."""
 
     sim_dt: float = 0.01
-    sim_substeps: int = 10
+    sim_substeps: int = 5
     render_every_n_steps: int = 4
     render_fps: int = 25
     render_res: tuple[int, int] = (640, 480)
@@ -91,6 +93,45 @@ class RuntimeConfigs:
     ipc_render_every_n_steps: int = 4
     ipc_render_fps: int = 25
     ipc_render_res: tuple[int, int] = (640, 480)
+
+
+@dataclass(slots=True, frozen=True)
+class RigidConfigs:
+    """RigidOptions values forced on generated scenes."""
+
+    enable_collision: bool = True
+    enable_joint_limit: bool = True
+    enable_self_collision: bool = True
+    enable_neutral_collision: bool = False
+    enable_adjacent_collision: bool = False
+    disable_constraint: bool = False
+    max_collision_pairs: int = 4096
+    multiplier_collision_broad_phase: int = 8
+    integrator: Literal["Euler", "implicitfast", "approximate_implicitfast"] = "approximate_implicitfast"
+    IK_max_targets: int = 6
+    batch_links_info: bool = False
+    batch_joints_info: bool = False
+    batch_dofs_info: bool = False
+    constraint_solver: Literal["CG", "Newton"] = "CG"
+    iterations: int = 50
+    tolerance: float = 2e-6
+    ls_iterations: int = 20
+    ls_tolerance: float = 1e-2
+    noslip_iterations: int = 0
+    noslip_tolerance: float = 1e-6
+    sparse_solve: bool = True
+    constraint_timeconst: float = 0.01
+    use_contact_island: bool = False
+    box_box_detection: bool = True
+    use_hibernation: bool = False
+    hibernation_thresh_vel: float = 1e-3
+    hibernation_thresh_acc: float = 1e-2
+    max_dynamic_constraints: int = 8
+    enable_multi_contact: bool = True
+    enable_mujoco_compatibility: bool = False
+    prefer_parallel_linesearch: bool | None = None
+    use_gjk_collision: bool | None = False
+    broadphase_traversal: Literal["SAP", "ALL_VS_ALL"] | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -244,6 +285,11 @@ class MeshRepairConfigs:
     genesis_fem_import_timeout_sec: float = 240.0
     texture_transfer_max_resolution: int = 1024
     texture_transfer_chunk_size: int = 200000
+    auto_remesh_enabled: bool = True
+    auto_remesh_target_face_count: int = 5000
+    auto_remesh_target_face_tolerance: float = 0.50
+    auto_remesh_max_search_attempts: int = 6
+    auto_remesh_iterations: int = 10
 
 
 @dataclass(slots=True, frozen=True)
@@ -262,6 +308,7 @@ class Configs:
     harness: HarnessConfigs
     opt: OptConfigs
     runtime: RuntimeConfigs
+    rigid: RigidConfigs
     deformable: DeformableConfigs
     ipc: IPCConfigs
     critic: CriticConfigs
@@ -275,6 +322,7 @@ CONFIGS = Configs(
     harness=HarnessConfigs(),
     opt=OptConfigs(),
     runtime=RuntimeConfigs(),
+    rigid=RigidConfigs(),
     deformable=DeformableConfigs(),
     ipc=IPCConfigs(),
     critic=CriticConfigs(),
@@ -282,6 +330,12 @@ CONFIGS = Configs(
     mesh_repair=MeshRepairConfigs(),
     xml_asset=XMLAssetConfigs(),
 )
+
+
+def rigid_config_dict() -> dict[str, object]:
+    """Return the repository-owned rigid solver config exposed to generated scenes."""
+
+    return asdict(CONFIGS.rigid)
 
 
 def deformable_config_dict(
